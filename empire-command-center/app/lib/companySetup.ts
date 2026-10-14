@@ -85,6 +85,14 @@ async function companyFetch<T>(path: string, opts?: RequestInit): Promise<T> {
   }
   if (!res.ok) {
     const text = await res.text().catch(() => '');
+    try {
+      const parsed = JSON.parse(text);
+      const detail = parsed?.detail;
+      if (typeof detail === 'string' && detail.trim()) throw new Error(detail);
+      if (Array.isArray(detail) && detail[0]?.msg) throw new Error(String(detail[0].msg));
+    } catch (err) {
+      if (err instanceof Error && err.message && err.message !== text) throw err;
+    }
     throw new Error(text || `API ${res.status}`);
   }
   return res.json();
@@ -96,6 +104,11 @@ export function loadInterview() {
 
 export function loadCompanyStatus() {
   return companyFetch<CompanyStatus>('/onboarding/status');
+}
+
+/** Public yes/no. Safe without a founder session — does not 403. */
+export function loadConfigured() {
+  return companyFetch<{ configured: boolean }>('/onboarding/configured');
 }
 
 export function saveSection(sectionId: string, data: Record<string, unknown>, markComplete = true) {

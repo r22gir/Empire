@@ -129,19 +129,26 @@ def lookup_fabric_allowance(foam_thickness_in: Optional[float]) -> dict[str, Any
             "label": "needs foam thickness — required before a fabric cut can be sized.",
         }
     key = _sixteenths(thickness)
-    rows = list(FABRIC_CUT_ALLOWANCE_BY_FOAM_THICKNESS)
-    try:
-        from app.services.company_setup.store import load_merged
-
-        merged = load_merged()
-        fabric = merged.get("fabric") if isinstance(merged.get("fabric"), dict) else {}
-        extra = fabric.get("allowance_by_foam_thickness") if isinstance(fabric, dict) else None
-        if isinstance(extra, list) and extra:
-            rows = [r for r in extra if isinstance(r, dict)] + rows
-    except Exception:
-        pass
-    for row in rows:
-        if _sixteenths(row["foam_thickness_in"]) == key:
+    for row in FABRIC_CUT_ALLOWANCE_BY_FOAM_THICKNESS:
+        try:
+            if _sixteenths(row["foam_thickness_in"]) == key:
+                return dict(row)
+        except (KeyError, TypeError, ValueError):
+            continue
+    extra = _validated_overlay_rows()
+    builtin = {
+        _sixteenths(r["foam_thickness_in"])
+        for r in FABRIC_CUT_ALLOWANCE_BY_FOAM_THICKNESS
+        if "foam_thickness_in" in r
+    }
+    for row in extra:
+        try:
+            extra_key = _sixteenths(row["foam_thickness_in"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        if extra_key in builtin:
+            continue
+        if extra_key == key:
             return dict(row)
     return {
         "foam_thickness_in": thickness,
@@ -152,3 +159,53 @@ def lookup_fabric_allowance(foam_thickness_in: Optional[float]) -> dict[str, Any
             "Add a row in fabric_cut_allowance.py — do not guess."
         ),
     }
+
+
+def _is_sixteenth(value: float) -> bool:
+    return abs(float(value) * 16 - round(float(value) * 16)) < 1e-6
+
+
+def validate_overlay_allowance_row(row: Any) -> dict[str, Any] | None:
+    """Accept a new foam thickness only. Never overrides Rafael's table.
+
+    Missing foam_thickness_in returns None (no KeyError). Overlay rows
+    stay confirm_with_rafael until he approves them.
+    """
+    if not isinstance(row, dict) or "foam_thickness_in" not in row:
+        return None
+    try:
+        foam = float(row["foam_thickness_in"])
+        extra = float(row["allowance_in"])
+    except (KeyError, TypeError, ValueError):
+        return None
+    if foam <= 0 or extra < 0:
+        return None
+    if not _is_sixteenth(foam) or not _is_sixteenth(extra):
+        return None
+    return {
+        "foam_thickness_in": foam,
+        "allowance_in": extra,
+        "status": CONFIRM_WITH_RAFAEL,
+        "apply": ALLOWANCE_APPLY,
+        "label": row.get("label")
+        or f'{foam:g}" foam — per side (unconfirmed until Rafael approves)',
+    }
+
+
+def _validated_overlay_rows() -> list[dict[str, Any]]:
+    try:
+        from app.services.company_setup.store import load_merged
+
+        merged = load_merged()
+        fabric = merged.get("fabric") if isinstance(merged.get("fabric"), dict) else {}
+        extra = fabric.get("allowance_by_foam_thickness") if isinstance(fabric, dict) else None
+    except Exception:
+        return []
+    if not isinstance(extra, list):
+        return []
+    out: list[dict[str, Any]] = []
+    for raw in extra:
+        row = validate_overlay_allowance_row(raw)
+        if row:
+            out.append(row)
+    return out

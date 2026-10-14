@@ -74,7 +74,9 @@ export default function WhatsAppKeysPanel({ compact = false }: { compact?: boole
         </div>
         <div>
           <div style={{ fontWeight: 700, fontSize: 14 }}>WhatsApp keys — this edition</div>
-          <div style={{ fontSize: 11, color: '#888' }}>Stored server-side. Never shown back. Never logged.</div>
+          <div style={{ fontSize: 11, color: '#888' }}>
+            Stored server-side. Leave a field blank to keep the masked value on file. Never shown back. Never logged.
+          </div>
         </div>
       </div>
 
@@ -111,7 +113,7 @@ export default function WhatsAppKeysPanel({ compact = false }: { compact?: boole
                 autoComplete="off"
                 value={form[key.name]}
                 onChange={(e) => setForm((prev) => ({ ...prev, [key.name]: e.target.value }))}
-                placeholder="Leave blank to keep the stored value"
+                placeholder="Leave blank to keep"
                 style={inputStyle}
               />
               <button
@@ -126,11 +128,11 @@ export default function WhatsAppKeysPanel({ compact = false }: { compact?: boole
           </label>
         ))}
         <label style={{ display: 'grid', gap: 4, fontSize: 12 }}>
-          <span style={{ fontWeight: 600, color: '#333' }}>Owner numbers (this edition)</span>
+          <span style={{ fontWeight: 600, color: '#333' }}>Owner numbers (this edition, E.164)</span>
           <textarea
             value={form.owner_numbers}
             onChange={(e) => setForm((prev) => ({ ...prev, owner_numbers: e.target.value }))}
-            placeholder="One per line or comma-separated"
+            placeholder="Leave blank to keep. Example: +17035551212"
             rows={2}
             style={{ ...inputStyle, minHeight: 64, padding: 8 }}
           />
@@ -138,8 +140,11 @@ export default function WhatsAppKeysPanel({ compact = false }: { compact?: boole
       </div>
 
       {error && (
-        <div style={{ marginTop: 10, fontSize: 12, color: '#b91c1c', display: 'flex', alignItems: 'center', gap: 6 }}>
-          <ShieldAlert size={14} /> {error}
+        <div style={{ marginTop: 10, fontSize: 12, color: '#b91c1c', display: 'flex', alignItems: 'flex-start', gap: 6 }}>
+          <ShieldAlert size={14} style={{ marginTop: 2 }} />
+          <span>
+            {friendlyWhatsAppError(error)}
+          </span>
         </div>
       )}
 
@@ -167,6 +172,18 @@ export default function WhatsAppKeysPanel({ compact = false }: { compact?: boole
       </button>
     </div>
   );
+}
+
+function friendlyWhatsAppError(raw: string): string {
+  const t = (raw || '').toLowerCase();
+  if (t.includes('e.164') || t.includes('owner number')) {
+    return 'Owner numbers must look like +17035551212 (plus sign, country code, no spaces).';
+  }
+  if (t.includes('newline') || t.includes('may only use') || t.includes('letters, numbers')) {
+    return 'Keys may only use letters, numbers, and _ - . | — no spaces or line breaks. Leave a box blank to keep the stored value.';
+  }
+  if (t.includes('founder session')) return 'Sign in as the founder to save WhatsApp keys.';
+  return raw || 'Could not save those keys.';
 }
 
 const inputStyle: CSSProperties = {

@@ -13,7 +13,13 @@ from pydantic import BaseModel, Field
 from app.edition import edition_name, is_family_edition
 from app.services.company_setup.auth import require_verified_founder
 from app.services.company_setup.invites import create_invite, list_invites
-from app.services.company_setup.schema import SECTION_IDS, configured_report, is_configured, section_by_id
+from app.services.company_setup.schema import (
+    SECTION_IDS,
+    UnknownSectionKey,
+    configured_report,
+    is_configured,
+    section_by_id,
+)
 from app.services.company_setup.store import (
     interview_state,
     load_merged,
@@ -23,7 +29,12 @@ from app.services.company_setup.store import (
     save_progress,
     save_section,
 )
-from app.services.company_setup.whatsapp_secrets import save_secrets, status_panel
+from app.services.company_setup.whatsapp_secrets import (
+    SecretValueError,
+    WhatsAppKeysIn,
+    save_secrets,
+    status_panel,
+)
 
 router = APIRouter()
 
@@ -45,17 +56,14 @@ class InviteIn(BaseModel):
     name: str = ""
 
 
-class WhatsAppKeysIn(BaseModel):
-    WHATSAPP_ACCESS_TOKEN: Optional[str] = None
-    WHATSAPP_PHONE_NUMBER_ID: Optional[str] = None
-    WHATSAPP_APP_SECRET: Optional[str] = None
-    WHATSAPP_VERIFY_TOKEN: Optional[str] = None
-    owner_numbers: Optional[list[str]] = None
-    founder_phones: Optional[list[str]] = None
-
-
 def _founder(request: Request) -> dict:
     return require_verified_founder(request)
+
+
+@router.get("/onboarding/configured")
+async def onboarding_configured():
+    """Public yes/no. No file dump. Safe for callers that cannot send a founder session."""
+    return {"configured": is_configured(load_merged())}
 
 
 @router.get("/onboarding/status")
@@ -91,7 +99,7 @@ async def put_section(section_id: str, body: SectionSave, request: Request):
         raise HTTPException(400, f"Unknown section. Must be one of: {SECTION_IDS}")
     try:
         save_section(section_id, body.data, mark_complete=body.mark_complete)
-    except ValueError as exc:
+    except (UnknownSectionKey, ValueError) as exc:
         raise HTTPException(400, str(exc)) from exc
     return interview_state()
 
@@ -141,10 +149,14 @@ async def get_whatsapp_keys(request: Request):
 
 
 @router.post("/onboarding/whatsapp")
-async def post_whatsapp_keys(body: WhatsAppKeysIn, request: Request):
+async def post_whatsapp_keys(request: Request):
     _founder(request)
-    payload = body.model_dump(exclude_none=True)
-    return save_secrets(payload)
+    try:
+        raw = await request.json()
+        body = WhatsAppKeysIn.model_validate(raw)
+        return save_secrets(body)
+    except Exception as exc:
+        raise HTTPException(400, str(exc)) from exc
 
 
 @router.post("/onboarding/setup")

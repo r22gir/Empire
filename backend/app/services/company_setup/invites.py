@@ -1,12 +1,12 @@
 """Team invite records. Never sends email or WhatsApp."""
 from __future__ import annotations
 
-import json
 import logging
 import secrets
 from datetime import datetime, timezone
 from typing import Any
 
+from app.services.company_setup.io import atomic_write, edition_lock, read_json_list
 from app.services.company_setup.schema import TEAM_ROLES
 from app.services.company_setup.store import edition_company_dir
 
@@ -17,27 +17,8 @@ def _path():
     return edition_company_dir() / "invites.json"
 
 
-def _load() -> list[dict[str, Any]]:
-    path = _path()
-    if not path.exists():
-        return []
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return []
-    if isinstance(data, list):
-        return [r for r in data if isinstance(r, dict)]
-    return []
-
-
-def _save(rows: list[dict[str, Any]]) -> None:
-    path = _path()
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(rows, indent=2) + "\n", encoding="utf-8")
-
-
 def list_invites() -> list[dict[str, Any]]:
-    return _load()
+    return [r for r in read_json_list(_path()) if isinstance(r, dict)]
 
 
 def create_invite(email: str, role: str, name: str = "") -> dict[str, Any]:
@@ -58,8 +39,9 @@ def create_invite(email: str, role: str, name: str = "") -> dict[str, Any]:
         "sent": False,
         "send_channel": "none",
     }
-    rows = _load()
-    rows.append(row)
-    _save(rows)
+    with edition_lock(edition_company_dir()):
+        rows = [r for r in read_json_list(_path()) if isinstance(r, dict)]
+        rows.append(row)
+        atomic_write(_path(), rows, mode=0o600, backup=True)
     logger.info("company setup invite recorded role=%s sent=false", role)
     return row

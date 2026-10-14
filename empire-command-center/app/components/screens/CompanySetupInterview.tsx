@@ -68,7 +68,7 @@ export default function CompanySetupInterview() {
       }
       setTimeout(() => setSaved(false), 2000);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Save failed');
+      setError(friendlySetupError(err instanceof Error ? err.message : 'Save failed'));
     } finally {
       setSaving(false);
     }
@@ -469,7 +469,7 @@ const goldBtn: CSSProperties = {
   gap: 8,
 };
 
-const ghostBtn: React.CSSProperties = {
+const ghostBtn: CSSProperties = {
   ...goldBtn,
   background: '#fff',
   color: '#333',
@@ -610,7 +610,7 @@ function MeasurementsForm({ form, setForm }: any) {
     <div>
       <label style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 13, marginBottom: 10 }}>
         <input type="checkbox" checked={form.fractions_only !== false} onChange={(e) => setForm({ ...form, fractions_only: e.target.checked })} />
-        Fractions only (no decimal inches on docs)
+        Fractions only — print 1 1/2, never 1.5, on shop or client docs
       </label>
       <Field label="Notes"><textarea style={{ ...input, minHeight: 80, padding: 8 }} value={form.notes || ''} onChange={(e) => setForm({ ...form, notes: e.target.value })} /></Field>
     </div>
@@ -622,10 +622,13 @@ function FabricForm({ form, setForm }: any) {
     <div>
       <Field label="Fabric code format"><input style={input} value={form.code_format || 'V###-Color'} onChange={(e) => setForm({ ...form, code_format: e.target.value })} /></Field>
       <Field label="Next number"><input style={input} type="number" value={form.next_number ?? 1} onChange={(e) => setForm({ ...form, next_number: Number(e.target.value) })} /></Field>
-      <Field label="Allowance by foam thickness — foam|per-side inches|status">
+      <Field label="Allowance by foam thickness — foam|per-side inches|status (sixteenth fractions)">
         <textarea style={{ ...input, minHeight: 140, padding: 8, fontFamily: 'ui-monospace, monospace' }} value={form.allowance_text || ''} onChange={(e) => setForm({ ...form, allowance_text: e.target.value })} />
       </Field>
-      <p style={{ fontSize: 12, color: '#666' }}>Allowance is per side. Fabric = wood + 2 × allowance.</p>
+      <p style={{ fontSize: 12, color: '#666' }}>
+        Allowance is per side (fabric = wood + 2 × allowance). Use sixteenth fractions only (1, 1 1/2, 2).
+        Rows already in Rafael&apos;s table stay. New thicknesses stay unconfirmed until he approves them.
+      </p>
     </div>
   );
 }
@@ -782,4 +785,14 @@ function ReviewPage({ state }: { state: CompanyInterview | null }) {
       </div>
     </div>
   );
+}
+
+function friendlySetupError(raw: string): string {
+  const t = (raw || '').toLowerCase();
+  if (t.includes('unknown key')) {
+    return 'That field is not part of this step. Services cannot change founder phones or other identity keys.';
+  }
+  if (t.includes('founder session')) return 'Sign in as the founder to save company setup.';
+  if (t.includes('e.164')) return 'Phone numbers must look like +17035551212.';
+  return raw || 'Could not save this step.';
 }

@@ -162,6 +162,66 @@ PAYMENT_PROCESSORS = ("stripe_payment_links", "square")
 
 LIFE_PRIVACY = ("private", "shared_family", "workroom")
 
+# Input keys allowed per section. Anything else is a 400.
+SECTION_ALLOWLIST: dict[str, frozenset[str]] = {
+    "identity": frozenset({"legal_name", "dba", "business_name", "owner_name", "tagline", "business_tagline", "brands"}),
+    "contact": frozenset({"address", "phone", "email", "website", "timezone", "business_address", "business_phone", "business_email", "street", "city", "state"}),
+    "tax": frozenset({"ein", "rates", "taxable_items"}),
+    "payments": frozenset({"deposit_percent", "deposit_terms", "processors"}),
+    "numbering": frozenset({"quote_prefix", "quote_start", "invoice_prefix", "invoice_start"}),
+    "services": frozenset({"catalog", "services_catalog", "rate_cards", "labor_rate"}),
+    "measurements": frozenset({"fractions_only", "notes"}),
+    "fabric": frozenset({"code_format", "next_number", "allowance_by_foam_thickness"}),
+    "team": frozenset({"users"}),
+    "channels": frozenset({"whatsapp", "email", "phone", "founder_phones", "owner_phones"}),
+    "calendar": frozenset({"hours", "notes"}),
+    "suppliers": frozenset({"suppliers"}),
+    "insurance": frozenset({"coi_required", "coverage", "min_amount", "notes"}),
+    "branding": frozenset({"logo_url", "primary", "ink", "paper", "letterhead"}),
+    "life": frozenset({"areas", "privacy_boundaries", "max_covers_whole_life"}),
+    "review": frozenset(),
+}
+
+# Overlay keys a section is allowed to write. Seed keys not in this set stay
+# out of the overlay so later edits to config/business.json are not stale-copied.
+SECTION_OVERLAY_KEYS: dict[str, frozenset[str]] = {
+    "identity": frozenset({"identity", "brands", "legal_name", "dba", "business_name", "owner_name", "business_tagline"}),
+    "contact": frozenset({"contact", "business_address", "business_phone", "business_email", "business_website", "timezone"}),
+    "tax": frozenset({"tax"}),
+    "payments": frozenset({"payments"}),
+    "numbering": frozenset({"numbering"}),
+    "services": frozenset({"services_section", "services_catalog", "rate_cards", "labor_rate"}),
+    "measurements": frozenset({"measurements"}),
+    "fabric": frozenset({"fabric", "fabric_next_number", "fabric_code_format"}),
+    "team": frozenset({"team"}),
+    "channels": frozenset({"channels", "founder_phones", "owner_phones"}),
+    "calendar": frozenset({"calendar"}),
+    "suppliers": frozenset({"suppliers"}),
+    "insurance": frozenset({"insurance"}),
+    "branding": frozenset({"branding"}),
+    "life": frozenset({"life"}),
+    "review": frozenset(),
+}
+
+
+class UnknownSectionKey(ValueError):
+    """Payload included a key this section may not write."""
+
+
+def validate_section_payload(section_id: str, payload: dict[str, Any] | None) -> dict[str, Any]:
+    if section_id not in SECTION_ALLOWLIST:
+        raise ValueError(f"Unknown company setup section: {section_id}")
+    if payload is None:
+        payload = {}
+    if not isinstance(payload, dict):
+        raise ValueError("Section data must be an object")
+    allowed = SECTION_ALLOWLIST[section_id]
+    unknown = sorted(k for k in payload if k not in allowed)
+    if unknown:
+        raise UnknownSectionKey(f"Unknown keys for {section_id}: {unknown}")
+    return {k: v for k, v in payload.items() if k in allowed}
+
+
 # Keys that a payload must never wipe when absent or null.
 PRESERVE_KEYS = (
     "business_phone",
