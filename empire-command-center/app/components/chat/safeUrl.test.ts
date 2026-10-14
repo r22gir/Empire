@@ -20,6 +20,8 @@ test('in-app deep links are clickable; job file paths stay plain text', () => {
   assert.equal(safeUrl('/?product=improvements'), '/?product=improvements');
   assert.equal(safeUrl('/'), '/');
   assert.equal(safeUrl('/ayuda'), '/ayuda');
+  assert.equal(safeUrl('/ayuda/empresa'), '/ayuda/empresa');
+  assert.equal(safeUrl('/help/company'), '/help/company');
   assert.equal(safeUrl('//evil.example'), '');
   assert.equal(safeUrl('/jobs/wall-unit/led.pdf'), '');
 

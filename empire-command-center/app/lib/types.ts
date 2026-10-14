@@ -7,7 +7,7 @@ export type EcosystemProduct = 'owner' | 'workroom' | 'craft' | 'social' | 'plat
 export type BusinessTab = 'max' | 'workroom' | 'craft' | 'social' | 'platform' | 'tickets' | 'shipping';
 
 // What's shown in center content area
-export type ScreenMode = 'chat' | 'quote' | 'docs' | 'research' | 'video' | 'dashboard' | 'desks' | 'inbox' | 'memory-bank' | 'report' | 'tickets' | 'shipping' | 'costs' | 'mail' | 'tasks' | 'calendar' | 'telegram' | 'whatsapp' | 'product-docs' | 'pricing' | 'pricing-studio' | 'business-profile' | 'settings' | 'presentation' | 'dev' | 'jobs' | 'invoices' | 'final-docs' | 'invoice' | FounderScreenMode;
+export type ScreenMode = 'chat' | 'quote' | 'docs' | 'research' | 'video' | 'dashboard' | 'desks' | 'inbox' | 'memory-bank' | 'report' | 'tickets' | 'shipping' | 'costs' | 'mail' | 'tasks' | 'calendar' | 'telegram' | 'whatsapp' | 'product-docs' | 'pricing' | 'pricing-studio' | 'business-profile' | 'company-setup' | 'settings' | 'presentation' | 'dev' | 'jobs' | 'invoices' | 'final-docs' | 'invoice' | FounderScreenMode;
 
 export type SidebarIcon = 'chat' | 'dashboard' | 'desks' | 'inbox' | 'files' | 'search' | 'voice' | 'settings';
 export type RightTab = 'desks' | 'inbox' | 'system' | 'memory';

@@ -18,6 +18,7 @@ import {
   XCircle,
 } from 'lucide-react';
 import { API } from '../../lib/api';
+import WhatsAppKeysPanel from './WhatsAppKeysPanel';
 
 const PIN_KEY = 'empire_whatsapp_founder_pin';
 
@@ -444,6 +445,10 @@ export default function WhatsAppChatsScreen() {
           <RefreshCw size={14} />
         </button>
       </header>
+
+      <div className="no-print" style={{ padding: '12px 16px', borderBottom: '1px solid #2a261c', background: '#16140f' }}>
+        <WhatsAppKeysPanel compact />
+      </div>
 
       {needsPin && (
         <div className="no-print" style={{ padding: 16, borderBottom: '1px solid #2a261c' }}>

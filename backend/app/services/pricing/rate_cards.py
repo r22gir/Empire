@@ -7,6 +7,9 @@ in ``PRICING_SPECS``; this module does not copy those tables.
 """
 from __future__ import annotations
 
+import time
+from typing import Any
+
 # Founder-approved client overlays and format rules.  These are durable
 # Pricing Studio data, not chat-only guidance or quote-specific notes.
 CLIENT_RATE_RULES: dict[str, dict[str, object]] = {
@@ -59,11 +62,70 @@ COMPONENT_RATES: dict[str, dict[str, float]] = {
 }
 
 
+_OVERLAY_CACHE: tuple[float, dict[str, Any]] | None = None
+_OVERLAY_TTL = 2.0
+
+
+def invalidate_rate_overlay_cache() -> None:
+    global _OVERLAY_CACHE
+    _OVERLAY_CACHE = None
+
+
+def _company_rate_overlay() -> dict[str, Any]:
+    """Cached company-setup rate_cards blob. Failed reads stay empty."""
+    global _OVERLAY_CACHE
+    now = time.monotonic()
+    if _OVERLAY_CACHE and now - _OVERLAY_CACHE[0] < _OVERLAY_TTL:
+        return _OVERLAY_CACHE[1]
+    data: dict[str, Any] = {}
+    try:
+        from app.services.company_setup.store import load_merged
+
+        raw = load_merged().get("rate_cards") or {}
+        if isinstance(raw, dict):
+            data = raw
+    except Exception:
+        data = {}
+    _OVERLAY_CACHE = (now, data)
+    return data
+
+
+def apply_company_rate_overlay(business_unit: str, card: dict[str, float]) -> dict[str, float]:
+    """Apply interview rates onto one card.
+
+    Only keys already on the card. Values must be numeric and > 0.
+    ``bool`` is rejected (it is an ``int`` subclass).
+    """
+    out = dict(card)
+    unit = (business_unit or "").strip().lower()
+    overlay = _company_rate_overlay().get(unit)
+    if not isinstance(overlay, dict):
+        return out
+    for key, value in overlay.items():
+        name = str(key)
+        if name not in out:
+            continue
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            continue
+        if float(value) > 0:
+            out[name] = float(value)
+    return out
+
+
+def _base_card(business_unit: str) -> dict[str, float]:
+    unit = (business_unit or "").strip().lower()
+    card = COMPONENT_RATES.get(unit)
+    if not card:
+        known = sorted(COMPONENT_RATES)
+        raise KeyError(f"No rate card for '{business_unit}'. Cards: {known}")
+    return dict(card)
+
+
 def lookup_rate(business_unit: str, key: str) -> float:
     """Return one canonical rate. Raises KeyError if the card has no such key."""
     unit = (business_unit or "").strip().lower()
-    card = COMPONENT_RATES.get(unit)
-    if not card or key not in card:
+    card = apply_company_rate_overlay(unit, _base_card(unit))
+    if key not in card:
         known = sorted(COMPONENT_RATES)
         raise KeyError(f"No {unit or 'unknown'} rate '{key}'. Cards: {known}")
     return float(card[key])
@@ -72,10 +134,7 @@ def lookup_rate(business_unit: str, key: str) -> float:
 def component_rates(business_unit: str) -> dict[str, float]:
     """Copy of the component rate card for API responses."""
     unit = (business_unit or "").strip().lower()
-    card = COMPONENT_RATES.get(unit)
-    if not card:
-        raise KeyError(f"No rate card for '{business_unit}'")
-    return dict(card)
+    return apply_company_rate_overlay(unit, _base_card(unit))
 
 
 def client_rate_rules(client_key: str) -> dict[str, object]:

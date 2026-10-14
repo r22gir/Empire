@@ -6,6 +6,7 @@ from the chats viewer.
 """
 from __future__ import annotations
 
+import logging
 import threading
 import time
 
@@ -24,6 +25,7 @@ from app.services.max.whatsapp_channel import (
 )
 
 router = APIRouter()
+logger = logging.getLogger("max.company_setup")
 
 _PIN_FAILS: dict[str, list[float]] = {}
 _PIN_LOCK = threading.Lock()
@@ -223,6 +225,40 @@ async def whatsapp_export_chat(
     )
 
 
+@router.get("/whatsapp/keys")
+async def whatsapp_keys_status(request: Request):
+    """Founder-only. Masked status — never returns secret values."""
+    from app.services.company_setup.auth import require_verified_founder
+    from app.services.company_setup.whatsapp_secrets import status_panel
+
+    require_verified_founder(request)
+    return status_panel()
+
+
+@router.post("/whatsapp/keys")
+async def whatsapp_keys_save(request: Request):
+    """Founder-only. Store edition secrets. Body values are never logged."""
+    from app.services.company_setup.auth import require_verified_founder
+    from pydantic import ValidationError
+
+    from app.services.company_setup.whatsapp_secrets import (
+        SecretValueError,
+        WhatsAppKeysIn,
+        save_secrets,
+        whatsapp_client_error,
+    )
+
+    require_verified_founder(request)
+    try:
+        body = WhatsAppKeysIn.model_validate(await request.json())
+        return save_secrets(body)
+    except (ValidationError, SecretValueError) as exc:
+        raise HTTPException(status_code=400, detail=whatsapp_client_error(exc)) from exc
+    except Exception as exc:
+        logger.error("whatsapp keys save failed type=%s", type(exc).__name__)
+        raise HTTPException(status_code=500, detail="Could not save WhatsApp keys") from None
+
+
 @router.get("/whatsapp/webhook")
 async def whatsapp_verify(request: Request):
     status = channel_status()
@@ -233,6 +269,13 @@ async def whatsapp_verify(request: Request):
         request.query_params.get("hub.verify_token"),
         request.query_params.get("hub.challenge"),
     )
+    if challenge is not None:
+        try:
+            from app.services.company_setup.whatsapp_secrets import record_webhook_challenge
+
+            record_webhook_challenge(ok=True)
+        except Exception:
+            pass
     if challenge is None:
         return JSONResponse({"ok": False, "reason": "verify token rejected"}, status_code=403)
     return PlainTextResponse(challenge)

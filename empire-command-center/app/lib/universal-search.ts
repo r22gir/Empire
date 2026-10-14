@@ -61,7 +61,7 @@ export const GROUP_LABELS: Record<string, string> = {
 export const WORKROOM_ONLY_SCREENS = new Set([
   'workroom', 'craft', 'construction', 'luxe', 'storefront',
   'schedule', 'final-docs', 'daily-summary',
-  'business-profile', 'vendorops', 'contractor', 'lead', 'crm', 'pay',
+  'business-profile', 'company-setup', 'vendorops', 'contractor', 'lead', 'crm', 'pay',
   'pricing-studio', 'drawings', 'vision', 'recovery',
   'social', 'market', 'support', 'ship', 'archive', 'transcript',
   'platform', 'openclaw', 'max-continuity', 'hardware',

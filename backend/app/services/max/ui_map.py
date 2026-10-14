@@ -32,7 +32,7 @@ CC_APP_PATH = CC_APP / "CommandCenterApp.tsx"
 WORKROOM_ONLY_IDS = frozenset({
     "workroom", "craft", "construction", "luxe", "storefront",
     "schedule", "final-docs", "daily-summary",
-    "business-profile", "vendorops", "contractor", "lead", "crm", "pay",
+    "business-profile", "company-setup", "vendorops", "contractor", "lead", "crm", "pay",
     "pricing-studio",
     "drawings", "vision", "recovery",
     "social", "market", "support", "ship",

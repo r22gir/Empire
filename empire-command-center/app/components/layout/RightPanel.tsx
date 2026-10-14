@@ -500,6 +500,7 @@ function NavigationHelper({ activeProduct, activeSection, onScreenChange, onModu
           <div style={{ fontSize: 9, fontWeight: 700, color: '#999', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 6 }}>Settings</div>
           <div className="flex flex-col gap-1">
             <SidebarAction label="Business Profile" icon={<Building2 size={12} />} color="#b8960c" onClick={() => onScreenChange('business-profile')} />
+            <SidebarAction label="Company Setup" icon={<Building2 size={12} />} color="#b8960c" onClick={() => onScreenChange('company-setup')} />
           </div>
         </div>
       </div>

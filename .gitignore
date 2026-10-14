@@ -58,6 +58,9 @@ backend/app/config/business.json
 backend/app/config/woodcraft_business.json
 **/business.json
 **/.env
+**/secrets/whatsapp.json
+**/.empire/secrets/
+backend/app/config/company_overlay/
 
 # OAuth credentials (Gmail, Google API)
 credentials.json
@@ -67,6 +70,7 @@ backend/token.json
 
 # Backup files
 *.bak
+**/*.bak
 *.bak2
 
 # Runtime data — databases, chats, quotes, inbox (never commit)

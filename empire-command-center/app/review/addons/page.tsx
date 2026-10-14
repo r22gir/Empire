@@ -44,6 +44,7 @@ const MODULES: Module[] = [
   M('capture', 'sales', 'Workroom manual capture and public lead intake', 'Capture leads into CRM and LeadForge without automatically sending mail.', 'live', '/workroom/capture'),
   M('intake', 'sales', 'Customer/project intake portal (LuxeForge intake)', 'Customer projects, measurements, photos, scans, messages and quote conversion.', 'live', '/intake'),
   M('business-profile', 'sales', 'Business Profile, onboarding and Nueva empresa', 'Business setup, profile, registry and EasyStep-style company interview.', 'live', '/?screen=business-profile'),
+  M('company-setup', 'sales', 'Company Setup interview', 'Founder-only multi-step company setup. Merges into business.json. WhatsApp keys and /ayuda/empresa guide.', 'live', '/?screen=company-setup'),
   M('jobs', 'sales', 'Scheduling, jobs and lifecycle', 'Unified jobs, stages, calendars, work orders and quote-to-job lifecycle.', 'live', '/?screen=jobs'),
   M('contractor', 'sales', 'ContractorForge', 'Contractor/installer contacts, assignments and desk workflows.', 'partial', '/?product=contractor'),
   M('vendorops', 'sales', 'VendorOps', 'Vendor accounts, approvals, renewal alerts, audit and tiered activation.', 'partial', '/?product=vendorops'),
