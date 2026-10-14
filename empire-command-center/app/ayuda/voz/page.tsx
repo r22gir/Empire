@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { AYUDA_OPENER } from '../../lib/ayudaCopy';
 
 const STEPS = [
   'Mantén presionado el micrófono en el chat. Al soltarlo, la nota se envía a transcribir.',
@@ -18,6 +19,7 @@ export default function ComoUsarLaVoz() {
       </nav>
       <p style={{ fontSize: 12, letterSpacing: 0.4, color: '#b8960c', fontWeight: 700, margin: 0 }}>CENTRO DE MANDO</p>
       <h1 style={{ fontSize: 32, margin: '8px 0' }}>Cómo usar la voz</h1>
+      <p data-ayuda-opener="1" style={{ fontFamily: "'Playfair Display', Georgia, serif", fontSize: 26, margin: '8px 0 12px' }}>{AYUDA_OPENER}</p>
       <p style={{ fontSize: 16, lineHeight: 1.5 }}>
         Max, Max-e y Maxine arman cotizaciones, facturas, contratos y planes de pago a partir de lo que dictas. El resultado es un borrador hasta que tú lo apruebas.
       </p>
