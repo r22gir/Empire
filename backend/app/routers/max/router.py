@@ -2157,11 +2157,13 @@ def _apply_confidence_cascade_to_reply(
     tool_results: list | None = None,
     chosen_path: str | None = None,
     channel: str | None = None,
+    is_founder: bool = False,
 ) -> tuple[str, dict[str, Any]]:
     """Shared /chat and /chat/stream confidence cascade.
 
     Return early unless MAX_CONFIDENCE_GATE is on: no scoring, no DB write,
-    no log, no confidence_cascade metadata key. Founder channels only.
+    no log, no confidence_cascade metadata key. Runs only when is_founder
+    is a server-verified founder session, not a body channel string.
     Fail-open — a cascade error never replaces the reply.
     """
     try:
@@ -2173,6 +2175,7 @@ def _apply_confidence_cascade_to_reply(
             tool_results=tool_results,
             chosen_path=chosen_path,
             channel=channel,
+            is_founder=is_founder,
         )
     except Exception:
         logger.debug("confidence cascade hook failed", exc_info=True)
@@ -4330,9 +4333,11 @@ async def _chat_with_max_service_impl(
         except Exception:
             pass
 
+        from app.services.max.founder_session import current_verified as _cascade_founder
         final_content, _cascade_meta = _apply_confidence_cascade_to_reply(
             request.message, final_content, tool_results=tool_results_list,
             channel=request.channel,
+            is_founder=bool(canonical_founder and _cascade_founder()),
         )
 
         _quality_flags = detect_quality_flags(
@@ -5538,9 +5543,11 @@ async def _chat_stream_impl(request: ChatRequest):
                 )
             except Exception:
                 pass
+            from app.services.max.founder_session import current_verified as _stream_cascade_founder
             full_response, _cascade_meta = _apply_confidence_cascade_to_reply(
                 request.message, full_response, tool_results=tool_results_list,
                 channel=request.channel,
+                is_founder=_stream_cascade_founder(),
             )
             if full_response:
                 yield f"data: {_safe_dumps({'type': 'text', 'content': full_response})}\n\n"

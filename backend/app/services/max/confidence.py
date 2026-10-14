@@ -2,11 +2,12 @@
 
 Default / unset MAX_CONFIDENCE_GATE=shadow: score and log only on the
 existing WhatsApp/tool hooks — the /chat cascade is a no-op (no score,
-no DB write, no log, no metadata key). Gate on + founder channel:
-low-confidence answers escalate (retry with a stronger local
-reasoning/tool check, then ask the founder). High-confidence answers
-proceed. Client/non-founder channels are never rewritten. Optional
-included-model nudge only when quota remains (no auto-credits).
+no DB write, no log, no metadata key). Gate on + server-verified
+founder session (is_founder=True from Cloudflare Access email in
+FOUNDER_ACCESS_EMAILS): low-confidence answers escalate (retry with a
+stronger local reasoning/tool check, then ask the founder).
+High-confidence answers proceed. Body channel is never privilege.
+Optional included-model nudge only when quota remains (no auto-credits).
 Low-score cases can be filed as proposed improvements (draft only —
 never approved).
 
@@ -58,21 +59,6 @@ CASCADE_ASK_FOUNDER = "ask_founder"
 CASCADE_INBOX_SOURCE = "confidence_cascade"
 DEFAULT_INBOX_DAILY_CAP = 12
 DEFAULT_RECENT_RESOLVED_HOURS = 24
-FOUNDER_CASCADE_CHANNELS = frozenset({
-    "",
-    "web",
-    "web_cc",
-    "cc",
-    "command_center",
-    "command-center",
-    "studio",
-    "studio_browser",
-    "dashboard",
-    "mobile_browser",
-    "telegram",
-    "whatsapp",
-    "phone",
-})
 
 _HEDGE_RE = re.compile(
     r"\b(?:I think|probably|might be|I['’]m not sure|I believe|possibly|"
@@ -109,19 +95,6 @@ def is_enabled() -> bool:
 def cascade_enabled() -> bool:
     """True only when the founder turned the real gate on. Unset is shadow."""
     return gate_mode() == "on"
-
-
-def cascade_allowed_for_channel(channel: str | None) -> bool:
-    """Founder-operator surfaces only. Clients never see a founder-ask rewrite."""
-    ch = (channel or "").strip().lower()
-    if ch in FOUNDER_CASCADE_CHANNELS:
-        return True
-    try:
-        from app.services.max.founder_auth import is_founder_channel
-
-        return bool(is_founder_channel(ch))
-    except Exception:
-        return False
 
 
 def inbox_daily_cap() -> int:
@@ -667,6 +640,7 @@ def _file_founder_ask(record: dict[str, Any], text: str = "") -> dict[str, Any] 
             priority="high",
             reason="low_confidence_cascade",
             source=CASCADE_INBOX_SOURCE,
+            skip_existing=True,
             recent_resolved_hours=recent_resolved_hours(),
         )
     except Exception:
@@ -686,18 +660,20 @@ def apply_answer_cascade(
     retry_fn: Any = None,
     ask_founder_fn: Any = None,
     channel: str | None = None,
+    is_founder: bool = False,
 ) -> dict[str, Any]:
     """Score a reply and, only when the gate is on, escalate low confidence.
 
     Unset / shadow / off: no scoring, no DB write, no log. retry_fn /
-    ask_founder_fn are never called. Non-founder channels proceed unchanged.
+    ask_founder_fn are never called. Requires a server-verified founder
+    session (is_founder=True). Channel strings are not privilege.
     """
     original = answer
     mode = gate_mode()
     if mode != "on":
         return _noop_cascade(original, skipped="gate_off")
-    if not cascade_allowed_for_channel(channel):
-        return _noop_cascade(original, skipped="non_founder_channel")
+    if not is_founder:
+        return _noop_cascade(original, skipped="not_founder")
 
     record = score_answer(
         text,
@@ -796,13 +772,14 @@ def apply_router_cascade(
     chosen_path: str | None = None,
     persist: bool = True,
     channel: str | None = None,
+    is_founder: bool = False,
 ) -> tuple[str, dict[str, Any]]:
     """Production /chat and /chat/stream hook.
 
     Unset / shadow / off: no scoring, no DB write, no log, empty meta.
-    Non-founder channels: proceed unchanged, empty meta.
+    Runs only when is_founder is True (server-verified founder session).
     """
-    if not cascade_enabled() or not cascade_allowed_for_channel(channel):
+    if not cascade_enabled() or not is_founder:
         return answer, {}
     hit = apply_reply_cascade(
         user_text,
@@ -811,6 +788,7 @@ def apply_router_cascade(
         chosen_path=chosen_path,
         persist=persist,
         channel=channel,
+        is_founder=is_founder,
     )
     if hit.get("skipped") or hit.get("error"):
         return answer, {}
@@ -825,6 +803,7 @@ def apply_reply_cascade(
     chosen_path: str | None = None,
     persist: bool = True,
     channel: str | None = None,
+    is_founder: bool = False,
 ) -> dict[str, Any]:
     """Shared /chat and /chat/stream entry. Fail-open wrapper."""
     try:
@@ -835,6 +814,7 @@ def apply_reply_cascade(
             tool_results=tool_results,
             persist=persist,
             channel=channel,
+            is_founder=is_founder,
         )
     except Exception:
         logger.warning("confidence reply cascade failed", exc_info=True)

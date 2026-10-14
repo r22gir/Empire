@@ -317,6 +317,7 @@ def test_gate_on_high_confidence_proceeds(isolated, monkeypatch):
         tool_results=[{"tool": "create_quote", "success": True}],
         retry_fn=lambda *a, **k: called.append("retry") or "nope",
         ask_founder_fn=lambda *a, **k: called.append("ask") or {},
+        is_founder=True,
     )
     assert hit["mode"] == "on"
     assert hit["action"] == "proceed"
@@ -349,6 +350,7 @@ def test_gate_on_low_retries_then_asks_founder(isolated, monkeypatch):
         chosen_path="quote_intake",
         retry_fn=_retry,
         ask_founder_fn=_ask,
+        is_founder=True,
     )
     assert len(retries) == 1
     assert hit["retried"] is True
@@ -384,6 +386,7 @@ def test_gate_on_retry_can_recover_and_proceed(isolated, monkeypatch):
         chosen_path="article_link",
         retry_fn=_retry,
         ask_founder_fn=lambda *a, **k: {"id": "should-not"},
+        is_founder=True,
     )
     assert hit["retried"] is True
     assert hit["action"] == "proceed"
@@ -445,26 +448,28 @@ def test_chat_and_stream_share_confidence_cascade_helper():
     src = router.read_text(encoding="utf-8")
     assert src.count("def _apply_confidence_cascade_to_reply(") == 1
     assert src.count("_apply_confidence_cascade_to_reply(") >= 3
-    assert src.count("channel=request.channel") >= 2
+    assert src.count("is_founder=") >= 2
     assert src.count("_confidence_cascade_extra(") >= 3
     assert "Return early unless MAX_CONFIDENCE_GATE is on" in src
+    conf_src = Path(__file__).resolve().parents[1].joinpath(
+        "app/services/max/confidence.py"
+    ).read_text(encoding="utf-8")
+    assert "FOUNDER_CASCADE_CHANNELS" not in src
+    assert "FOUNDER_CASCADE_CHANNELS" not in conf_src
 
 
-def test_non_founder_channel_skips_even_when_gate_on(isolated, monkeypatch):
+def test_web_channel_without_founder_session_untouched(isolated, monkeypatch):
     conf = isolated["conf"]
     monkeypatch.setenv("MAX_CONFIDENCE_GATE", "on")
     importlib.reload(conf)
     original = "I think I'll start a quote from that tweet."
     hit = conf.apply_answer_cascade(
-        TWEET, original, chosen_path="quote_intake", channel="storefront",
+        TWEET, original, chosen_path="quote_intake", channel="web", is_founder=False,
     )
-    assert hit["skipped"] == "non_founder_channel"
+    assert hit["skipped"] == "not_founder"
     assert hit["answer"] == original
     assert hit["behavior_changed"] is False
     assert "need a call from you" not in hit["answer"].lower()
-    assert conf.cascade_allowed_for_channel("web") is True
-    assert conf.cascade_allowed_for_channel("storefront") is False
-    assert conf.cascade_allowed_for_channel("email") is False
 
 
 def test_decide_cascade_shadow_always_proceeds(isolated, monkeypatch):

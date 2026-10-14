@@ -96,31 +96,33 @@ def add(
     customer_name: Optional[str] = None,
     conversation_id: Optional[str] = None,
     desk: Optional[str] = None,
+    skip_existing: bool = False,
     recent_resolved_hours: int = 24,
 ) -> dict[str, Any]:
-    """Insert a new inbox row. Never INSERT OR REPLACE over an existing id.
+    """Insert an inbox row.
 
-    Skip (return the existing row) when the id is already open or was
-    recently resolved. Older resolved rows are also left untouched so a
-    cascade cannot reopen a closed item.
+    Default: INSERT OR REPLACE (desk_manager._persist_inbox semantics).
+    skip_existing=True (cascade only): leave an open or recently-resolved
+    row untouched.
     """
     ensure_schema()
     with _conn() as conn:
-        existing = conn.execute(
-            "SELECT * FROM founder_inbox WHERE id=?", (task_id,)
-        ).fetchone()
-        if existing:
-            row = dict(existing)
-            if (row.get("status") or "") == "open":
-                row["skipped"] = "open"
+        if skip_existing:
+            existing = conn.execute(
+                "SELECT * FROM founder_inbox WHERE id=?", (task_id,)
+            ).fetchone()
+            if existing:
+                row = dict(existing)
+                if (row.get("status") or "") == "open":
+                    row["skipped"] = "open"
+                    return row
+                if _recently_resolved(row, recent_resolved_hours):
+                    row["skipped"] = "recently_resolved"
+                    return row
+                row["skipped"] = "resolved"
                 return row
-            if _recently_resolved(row, recent_resolved_hours):
-                row["skipped"] = "recently_resolved"
-                return row
-            row["skipped"] = "resolved"
-            return row
         conn.execute(
-            """INSERT INTO founder_inbox
+            """INSERT OR REPLACE INTO founder_inbox
                (id, title, description, priority, reason, source, customer_name,
                 conversation_id, desk, status, created_at)
                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'open', datetime('now'))""",

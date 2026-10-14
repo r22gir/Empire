@@ -1,4 +1,4 @@
-"""Router-level confidence cascade: unset is a no-op, founder-only, inbox cap.
+"""Router-level confidence cascade: founder session, inbox replace vs skip.
 
 Tests the production hook both /chat and /chat/stream call
 (`apply_router_cascade` / `_apply_confidence_cascade_to_reply`).
@@ -57,7 +57,9 @@ def test_unset_router_helper_no_db_write_no_metadata_key(isolated, monkeypatch):
 
     dest = conf.db_path()
     log = conf.log_path()
-    text, meta = conf.apply_router_cascade(TWEET, LOW_ANSWER, channel="web")
+    text, meta = conf.apply_router_cascade(
+        TWEET, LOW_ANSWER, channel="web", is_founder=True,
+    )
     assert text == LOW_ANSWER
     assert meta == {}
     envelope = _envelope(conf, "web", meta)
@@ -67,40 +69,41 @@ def test_unset_router_helper_no_db_write_no_metadata_key(isolated, monkeypatch):
     assert not log.exists() or log.stat().st_size == 0
 
 
-def test_both_chat_doors_use_shared_helper_and_omit_empty_meta():
+def test_both_chat_doors_use_shared_helper_and_founder_flag():
     src = ROUTER.read_text(encoding="utf-8")
     assert src.count("def _apply_confidence_cascade_to_reply(") == 1
     assert src.count("_apply_confidence_cascade_to_reply(") >= 3
-    assert src.count("channel=request.channel") >= 2
-    assert src.count("extra=_confidence_cascade_extra(_cascade_meta)") == 2
+    assert src.count("is_founder=") >= 2
+    assert "canonical_founder and _cascade_founder()" in src
+    assert "_stream_cascade_founder()" in src
     assert "apply_router_cascade" in src
-    assert "Return early unless MAX_CONFIDENCE_GATE is on" in src
+    assert "FOUNDER_CASCADE_CHANNELS" not in src
 
 
-def test_non_founder_channel_untouched_when_gate_on(isolated, monkeypatch):
+def test_web_channel_without_founder_session_untouched(isolated, monkeypatch):
+    """channel='web' without a verified founder session must not rewrite."""
     conf = isolated["conf"]
     monkeypatch.setenv("MAX_CONFIDENCE_GATE", "on")
     importlib.reload(conf)
 
     dest = conf.db_path()
-    text, meta = conf.apply_router_cascade(TWEET, LOW_ANSWER, channel="storefront")
+    text, meta = conf.apply_router_cascade(
+        TWEET, LOW_ANSWER, channel="web", is_founder=False, chosen_path="quote_intake",
+    )
     assert text == LOW_ANSWER
     assert "need a call from you" not in text.lower()
     assert meta == {}
-    assert "confidence_cascade" not in _envelope(conf, "storefront", meta)
+    assert "confidence_cascade" not in _envelope(conf, "web", meta)
     assert not dest.exists()
-    email_text, email_meta = conf.apply_router_cascade(TWEET, LOW_ANSWER, channel="email")
-    assert email_text == LOW_ANSWER
-    assert email_meta == {}
 
 
-def test_founder_channel_gate_on_can_rewrite(isolated, monkeypatch):
+def test_founder_session_gate_on_can_rewrite(isolated, monkeypatch):
     conf = isolated["conf"]
     monkeypatch.setenv("MAX_CONFIDENCE_GATE", "on")
     importlib.reload(conf)
 
     text, meta = conf.apply_router_cascade(
-        TWEET, LOW_ANSWER, channel="web", chosen_path="quote_intake",
+        TWEET, LOW_ANSWER, channel="web", is_founder=True, chosen_path="quote_intake",
     )
     assert "need a call from you" in text.lower()
     assert meta.get("asked_founder") is True
@@ -110,13 +113,27 @@ def test_founder_channel_gate_on_can_rewrite(isolated, monkeypatch):
         "Quote for Maggie. Straight bench 48 inches long.",
         HIGH_ANSWER,
         channel="web",
+        is_founder=True,
         tool_results=[{"tool": "create_quote", "success": True}],
     )
     assert high == HIGH_ANSWER
     assert high_meta.get("asked_founder") is False
 
 
-def test_inbox_dedupe_skips_open_and_recently_resolved(isolated, monkeypatch):
+def test_inbox_default_replace_reopens_resolved(isolated):
+    inbox = isolated["inbox"]
+    first = inbox.add(task_id="desk-1", title="Unrouted", reason="no desk")
+    assert first["status"] == "open"
+    assert inbox.resolve("desk-1") is True
+    assert inbox.get("desk-1")["status"] == "resolved"
+    again = inbox.add(task_id="desk-1", title="Reopened by desk", reason="retry")
+    assert not again.get("skipped")
+    assert again["status"] == "open"
+    assert inbox.get("desk-1")["status"] == "open"
+    assert inbox.count_open() == 1
+
+
+def test_inbox_skip_existing_used_by_cascade(isolated, monkeypatch):
     conf = isolated["conf"]
     inbox = isolated["inbox"]
     monkeypatch.setenv("MAX_CONFIDENCE_GATE", "on")
