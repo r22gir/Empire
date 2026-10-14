@@ -15,12 +15,47 @@ which tests replace with a mock. Last-image memory is in-process only.
 """
 from __future__ import annotations
 
+import asyncio
 import re
 from pathlib import Path
 from typing import Any
 
 # In-process last-image memory. Tests must not write ~/empire-data.
 _LAST_IMAGE: dict[str, str] = {}
+
+# Stream first-chunk wait. wait_for() cancels the producer — MiniMax
+# vision is ~12s+ so a 15s cap used to drop the image-bearing reply.
+STREAM_CHUNK_TIMEOUT_S = 15.0
+STREAM_IMAGE_CHUNK_TIMEOUT_S = 60.0
+
+
+def stream_chunk_timeout(image_filename: str | None) -> float:
+    """60s when an image is on the turn so vision is never cancelled."""
+    return STREAM_IMAGE_CHUNK_TIMEOUT_S if image_filename else STREAM_CHUNK_TIMEOUT_S
+
+
+async def next_stream_chunk(pending, aiter, timeout: float):
+    """Wait for the next stream chunk without cancelling the producer.
+
+    ``asyncio.wait_for`` cancels the awaited coroutine on timeout. The
+    reply that holds the image description must stay alive; ``asyncio.wait``
+    only times out the waiter.
+
+    Returns ``(chunk, model, next_pending, finished)``.
+    """
+    task = pending or asyncio.ensure_future(aiter.__anext__())
+    done, _ = await asyncio.wait({task}, timeout=timeout)
+    if not done:
+        return None, None, task, False
+    try:
+        chunk, model = task.result()
+    except StopAsyncIteration:
+        return None, None, None, True
+    return chunk, model, None, False
+
+
+def image_turn_reply_is_empty(text: str | None) -> bool:
+    return not (text or "").strip()
 
 _IMAGE_REFERRAL_RE = re.compile(
     r"(?i)\b("
@@ -132,6 +167,22 @@ def resolve_turn_image(
     if refers_to_last_image(message):
         return last_conversation_image(conversation_id)
     return None
+
+
+def drawing_intent_active(message: str | None, image_filename: str | None) -> bool:
+    """True when this turn should take the Drawing Studio path."""
+    from app.services.max.drawing_intent import (
+        is_drawing_intent,
+        is_text_measurement_drawing_request,
+    )
+    text = message or ""
+    if image_filename:
+        return (
+            is_photo_drawing_request(text, image_filename)
+            or is_drawing_intent(text)
+            or is_text_measurement_drawing_request(text)
+        )
+    return is_drawing_intent(text) or is_text_measurement_drawing_request(text)
 
 
 def is_photo_drawing_request(

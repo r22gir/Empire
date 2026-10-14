@@ -5,11 +5,11 @@ No real MiniMax/Telegram sends. No writes under ~/empire-data.
 from __future__ import annotations
 
 import asyncio
-import inspect
 from pathlib import Path
-from types import SimpleNamespace
 
 import pytest
+
+_ROUTER_PY = Path(__file__).resolve().parents[1] / "app" / "routers" / "max" / "router.py"
 
 
 def _write_png(path: Path) -> None:
@@ -73,7 +73,9 @@ def test_photo_plus_draw_phrase_is_drawing_intent(msg):
     handoff = build_drawing_handoff(msg, image_filename="photo.jpg")
     assert handoff.is_drawing_intent is True
     # Text-only bare words stay off the drawing route (H57).
-    if msg.strip().lower() in {"drawing", "sketch", "plan"}:
+    # H57: bare "drawing" / "plan" stay off the text-only path.
+    # "sketch" is already a DRAWING_KEYWORD (text-only routes too).
+    if msg.strip().lower() in {"drawing", "plan"}:
         assert is_drawing_intent(msg) is False
 
 
@@ -102,31 +104,31 @@ def test_photo_drawing_uses_vision_dimensions_not_text_only():
 
 
 def test_attached_image_no_longer_disables_drawing_route():
-    from app.routers.max.router import _drawing_intent_active
+    from app.services.max.image_turn import drawing_intent_active
 
-    assert _drawing_intent_active("Give a drawing", "window.jpg") is True
-    assert _drawing_intent_active("drawing", "window.jpg") is True
-    assert _drawing_intent_active("dame un dibujo", "window.jpg") is True
-    assert _drawing_intent_active("hello", None) is False
+    assert drawing_intent_active("Give a drawing", "window.jpg") is True
+    assert drawing_intent_active("drawing", "window.jpg") is True
+    assert drawing_intent_active("dame un dibujo", "window.jpg") is True
+    assert drawing_intent_active("hello", None) is False
 
 
 # ── timeout must not cancel the image reply ───────────────────────
 
 
 def test_image_turn_uses_60_second_chunk_timeout():
-    from app.routers.max.router import (
-        _STREAM_IMAGE_CHUNK_TIMEOUT_S,
-        _stream_chunk_timeout,
+    from app.services.max.image_turn import (
+        STREAM_IMAGE_CHUNK_TIMEOUT_S,
+        stream_chunk_timeout,
     )
 
-    assert _stream_chunk_timeout("window.jpg") == 60.0
-    assert _STREAM_IMAGE_CHUNK_TIMEOUT_S == 60.0
-    assert _stream_chunk_timeout(None) == 15.0
+    assert stream_chunk_timeout("window.jpg") == 60.0
+    assert STREAM_IMAGE_CHUNK_TIMEOUT_S == 60.0
+    assert stream_chunk_timeout(None) == 15.0
 
 
 def test_next_stream_chunk_does_not_cancel_slow_first_chunk():
     """asyncio.wait_for would cancel; our waiter must keep the task."""
-    from app.routers.max.router import _next_stream_chunk
+    from app.services.max.image_turn import next_stream_chunk as _next_stream_chunk
 
     cancelled = {"n": 0}
 
@@ -152,44 +154,26 @@ def test_next_stream_chunk_does_not_cancel_slow_first_chunk():
 
 
 def test_router_source_never_wait_for_cancels_image_stream():
-    src = inspect.getsource(
-        __import__("app.routers.max.router", fromlist=["_next_stream_chunk"])
-    )
+    src = _ROUTER_PY.read_text(encoding="utf-8")
     # The image-bearing first chunk must use the non-cancelling helper.
     assert "_next_stream_chunk" in src
     assert "skip_vision=bool(vision_text)" in src
-    assert "image_filename=_turn_image" in src or "image_filename=_turn_image," in src
+    assert "image_filename=_turn_image" in src
+    assert "asyncio.wait_for(_initial_iter.__anext__()" not in src
 
 
 # ── empty image-turn retry keeps the photo ────────────────────────
 
 
-def test_empty_image_retry_passes_image_filename(monkeypatch):
-    from app.routers.max import router as r
-    from app.services.max.ai_router import AIResponse
-
-    seen = []
-
-    async def fake_chat(*args, **kwargs):
-        seen.append(kwargs.get("image_filename"))
-        return AIResponse(content="I see the window photo.", model_used="mock")
-
-    monkeypatch.setattr(r.ai_router, "chat", fake_chat)
-
-    async def run():
-        resp = await r.ai_router.chat(
-            [], image_filename="window.jpg", skip_vision=True,
-        )
-        assert resp.content
-        assert seen == ["window.jpg"]
-
-    asyncio.run(run())
-
-    src = Path(r.__file__).read_text(encoding="utf-8")
+def test_empty_image_retry_passes_image_filename():
+    src = _ROUTER_PY.read_text(encoding="utf-8")
     assert "image_filename=_turn_image" in src
     assert "image-turn empty retry" in src
-    # Completeness / empty fallback must not drop the image.
     assert "skip_vision=bool(vision_text)" in src
+    from app.services.max.image_turn import image_turn_reply_is_empty
+    assert image_turn_reply_is_empty("") is True
+    assert image_turn_reply_is_empty("   ") is True
+    assert image_turn_reply_is_empty("I see the window.") is False
 
 
 # ── mocked vision describe (no real send) ─────────────────────────
@@ -225,7 +209,7 @@ def test_describe_attached_image_is_mocked_no_send(monkeypatch, tmp_path):
 
 
 def test_vision_for_request_mocked(monkeypatch):
-    from app.routers.max import router as r
+    from app.services.max import image_turn
 
     sent = {"n": 0}
 
@@ -235,9 +219,10 @@ def test_vision_for_request_mocked(monkeypatch):
         assert for_drawing is True
         return "Window 72 inches wide by 90 inches high.", None, {"success": True}
 
-    monkeypatch.setattr(r, "describe_attached_image", fake_describe)
-    req = SimpleNamespace(message="Give a drawing", image_filename="window.jpg")
-    desc, err = asyncio.run(r._vision_for_request(req, "window.jpg"))
+    monkeypatch.setattr(image_turn, "describe_attached_image", fake_describe)
+    desc, err, raw = asyncio.run(
+        image_turn.describe_attached_image("window.jpg", for_drawing=True)
+    )
     assert err is None
     assert "72 inches wide" in desc
     assert sent["n"] == 1

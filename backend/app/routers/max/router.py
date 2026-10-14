@@ -51,9 +51,11 @@ from app.services.max.drawing_intent import (
 )
 from app.services.max.image_turn import (
     describe_attached_image,
+    image_turn_reply_is_empty,
     inject_vision_context,
-    is_photo_drawing_request,
+    next_stream_chunk,
     resolve_turn_image,
+    stream_chunk_timeout,
 )
 from app.services.max.grounding_verifier import verify_web_response, log_to_audit
 from app.services.max.response_quality_engine import quality_engine, Channel
@@ -385,50 +387,17 @@ def _resolve_max_chat_timeout(message: str | None = None) -> float:
     return base
 
 
-# Stream first-chunk wait. wait_for() cancels the producer — MiniMax
-# vision is ~12s+ so a 15s cap used to drop the image-bearing reply.
+# Re-export so existing tests / callers can keep using the router names.
 _STREAM_CHUNK_TIMEOUT_S = 15.0
 _STREAM_IMAGE_CHUNK_TIMEOUT_S = 60.0
-
-
-def _stream_chunk_timeout(image_filename: str | None) -> float:
-    """60s when an image is on the turn so vision is never cancelled."""
-    return _STREAM_IMAGE_CHUNK_TIMEOUT_S if image_filename else _STREAM_CHUNK_TIMEOUT_S
-
-
-async def _next_stream_chunk(pending, aiter, timeout: float):
-    """Wait for the next stream chunk without cancelling the producer.
-
-    ``asyncio.wait_for`` cancels the awaited coroutine on timeout. The
-    reply that holds the image description must stay alive; ``asyncio.wait``
-    only times out the waiter.
-
-    Returns ``(chunk, model, next_pending, finished)``.
-    """
-    task = pending or asyncio.ensure_future(aiter.__anext__())
-    done, _ = await asyncio.wait({task}, timeout=timeout)
-    if not done:
-        return None, None, task, False
-    try:
-        chunk, model = task.result()
-    except StopAsyncIteration:
-        return None, None, None, True
-    return chunk, model, None, False
-
-
-def _image_turn_reply_is_empty(text: str | None) -> bool:
-    return not (text or "").strip()
+_stream_chunk_timeout = stream_chunk_timeout
+_next_stream_chunk = next_stream_chunk
+_image_turn_reply_is_empty = image_turn_reply_is_empty
 
 
 def _drawing_intent_active(message: str | None, image_filename: str | None) -> bool:
-    text = message or ""
-    if image_filename:
-        return (
-            is_photo_drawing_request(text, image_filename)
-            or is_drawing_intent(text)
-            or is_text_measurement_drawing_request(text)
-        )
-    return is_drawing_intent(text) or is_text_measurement_drawing_request(text)
+    from app.services.max.image_turn import drawing_intent_active
+    return drawing_intent_active(message, image_filename)
 
 
 def _resolve_request_image(request) -> str | None:
