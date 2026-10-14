@@ -370,7 +370,7 @@ def test_quote_text_stays_on_the_draft_and_send_it_does_not_send(monkeypatch):
         return reply["text"] if isinstance(reply, dict) else reply
 
     first = asyncio.run(wa.default_text_handler(
-        "Quote for Maggie. Straight bench 48 inches long.",
+        "Quote 3 roman shades 34 1/2 x 60 for kitchen",
         _founder(),
     ))
     shown = _shown(first)

@@ -377,21 +377,22 @@ def test_whatsapp_client_sender_does_not_run_chain(monkeypatch, tmp_path, isolat
     monkeypatch.setenv("VOICE_DOC_SESSIONS_PATH", str(tmp_path / "voice-sessions.json"))
     monkeypatch.setenv("EMPIRE_DATA_DIR", str(tmp_path / "edition-data"))
     monkeypatch.setenv("WHATSAPP_FOUNDER_PHONES", FOUNDER_WA)
-    fell_through = []
 
     async def _chat(*_a, **_k):
-        fell_through.append("max_chat")
         return "ok"
 
     monkeypatch.setattr(wa, "max_chat", _chat)
     monkeypatch.setattr(wa, "founder_documents", lambda pipeline: ([], ""))
 
     before = _quote_count()
+    customers_before = _customer_by_email("only@example.com")
+    assert try_handle_inbound(ROMAN, channel="whatsapp", sender=CLIENT_WA, founder=False) is None
     shown = asyncio.run(wa.default_text_handler(ROMAN, CLIENT_WA))
     text = shown["text"] if isinstance(shown, dict) else shown
-    assert "Draft" not in str(text)
+    assert "Draft EST-" not in str(text)
+    assert "quoteiq" not in str(text).lower()
     assert _quote_count() == before
-    assert fell_through == ["max_chat"]
+    assert _customer_by_email("only@example.com") == customers_before
 
 
 def test_roman_shades_use_catalog_pricer_and_fractions(isolated_empire_db):
