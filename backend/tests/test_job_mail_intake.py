@@ -303,16 +303,24 @@ def test_approve_calendar_proposal_stays_pending_when_insert_fails(monkeypatch):
 
 def test_job_mail_routes_are_founder_only(monkeypatch):
     monkeypatch.setenv("FOUNDER_PIN", "246810")
+    from fastapi import FastAPI
     from fastapi.testclient import TestClient
-    from app.main import app
+    from app.routers.job_mail_intake import router
 
+    app = FastAPI()
+    app.include_router(router, prefix="/api/v1")
     client = TestClient(app)
     denied = client.get("/api/v1/job-mail/review-queue")
-    assert denied.status_code in (403, 503)
+    assert denied.status_code == 403
     denied_run = client.post("/api/v1/job-mail/run")
-    assert denied_run.status_code in (403, 503)
+    assert denied_run.status_code == 403
+    wrong = client.get("/api/v1/job-mail/review-queue", headers={"X-Founder-Pin": "0000"})
+    assert wrong.status_code == 403
     ok = client.get("/api/v1/job-mail/review-queue", headers={"X-Founder-Pin": "246810"})
     assert ok.status_code == 200
+    paths = {getattr(r, "path", "") for r in router.routes}
+    assert "/job-mail/run" in paths
+    assert "/job-mail/calendar-proposals/{proposal_id}/approve" in paths
 
 
 def test_approve_records_who_approved():
