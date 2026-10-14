@@ -157,7 +157,8 @@ def test_job_signals_win_over_link_host_and_fabric_link():
     lopez = 'Quote for Lopez: bench 48" like this https://x.com/a/status/123'
     ana = 'Make estimate for Ana, 2 cushions 22 1/2" x 18" https://pin.it/abc'
     linkedin_job = "Chair 36 inches for Rivera, see https://www.linkedin.com/in/someone"
-    for text in (banquette, lopez, ana, linkedin_job):
+    ruiz = "sofa slipcover foam chair for Ruiz https://p.com/a"
+    for text in (banquette, lopez, ana, linkedin_job, ruiz):
         assert is_link_or_article_message(text) is False, text
         assert has_real_job_signals(text) is True, text
     assert is_link_or_article_message(TWEET) is True

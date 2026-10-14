@@ -69,6 +69,13 @@ _JOB_CLIENT_RE = re.compile(
     r"\b(?:quote|estimate|invoice|drawing)\s+for\s+[A-Za-z]",
     re.IGNORECASE,
 )
+# "<item> for <Name>" — sofa/chair for Ruiz. Name keeps its capital.
+_JOB_ITEM_FOR_NAME_RE = re.compile(
+    r"(?i)\b(?:bench|banquette|booth|cushion|cushions|pillow|drape|drapes|drapery|"
+    r"shade|shades|roman|headboard|valance|cornice|upholster\w*|"
+    r"chair|seat|ottoman|sofa|curtain|slipcover|foam)\b"
+    r"[^.\n]{0,48}?\bfor\s+(?-i:[A-Z][A-Za-z'-]{1,30})\b"
+)
 _JOB_CREATE_RE = re.compile(
     r"\b(?:new|make|create|start|draft|build|prepare|write up)\b[^.?!]{0,40}"
     r"\b(?:quote|estimate|invoice|drawing)\b",
@@ -156,7 +163,7 @@ def _text_has_job_signals(raw: str, extraction: Any = None) -> bool:
     item = item or bool(_JOB_ITEM_RE.search(raw))
     dims = dims or bool(_JOB_DIM_RE.search(raw))
     if not client:
-        client = bool(_JOB_CLIENT_RE.search(raw))
+        client = bool(_JOB_CLIENT_RE.search(raw) or _JOB_ITEM_FOR_NAME_RE.search(raw))
     if item and (dims or client or create):
         return True
     if create and (item or dims or client):

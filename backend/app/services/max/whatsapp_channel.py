@@ -1696,7 +1696,7 @@ async def default_text_handler(text: str, wa_id: str) -> str:
         from app.services.max.answer_quality import detect_quality_flags
         from app.services.max.evaluation_service import evaluation_service
 
-        _qf = detect_quality_flags("", user_message=body)
+        _qf = detect_quality_flags("", user_message=body, founder=True)
         evaluation_service.log_answer_quality_flags(f"wa:{wa_id}", "whatsapp", _qf)
     except Exception:
         pass

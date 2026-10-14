@@ -44,6 +44,13 @@ _USER_REPEAT_RE = re.compile(
 _PUSHBACK_RE = re.compile(
     r"(?i)\b(?:that'?s wrong|incorrect|not right|you misunderstood|not what i asked|wrong)\b"
 )
+# Filing-only: bare again/wrong/^no/incomplete/repeat are not enough.
+_WEAK_FILE_RE = re.compile(
+    r"(?i)^\s*(?:"
+    r"(?:no+|nope)(?:\s+(?:thanks|thank you|thx))?"
+    r"|wrong|again|repeat|incomplete"
+    r")\s*[.!?]?\s*$"
+)
 
 _CURRENT_RE = re.compile(r"\b(latest|current|today|now|recent|this\s+(?:week|month|year)|breaking|news)\b", re.I)
 _HISTORICAL_RE = re.compile(r"\b(history|historical|in\s+\d{4}|during|before\s+\d{4}|originally|at\s+the\s+time)\b", re.I)
@@ -243,14 +250,52 @@ def enforce_reply_structure(text: str | None, regenerate=None) -> str:
     return filled_old
 
 
+def _is_frustration_correction(msg: str) -> bool:
+    try:
+        from app.services.max.whatsapp_format import is_frustration_correction
+
+        return bool(is_frustration_correction(msg))
+    except Exception:
+        return False
+
+
+def is_strong_quality_filing_signal(user_message: str | None) -> bool:
+    """Filing gate. Flags may stay broad; this is cut-off or real frustration.
+
+    Bare again / wrong / ^no / incomplete / repeat are not enough.
+    """
+    msg = (user_message or "").strip()
+    if not msg:
+        return False
+    if _CUTOFF_RE.search(msg):
+        return True
+    if not _is_frustration_correction(msg):
+        return False
+    return _WEAK_FILE_RE.fullmatch(msg) is None
+
+
+def _quality_dedupe_key(hit: list[str], *, thread_id: str | None = None) -> str:
+    day = date.today().isoformat()
+    flags = ",".join(hit)
+    if thread_id:
+        return f"aq:{flags}:thread:{thread_id}:{day}"
+    return f"aq:{flags}:day:{day}"
+
+
 def detect_quality_flags(
     text: str | None,
     *,
     user_message: str | None = None,
     tool_results: list[dict[str, Any]] | None = None,
     finish_reason: str | None = None,
+    founder: bool = False,
+    thread_id: str | None = None,
 ) -> dict[str, bool]:
-    """Return the requested per-turn self-score flags."""
+    """Return the requested per-turn self-score flags.
+
+    Filing (proposed improvement) happens only for the founder channel/user
+    and only on a strong cut-off or frustration signal.
+    """
     body = (text or "").strip()
     tools = tool_results or []
     flags = {name: False for name in FLAGS}
@@ -262,40 +307,51 @@ def detect_quality_flags(
         or _CUTOFF_RE.search(user_message or "")
     )
     msg = user_message or ""
-    frustration = False
-    try:
-        from app.services.max.whatsapp_format import is_frustration_correction
-
-        frustration = is_frustration_correction(msg)
-    except Exception:
-        frustration = False
-    flags["user_repeat"] = bool(frustration or _USER_REPEAT_RE.search(msg))
+    flags["user_repeat"] = bool(_is_frustration_correction(msg) or _USER_REPEAT_RE.search(msg))
     flags["pushback"] = bool(_PUSHBACK_RE.search(msg))
     # A web answer that has no date or source marker is a stale-source risk.
     has_web = any(str(item.get("tool", "")) in {"web_search", "web_read"} for item in tools if isinstance(item, dict))
     flags["stale_source"] = bool(has_web and not re.search(r"(?:https?://|\b(?:published|posted|updated|date)\b|\b20\d{2}\b)", body, re.I))
-    founder_hit = {
-        "truncated": bool(_CUTOFF_RE.search(msg)),
-        "user_repeat": flags["user_repeat"],
-        "pushback": flags["pushback"],
-    }
-    if any(founder_hit.values()) and (msg or "").strip():
+    if founder and (msg or "").strip():
         try:
-            file_quality_miss(founder_hit, user_message=msg)
+            file_quality_miss(
+                {
+                    "truncated": bool(_CUTOFF_RE.search(msg)),
+                    "user_repeat": flags["user_repeat"],
+                    "pushback": flags["pushback"],
+                },
+                user_message=msg,
+                founder=True,
+                thread_id=thread_id,
+            )
         except Exception:
             pass
     return flags
 
 
-def file_quality_miss(flags: dict[str, bool], *, user_message: str = "") -> dict | None:
-    """File a proposed improvement for a founder quality miss. Never approves. Deduped."""
+def file_quality_miss(
+    flags: dict[str, bool],
+    *,
+    user_message: str = "",
+    founder: bool = False,
+    thread_id: str | None = None,
+) -> dict | None:
+    """File a proposed improvement for a founder quality miss. Never approves.
+
+    Founder channel/user only. Strong signal only. Deduped on flag set + day
+    (or thread), not message text.
+    """
+    if not founder:
+        return None
+    if not is_strong_quality_filing_signal(user_message):
+        return None
     hit = [name for name in ("truncated", "user_repeat", "pushback") if flags.get(name)]
     if not hit:
         return None
     from app.services.max import improvements as imp
 
     title = f"Answer-quality miss: {', '.join(hit)}"
-    key = f"aq:{','.join(hit)}:{(user_message or '').strip().lower()[:80]}"
+    key = _quality_dedupe_key(hit, thread_id=thread_id)
     existing = imp.list_requests("proposed").get("items") or []
     for row in existing:
         if row.get("requested_via") == "answer_quality" and (row.get("requested_text") or "") == key:

@@ -3,6 +3,7 @@ from pathlib import Path
 
 from app.services.max.answer_quality import (
     detect_quality_flags,
+    file_quality_miss,
     freshness_directive,
     freshness_intent,
     needs_continuation,
@@ -66,7 +67,7 @@ def test_founder_dude_and_read_article_set_user_repeat(monkeypatch, tmp_path):
     assert casual["truncated"] is False
 
 
-def test_quality_miss_files_proposed_improvement_deduped(monkeypatch, tmp_path):
+def _quality_db(monkeypatch, tmp_path):
     monkeypatch.setenv("EMPIRE_TASK_DB", str(tmp_path / "empire.db"))
     monkeypatch.setenv("MAX_IMPROVE_SPEC_DIR", str(tmp_path / "specs"))
     monkeypatch.setenv("EMPIRE_DATA_DIR", str(tmp_path / "edition-data"))
@@ -77,16 +78,47 @@ def test_quality_miss_files_proposed_improvement_deduped(monkeypatch, tmp_path):
     init_db.init_database()
     from app.services.max import improvements as imp
     importlib.reload(imp)
-    from app.services.max.answer_quality import file_quality_miss
+    return imp
 
-    first = file_quality_miss({"truncated": True}, user_message="Message cut off")
+
+def test_quality_miss_weak_phrases_file_nothing(monkeypatch, tmp_path):
+    imp = _quality_db(monkeypatch, tmp_path)
+    for msg in ("send it again", "no thanks", "Can you send the invoice again"):
+        flags = detect_quality_flags("ok", user_message=msg, founder=True)
+        filed = file_quality_miss(flags, user_message=msg, founder=True)
+        assert filed is None, msg
+    assert (imp.list_requests("proposed").get("items") or []) == []
+    # Non-founder Dude must not file either.
+    assert file_quality_miss({"user_repeat": True}, user_message="Dude", founder=False) is None
+    detect_quality_flags("ok", user_message="Dude", founder=False)
+    assert (imp.list_requests("proposed").get("items") or []) == []
+
+
+def test_quality_miss_files_proposed_improvement_deduped(monkeypatch, tmp_path):
+    imp = _quality_db(monkeypatch, tmp_path)
+
+    first = file_quality_miss({"truncated": True}, user_message="Message cut off", founder=True)
     assert first and first["status"] == "proposed"
     assert first["kind"] == "fix"
     assert first["requested_via"] == "answer_quality"
     spec = Path(first["spec_path"])
     assert spec.is_file()
-    again = file_quality_miss({"truncated": True}, user_message="Message cut off")
+    # Same flag set + day, different wording — one row.
+    again = file_quality_miss({"truncated": True}, user_message="got cut off on the phone", founder=True)
     assert again["id"] == first["id"]
+
+    dude = detect_quality_flags("same summary", user_message="Dude", founder=True)
+    assert dude["user_repeat"] is True
+    items = imp.list_requests("proposed").get("items") or []
+    repeat_rows = [r for r in items if "user_repeat" in (r.get("title") or "")]
+    assert len(repeat_rows) == 1
+    detect_quality_flags("same summary", user_message="Dude", founder=True)
+    items2 = imp.list_requests("proposed").get("items") or []
+    repeat_rows2 = [r for r in items2 if "user_repeat" in (r.get("title") or "")]
+    assert len(repeat_rows2) == 1
+    assert repeat_rows2[0]["id"] == repeat_rows[0]["id"]
+    # At most one per day per flag set (truncated + user_repeat).
+    assert len(items2) == 2
 
 
 def test_complete_drapery_answer_has_no_truncation_flag():
