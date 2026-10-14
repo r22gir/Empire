@@ -1,0 +1,28 @@
+{
+  "id": "job-fixture-bench",
+  "title": "Window bench",
+  "client_address": "12 Client Street",
+  "quoted_amount": 2400,
+  "business_unit": "woodcraft",
+  "items": [
+    {
+      "item_key": "BN1",
+      "name": "Window bench",
+      "item_type": "bench",
+      "route_to": "woodcraft",
+      "fabric_code": "F012-Navy",
+      "measurements": {
+        "width": 60,
+        "depth": 18,
+        "height": 18,
+        "has_back": false
+      },
+      "cut_list": [
+        {"name": "Bench seat ply", "layer": "seat_ply", "width": 60, "height": 0.5, "thickness": 18, "y": 15.5},
+        {"name": "Bench seat foam", "layer": "seat_foam", "width": 60, "height": 2, "thickness": 18, "y": 16},
+        {"name": "Bench seat fabric", "layer": "seat_fabric", "width": 60, "height": 2.5, "thickness": 18, "y": 15.5},
+        {"name": "Bench base", "layer": "base", "min": [0, 0, 0], "max": [60, 15.5, 18], "dims": [60, 15.5, 18]}
+      ]
+    }
+  ]
+}

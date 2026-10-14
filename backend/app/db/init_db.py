@@ -223,6 +223,22 @@ CREATE TABLE IF NOT EXISTS jobs (
     FOREIGN KEY (customer_id) REFERENCES customers(id)
 );
 
+-- Max 3D job viewer publish records (slug is unguessable; never auto-publish)
+CREATE TABLE IF NOT EXISTS job_viewers (
+    id TEXT PRIMARY KEY,
+    job_id TEXT,
+    quote_id TEXT,
+    slug TEXT NOT NULL UNIQUE,
+    status TEXT NOT NULL DEFAULT 'draft',
+    title TEXT,
+    public_url TEXT,
+    html_sha TEXT,
+    published_at TEXT,
+    unpublished_at TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
 -- Saved pattern templates
 CREATE TABLE IF NOT EXISTS saved_patterns (
     id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(8)))),

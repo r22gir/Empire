@@ -5,6 +5,7 @@ import { CheckCircle, Mail, FileDown, FileText, Hammer, X, Loader2, Trash2 } fro
 import { API } from '../../../lib/api';
 import { openDocViewer } from '../../docs/viewerBus';
 import DepositPayLinkButton from '../finance/DepositPayLink';
+import JobViewerButton from '../../jobs/JobViewerButton';
 
 interface QuoteActionsProps {
   quoteId: string;
@@ -237,6 +238,7 @@ export default function QuoteActions({ quoteId, status, compact, onAction }: Quo
           color="#b8960c"
           onClick={() => handleAction('pdf', `/quotes-v2/${quoteId}/pdf`, 'GET')}
         />
+        <JobViewerButton quoteId={quoteId} compact={compact} />
         <DepositPayLinkButton quoteId={quoteId} compact={compact} />
         <ActionBtn
           id="invoice"

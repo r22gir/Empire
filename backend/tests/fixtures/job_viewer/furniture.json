@@ -1,0 +1,21 @@
+{
+  "id": "job-fixture-sofa",
+  "title": "Lounge sofa",
+  "client_address": "400 Oak Avenue",
+  "items": [
+    {
+      "item_key": "SF1",
+      "name": "Lounge sofa",
+      "item_type": "sofa",
+      "fabric_code": "V008-Charcoal",
+      "measurements": {
+        "width": 84,
+        "depth": 36,
+        "height": 18,
+        "has_back": true,
+        "channel_width": 21,
+        "back_height": 18
+      }
+    }
+  ]
+}

@@ -1,0 +1,19 @@
+{
+  "id": "job-fixture-cabinet",
+  "title": "Maple cabinet carcass",
+  "client_address": "9 Mill Road",
+  "business_unit": "woodcraft",
+  "items": [
+    {
+      "item_key": "CB1",
+      "name": "Base cabinet",
+      "item_type": "cabinet",
+      "route_to": "woodcraft",
+      "measurements": {
+        "width": 36,
+        "depth": 24,
+        "height": 34.5
+      }
+    }
+  ]
+}

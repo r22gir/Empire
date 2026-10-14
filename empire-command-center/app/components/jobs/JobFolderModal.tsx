@@ -5,6 +5,7 @@ import { formatInches } from '../../lib/formatInches';
 import { useJob, Job } from '../../hooks/useJob';
 import JobHeader from '../docs/JobHeader';
 import DocsTab from '../docs/DocsTab';
+import JobViewerButton from './JobViewerButton';
 import {
   X, Upload, Camera, FileText, CheckCircle2, Clock, AlertCircle,
   DollarSign, Receipt, Plus, RefreshCw, Send, Mail, ArrowRight,
@@ -332,6 +333,7 @@ export default function JobFolderModal({
             </div>
 
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <JobViewerButton jobId={jobId} quoteId={job?.quote_id} />
               <button
                 type="button"
                 onClick={handleSetCurrentActiveJob}

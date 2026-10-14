@@ -1,0 +1,48 @@
+{
+  "id": "job-fixture-banquettes",
+  "title": "Channel-back banquettes",
+  "client_name": "Fixture Client",
+  "client_address": "88 Hidden Lane",
+  "customer_address": "88 Hidden Lane",
+  "address": "88 Hidden Lane",
+  "quoted_amount": 18400,
+  "total": 18400,
+  "business_unit": "workroom",
+  "description": "U + L banquettes. Inches. Click a part to identify; hover for size.",
+  "items": [
+    {
+      "item_key": "U1",
+      "name": "U booth",
+      "item_type": "u_banquette",
+      "room": "Dining",
+      "fabric_code": "V003-Cognac",
+      "measurements": {
+        "shape": "u",
+        "A": 83.25,
+        "B": 40,
+        "C": 40,
+        "depth": 22,
+        "height": 18,
+        "channel_width": 12,
+        "back_height": 26.75,
+        "seat_height": 18
+      }
+    },
+    {
+      "item_key": "L1",
+      "name": "L booth",
+      "item_type": "l_banquette",
+      "room": "Dining",
+      "fabric_code": "V003-Cognac",
+      "measurements": {
+        "shape": "l",
+        "A": 72,
+        "B": 48,
+        "depth": 22,
+        "height": 18,
+        "channel_width": 12,
+        "back_height": 26.75
+      }
+    }
+  ]
+}
