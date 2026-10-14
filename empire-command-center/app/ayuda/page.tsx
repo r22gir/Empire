@@ -6,7 +6,7 @@ const ARTICLES = [
   { href: '/ayuda/empresa', title: 'Tu proyecto', note: 'Portafolio, lotes, obra, compradores, WhatsApp y voz.' },
   { href: '/ayuda/voz', title: 'Cómo usar la voz', note: 'Dicta lote, etapa y el plan de pagos. El borrador espera tu visto bueno.' },
   { href: '/ayuda/dispositivos', title: 'Cómo conectarte desde tus dispositivos', note: 'Sitio web, pantalla de inicio y acceso privado.' },
-  { href: '/ayuda/whatsapp', title: 'Cómo configurar WhatsApp', note: 'Tu cuenta de Meta, número de prueba y webhook. Sin las llaves de Juan ni de Rafael.' },
+  { href: '/ayuda/whatsapp', title: 'Cómo configurar WhatsApp', note: 'Tu cuenta de Meta, número de prueba y webhook. No reutilices llaves ni números de otra instancia.' },
 ];
 
 export default function AyudaMenu() {

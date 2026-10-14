@@ -1,1 +1,1 @@
-export { AYUDA_OPENER, ayudaOpenerHtml } from './ayudaCopy.mjs';
+export { AYUDA_OPENER, KEYS_HANDOFF, ayudaOpenerHtml } from './ayudaCopy.mjs';

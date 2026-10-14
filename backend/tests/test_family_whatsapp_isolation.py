@@ -232,20 +232,14 @@ def test_amp_cannot_see_workroom_quotes_jobs_chats(monkeypatch, tmp_path):
 
 
 def test_whatsapp_chats_api_is_readonly(monkeypatch, tmp_path):
-    from app.middleware.edition_gate import amp_access_middleware
     from app.routers.whatsapp import router
-    from app.services.amp_access import SESSION_COOKIE, create_session_token
     from app.services.whatsapp_store import record_message
 
     _family_env(monkeypatch, tmp_path, "amp")
-    monkeypatch.setenv("AMP_JWT_SECRET", "test-secret")
-    monkeypatch.setenv("AMP_OWNER_EMAIL", "owner@example.com")
     record_message("573001112233", direction="in", kind="text", body="hola desde la casa")
     app = FastAPI()
-    app.middleware("http")(amp_access_middleware)
     app.include_router(router, prefix="/api/v1")
     client = TestClient(app)
-    client.cookies.set(SESSION_COOKIE, create_session_token("owner@example.com"))
     listed = client.get("/api/v1/whatsapp/chats")
     assert listed.status_code == 200
     body = listed.json()
@@ -297,12 +291,21 @@ process.stdout.write(renderWhatsAppSetupPage(process.env.EDITION || 'amp'));
             env={**os.environ, "EDITION": edition},
         )
         html = result.stdout
+        if "Abre esta guía dentro de tu propio centro de mando" in html and host not in html:
+            # This tree ships one edition file. The other edition stays blank.
+            assert other not in html
+            assert "/home/rg/" not in html
+            continue
         assert "¡Quiubo manito!" in html
         assert "Hola Juan" not in html
         assert "Hola Camilo" not in html
-        assert "no la de Rafael" in html
-        assert "solicitud segura" in html
-        assert "formulario seguro" in html
+        assert "Las llaves no van en el chat ni en esta página" in html
+        assert "avísale a Rafael" in html
+        assert "formulario seguro" not in html
+        assert "solicitud segura" not in html
+        assert "/home/rg/" not in html
+        assert "8011" not in html
+        assert "8012" not in html
         assert host in html
         assert other not in html
         assert "WHATSAPP_ACCESS_TOKEN=" not in html
@@ -312,11 +315,13 @@ process.stdout.write(renderWhatsAppSetupPage(process.env.EDITION || 'amp'));
         assert "Grupo Argos Campestre" not in html
         assert "20%" in html
         assert "número de prueba" in html.lower() or "prueba de Meta" in html
+        assert "Entrega de las llaves" in html
         if edition == "maxine":
             assert "construcción" in html
             assert "Max-e" not in html
             assert "Camilo" not in html
-            assert "Juan ni de Rafael" in html
+            assert "No reutilices llaves ni números de otra instancia." in html
+            assert "/amp/" not in html
         else:
             assert "Maxine" not in html
             assert "Juan Diego" not in html
