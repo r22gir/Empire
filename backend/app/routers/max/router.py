@@ -1830,6 +1830,8 @@ def _should_read_research_pages(question: str | None) -> bool:
     text = question or ""
     if _is_local_finance_readiness_request(text):
         return False
+    if _today_agenda_prelookup_needed(text):
+        return False
     return is_factual_question(text) or _is_performative_web_search_request(text)
 
 
@@ -2533,6 +2535,37 @@ def _family_pre_search_open(desk: str | None) -> bool:
         return is_family_edition()
     except Exception:
         return False
+
+
+def _today_agenda_prelookup_needed(message: str | None) -> bool:
+    try:
+        from app.services.max.today_agenda import is_today_agenda_ask, missed_the_point
+        return is_today_agenda_ask(message) or missed_the_point(message)
+    except Exception:
+        return False
+
+
+async def _inject_today_agenda_prelookup(request, messages, founder: bool) -> list[dict[str, Any]]:
+    """Run calendar/organizer/task tools before the model answers agenda or miss-turns."""
+    entries: list[dict[str, Any]] = []
+    try:
+        from app.services.max.today_agenda import prelookup_calls, prelookup_message
+        calls = prelookup_calls(request.message, request.history)
+        if not calls:
+            return entries
+        rendered: list[tuple[str, str]] = []
+        for tc in calls:
+            result = await asyncio.to_thread(execute_tool, tc, desk=request.desk, founder=founder)
+            entry = _normalize_tool_result_entry(result)
+            entries.append(entry)
+            body = entry.get("error") if not entry.get("success") else _safe_dumps(entry.get("result") or {})
+            rendered.append((tc.get("tool") or "tool", str(body)[:4000]))
+        note = prelookup_message(request.message, rendered, request.history)
+        if note:
+            messages.insert(-1, AIMessage(role="system", content=note))
+    except Exception as exc:
+        logger.debug("today_agenda prelookup skipped: %s", exc)
+    return entries
 
 
 def _is_family_edition() -> bool:
@@ -3276,10 +3309,16 @@ async def _chat_with_max_service_impl(
             messages.insert(-1, AIMessage(role="system", content=(
                 finance_system_preamble(include_totals=True) + "\n" + _finance_context
             )))
+        _agenda_prelookup_entries = []
+        if _today_agenda_prelookup_needed(request.message):
+            _agenda_prelookup_entries = await _inject_today_agenda_prelookup(
+                request, messages, founder,
+            )
         if _family_pre_search_open(request.desk) and (
             (_is_performative_web_search_request(request.message)
              or is_factual_question(request.message))
             and not _is_local_finance_readiness_request(request.message)
+            and not _today_agenda_prelookup_needed(request.message)
         ):
             from app.services.max.search_context import build_search_query
             _built = build_search_query(request.message, history=request.history)
@@ -3683,6 +3722,7 @@ async def _chat_with_max_service_impl(
         if (
             is_factual_question(request.message)
             and not _is_local_finance_readiness_request(request.message)
+            and not _today_agenda_prelookup_needed(request.message)
             and "web_search" not in tools_used_names
             and not _local_tools_answered
         ):
@@ -4363,10 +4403,14 @@ async def _chat_stream_impl(request: ChatRequest, http_request: Request | None =
             messages.insert(-1, AIMessage(role="system", content=(
                 finance_system_preamble(include_totals=True) + "\n" + _finance_context
             )))
+        if _today_agenda_prelookup_needed(request.message):
+            yield f"data: {_safe_dumps({'type': 'progress', 'phase': 'agenda', 'message': 'Revisando calendario y tareas'})}\n\n"
+            await _inject_today_agenda_prelookup(request, messages, founder)
         if _family_pre_search_open(request.desk) and (
             (_is_performative_web_search_request(request.message)
              or is_factual_question(request.message))
             and not _is_local_finance_readiness_request(request.message)
+            and not _today_agenda_prelookup_needed(request.message)
         ):
             from app.services.max.search_context import build_search_query
             _stream_built = build_search_query(request.message, history=request.history)

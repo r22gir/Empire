@@ -39,7 +39,7 @@ def test_maxe_starts_with_amp_and_cibernettic(monkeypatch, tmp_path):
     manifest = edition_manifest()
     assert [item["slug"] for item in manifest["businesses"]] == ["amp", "cibernettic"]
     assert manifest["product"]["also_known_as"] == "El Portal de la Alegría"
-    assert greeting("es").startswith("Hola, soy Max-e")
+    assert greeting("es").startswith("¡Quiubo manito!")
     assert "Cibernettic" in greeting("es")
     assert "AMP" in greeting("es")
 

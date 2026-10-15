@@ -517,6 +517,9 @@ Puedes generar una imagen con MiniMax image-01 (minimax_text_to_image) a partir 
 Nunca pongas fotos de clientes, correos, teléfonos, rutas del Workroom ni datos de otra edición en el aviso.
 La voz speech-2.8 solo si está encendida. El video H3 solo crea un borrador; Rafael genera desde Max personal
 con X-Minimax-Video-Confirm: aprobar. Esta herramienta no genera clips ni acepta approval_id.
+Agenda de hoy: get_today_agenda + list_schedule + get_tasks para "qué hay hoy" / "mi agenda" / "what's on today".
+Mandar un enlace: send_me_link solo al WhatsApp y correo del dueño de ESTA instancia. Nunca send_me_this_link.
+"Can you send me X" / "puedes enviarme X": llama send_me_link, nunca un sí de catálogo.
 """
 
 
@@ -2893,6 +2896,16 @@ def _get_services_health(params: dict, desk: Optional[str] = None) -> ToolResult
                 results[name] = {"status": "online", "port": svc["port"], "description": svc["description"], "type": "port"}
         except Exception:
             results[name] = {"status": "offline", "port": svc["port"], "description": svc["description"]}
+
+    try:
+        from app.services.max.desks.live_services import avatar_service_status
+        results["avatar"] = avatar_service_status()
+    except Exception:
+        results["avatar"] = {
+            "status": "offline",
+            "description": "Avatar / Presentation Mode",
+            "type": "avatar",
+        }
 
     online = sum(1 for s in results.values() if s["status"] == "online")
     return ToolResult(tool="get_services_health", success=True, result={
@@ -7734,6 +7747,42 @@ try:
     TOOLS_DOC = TOOLS_DOC + _tools_acquisition.ACQUISITION_TOOLS_DOC
 except Exception as _acq_err:  # never take Max down over an optional tool pack
     logger.error(f"tools_acquisition not loaded: {_acq_err}")
+
+# Today's calendar + Organizer + tasks.
+try:
+    import importlib as _importlib, sys as _sys
+    _today_name = "app.services.max.today_agenda"
+    _today_agenda = (_importlib.reload(_sys.modules[_today_name]) if _today_name in _sys.modules
+                     else _importlib.import_module(_today_name))
+    _today_agenda.register_tools(tool, ToolResult)
+    FAMILY_TOOLS_DOC = FAMILY_TOOLS_DOC + _today_agenda.TODAY_AGENDA_DOC
+    if "TOOLS_DOC" in globals():
+        TOOLS_DOC = TOOLS_DOC + _today_agenda.TODAY_AGENDA_DOC
+except Exception as _today_err:
+    logger.error(f"today_agenda not loaded: {_today_err}")
+
+# Family owner-only send_me_link. Never register Studio send_me_this_link.
+try:
+    import importlib as _importlib, sys as _sys
+    _send_me_name = "app.services.max.send_me_link"
+    _send_me_link = (_importlib.reload(_sys.modules[_send_me_name]) if _send_me_name in _sys.modules
+                     else _importlib.import_module(_send_me_name))
+    _send_me_link.register_tools(tool, ToolResult)
+    FAMILY_TOOLS_DOC = FAMILY_TOOLS_DOC + _send_me_link.SEND_ME_LINK_DOC
+    if "TOOLS_DOC" in globals():
+        TOOLS_DOC = TOOLS_DOC + _send_me_link.SEND_ME_LINK_DOC
+except Exception as _send_me_err:
+    logger.error(f"send_me_link not loaded: {_send_me_err}")
+
+# Voice "can you do X" from the capability list.
+try:
+    import importlib as _importlib, sys as _sys
+    _can_do_name = "app.services.max.voice_can_do"
+    _can_do = (_importlib.reload(_sys.modules[_can_do_name]) if _can_do_name in _sys.modules
+               else _importlib.import_module(_can_do_name))
+    _can_do.register_tools(tool, ToolResult)
+except Exception as _can_do_err:
+    logger.error(f"voice_can_do not loaded: {_can_do_err}")
 
 TOOL_COUNT = len(TOOL_REGISTRY)
 TOOLS_DOC = TOOLS_DOC.replace("__TOOL_COUNT__", str(TOOL_COUNT))

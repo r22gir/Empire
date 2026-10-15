@@ -69,7 +69,7 @@ def greeting_reply(name: str = "Rafael", now: Optional[datetime] = None) -> str:
         family = False
     if family:
         part = "Buenos días" if 5 <= h < 12 else "Buenas tardes" if 12 <= h < 18 else "Buenas noches"
-        return f"{part}, {name}. ¿En qué te ayudo?"
+        return f"¡Quiubo manito! {part}, {name}. ¿En qué te ayudo?"
     part = "Good morning" if 5 <= h < 12 else "Good afternoon" if 12 <= h < 18 else "Good evening"
     return f"{part}, {name}. What can I do for you?"
 
