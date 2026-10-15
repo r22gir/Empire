@@ -8,6 +8,7 @@ Tests must mock every send — outbound I/O is isolated in _deliver_* helpers.
 """
 from __future__ import annotations
 
+import hashlib
 import logging
 import os
 import re
@@ -26,6 +27,9 @@ OWNER_ALIASES = frozenset({
 SIBLING_NAMES = frozenset({
     "juan", "juan diego", "juan diego giraldo",
 })
+STUDIO_NAMES = frozenset({
+    "rafael", "rafa", "rafa22", "rafa22giraldo",
+})
 MISSING_WHATSAPP_ES = (
     "Manito, todavía no tengo tu WhatsApp configurado. "
     "Pídele a Rafael que ponga EDITION_OWNER_WHATSAPP en esta instancia."
@@ -43,6 +47,15 @@ WHATSAPP_NOT_SETUP_ES = (
     "Puedo mandártelo por correo si quieres."
 )
 SEND_VIAS = ("whatsapp", "email")
+# SHA-256 of normalised Studio contacts (lowercase trimmed email; digits-only
+# 10-digit and +1 11-digit phone). No plaintext. Always denied, even when
+# FOUNDER_EMAIL is unset and business.json is not loaded.
+STUDIO_CONTACT_HASHES = frozenset({
+    "d22c7ae402e8fdf06de7d280b1cd1c93f5d6031121b18e84ff1e42d76051e6d6",
+    "f6bd29ec933b03199e6817fcfab2fb954d190abe0b9c9fb9696eb8a7b8abf9b9",
+    "b1f680f45ecbd77d4e1ede6cf0e8a0c50e26ccc4122e83b26304644247ddf1eb",
+    "dded6e07d174efdc44fdcb2c0ac431f1e419f0a4d0da247f418e533d24a301e6",
+})
 _EMAIL_IN_BRACKETS = re.compile(r"<([^<>]+@[^<>]+)>")
 _BARE_EMAIL = re.compile(r"([A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,})")
 _URL = re.compile(r"^https?://", re.I)
@@ -52,11 +65,12 @@ _ASKED_TO_SEND = re.compile(
     r"\b(?:send|sent|resend|forward|e-?mail|whats\s?app)\b|"
     r"\bcorreo\b|"
     r"\benviar(?:me|lo|la|te|nos)?\b|"
-    r"\benv[ií]a(?:me|lo|la|nos)?\b|"
+    r"\benv[ií]a(?:me|lo|la|nos|melo|mela)?\b|"
     r"\bmandar(?:me|lo|la|te|nos)?\b|"
-    r"\bm[aá]nda(?:me|lo|la|nos)?\b|"
-    r"\bp[aá]sa(?:me|lo|la|nos)?\b|"
-    r"\bme\s+puedes\s+(?:mandar|enviar|pasar)\b"
+    r"\bm[aá]nda(?:me|lo|la|nos|melo|mela)?\b|"
+    r"\bp[aá]sa(?:me|lo|la|nos|melo|mela)?\b|"
+    r"\bme\s+puedes\s+(?:mandar|enviar|pasar)\b|"
+    r"\bme\s+lo\s+(?:env[ií]as|pasas|mandas)\b"
     r")"
 )
 
@@ -109,6 +123,19 @@ def _split_csv(raw: str | None) -> list[str]:
     return [part.strip() for part in (raw or "").split(",") if part.strip()]
 
 
+def _contact_hash(value: str) -> str:
+    return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+
+def is_hashed_studio_email(addr: str | None) -> bool:
+    email = extract_email(addr)
+    return bool(email) and _contact_hash(email) in STUDIO_CONTACT_HASHES
+
+
+def is_hashed_studio_phone(number: str | None) -> bool:
+    return any(_contact_hash(v) in STUDIO_CONTACT_HASHES for v in _phone_variants(number or ""))
+
+
 def sibling_deny_emails() -> set[str]:
     """Other brother's emails from EDITION_DENY_EMAIL. Never a send target."""
     out: set[str] = set()
@@ -127,17 +154,11 @@ def sibling_deny_phones() -> set[str]:
     return out
 
 
-def studio_business_phone() -> str:
-    """Workroom business_phone at runtime, if this process can see it. Deny only."""
-    try:
-        from app.edition import workroom_business_config
-        return str((workroom_business_config() or {}).get("business_phone") or "")
-    except Exception:
-        return ""
-
-
 def runtime_denied_emails() -> set[str]:
-    """EDITION_DENY_EMAIL plus FOUNDER_EMAIL / AMP_OWNER_EMAIL from env."""
+    """EDITION_DENY_EMAIL plus FOUNDER_EMAIL / AMP_OWNER_EMAIL from env.
+
+    Family editions do not load business.json, so denial cannot depend on it.
+    """
     out = sibling_deny_emails()
     for key in ("FOUNDER_EMAIL", "AMP_OWNER_EMAIL"):
         for part in _split_csv(os.getenv(key) or ""):
@@ -148,10 +169,40 @@ def runtime_denied_emails() -> set[str]:
 
 
 def runtime_denied_phones() -> set[str]:
-    """EDITION_DENY_WHATSAPP plus business_phone from runtime config."""
-    out = sibling_deny_phones()
-    out |= _phone_variants(studio_business_phone())
+    """EDITION_DENY_WHATSAPP only. Family editions do not load business.json."""
+    return sibling_deny_phones()
+
+
+def owner_email_env_values() -> list[str]:
+    """Raw EDITION_OWNER_EMAIL entries, including any that later get denied."""
+    out: list[str] = []
+    for part in _split_csv(os.getenv("EDITION_OWNER_EMAIL") or ""):
+        email = extract_email(part)
+        if email and email not in out:
+            out.append(email)
     return out
+
+
+def owner_email_env_is_denied() -> bool:
+    """True when EDITION_OWNER_EMAIL is set but every value is denied."""
+    return bool(owner_email_env_values()) and not owner_emails()
+
+
+def owner_whatsapp_env_is_denied() -> bool:
+    """True when EDITION_OWNER_WHATSAPP is set but equals a denied number."""
+    raw = digits_only((os.getenv("EDITION_OWNER_WHATSAPP") or "").strip())
+    return bool(raw) and not owner_whatsapp()
+
+
+def owner_env_denied_reason(via: str | None = None) -> str | None:
+    """NOT_OWNER_ES when EDITION_OWNER_* equals FOUNDER/AMP_OWNER/EDITION_DENY_*."""
+    check_email = via in (None, "email")
+    check_wa = via in (None, "whatsapp")
+    if check_email and owner_email_env_is_denied():
+        return NOT_OWNER_ES
+    if check_wa and owner_whatsapp_env_is_denied():
+        return NOT_OWNER_ES
+    return None
 
 
 def denylist_emails() -> set[str]:
@@ -164,11 +215,17 @@ def denylist_phones() -> set[str]:
 
 def is_denied_email(addr: str | None) -> bool:
     email = extract_email(addr)
-    return bool(email) and email in denylist_emails()
+    if not email:
+        return False
+    if is_hashed_studio_email(email):
+        return True
+    return email in denylist_emails()
 
 
 def is_denied_phone(number: str | None) -> bool:
     variants = _phone_variants(number or "")
+    if is_hashed_studio_phone(number):
+        return True
     denied = denylist_phones()
     return bool(variants & denied)
 
@@ -177,9 +234,11 @@ def is_sibling_recipient(to: str | None) -> bool:
     raw = (to or "").strip().lower()
     if not raw:
         return False
-    if raw in SIBLING_NAMES:
+    if raw in SIBLING_NAMES or raw in STUDIO_NAMES:
         return True
     if re.search(r"\bjuan\b", raw):
+        return True
+    if re.search(r"\brafael\b|\brafa22\b", raw):
         return True
     email = extract_email(raw)
     if email and email in sibling_deny_emails():
@@ -244,6 +303,13 @@ def authorize_recipient(via: str, to: str | None) -> dict[str, Any]:
     if is_sibling_recipient(raw) or is_denied_email(raw) or (digits_only(raw) and is_denied_phone(raw)):
         return {"authorized": False, "via": via, "to": raw, "error": NOT_OWNER_ES}
 
+    denied_cfg = owner_env_denied_reason(via)
+    if denied_cfg:
+        logger.error(
+            "EDITION_OWNER_* equals FOUNDER_EMAIL, AMP_OWNER_EMAIL, or EDITION_DENY_*; refusing send"
+        )
+        return {"authorized": False, "via": via, "to": email or raw, "error": denied_cfg}
+
     if via == "email":
         allowed = owner_emails()
         if not allowed:
@@ -257,6 +323,8 @@ def authorize_recipient(via: str, to: str | None) -> dict[str, Any]:
 
     if via == "whatsapp":
         configured_wa = owner_whatsapp()
+        if owner_whatsapp_env_is_denied():
+            return {"authorized": False, "via": "whatsapp", "to": digits_only(raw) or raw, "error": NOT_OWNER_ES}
         if not configured_wa:
             return {"authorized": False, "via": "whatsapp", "to": digits_only(raw) or raw, "error": MISSING_WHATSAPP_ES}
         if _is_owner_alias(raw):
