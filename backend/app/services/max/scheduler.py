@@ -69,15 +69,15 @@ def compile_daily_brief(now: datetime | None = None) -> str:
     overdue_tasks = 0
     try:
         from app.db.database import get_db
-        db = get_db()
-        cursor = db.execute("SELECT COUNT(*) FROM tasks WHERE status IN ('todo','in_progress')")
-        open_tasks = cursor.fetchone()[0]
-        cursor = db.execute(
-            "SELECT COUNT(*) FROM tasks WHERE status IN ('todo','in_progress') "
-            "AND due_date IS NOT NULL AND due_date < ?",
-            (now.strftime("%Y-%m-%d"),)
-        )
-        overdue_tasks = cursor.fetchone()[0]
+        with get_db() as db:
+            cursor = db.execute("SELECT COUNT(*) FROM tasks WHERE status IN ('todo','in_progress')")
+            open_tasks = cursor.fetchone()[0]
+            cursor = db.execute(
+                "SELECT COUNT(*) FROM tasks WHERE status IN ('todo','in_progress') "
+                "AND due_date IS NOT NULL AND due_date < ?",
+                (now.strftime("%Y-%m-%d"),)
+            )
+            overdue_tasks = cursor.fetchone()[0]
     except Exception:
         pass
 
@@ -284,14 +284,14 @@ class MaxScheduler:
         try:
             from app.db.database import get_db
             now = datetime.now().strftime("%Y-%m-%d")
-            db = get_db()
-            cursor = db.execute(
-                "SELECT id, title, due_date, desk FROM tasks "
-                "WHERE status IN ('todo','in_progress') AND due_date IS NOT NULL AND due_date < ? "
-                "ORDER BY due_date LIMIT 10",
-                (now,)
-            )
-            overdue = cursor.fetchall()
+            with get_db() as db:
+                cursor = db.execute(
+                    "SELECT id, title, due_date, desk FROM tasks "
+                    "WHERE status IN ('todo','in_progress') AND due_date IS NOT NULL AND due_date < ? "
+                    "ORDER BY due_date LIMIT 10",
+                    (now,)
+                )
+                overdue = cursor.fetchall()
             if not overdue:
                 return
 
