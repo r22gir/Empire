@@ -40,17 +40,20 @@ def test_four_view_items_identified_does_not_fabricate_without_source():
     assert handoff.tool_payload is None
 
 
-def test_bare_drawing_with_source_image_no_longer_routes_h57():
-    """H57 FIX: bare 'drawing' no longer routes, even with a source
-    image. The dispatch principle: a message that merely MENTIONS
-    a drawing is not a request for one. Use a strong pattern
-    ('draw me', 'draw a') OR item+dims to route."""
+def test_bare_drawing_with_source_image_routes_to_drawing_studio():
+    """Photo + the word drawing/sketch/plan is a Drawing Studio ask.
+
+    H57 still blocks bare 'drawing' on text-only turns. An attached
+    photo plus that word (or 'give a drawing') is the Studio chat
+    case Rafael hit — route it.
+    """
     from app.services.max.drawing_intent import build_drawing_handoff
 
     handoff = build_drawing_handoff("drawing", image_filename="uploaded-photo.jpg")
-    assert handoff.is_drawing_intent is False, (
-        "bare 'drawing' must NOT route (H57) — even with image"
+    assert handoff.is_drawing_intent is True, (
+        "photo + 'drawing' must route to Drawing Studio"
     )
+    assert handoff.source_image == "uploaded-photo.jpg"
 
     # Strong pattern with image: routes correctly. Missing list is
     # template-truth (HOTFIX 4.0b) — bench needs width/height/depth.

@@ -27,7 +27,7 @@ FIX covers four items per the directive:
       remap 'length'/'long' back to 'width' (long-edge = front).
 
   (d) All drawing output paths flow through canonical_drawings_dir
-      which lands in the live Workroom checkout's backend/data/drawings/.
+      which lands under ~/empire-data/drawings (or $EMPIRE_DATA_DIR).
       The stale ~/empire-repo/ path is forbidden and triggers a
       RuntimeError if anyone tries to bypass.
 """
@@ -296,25 +296,22 @@ class TestCanonicalDrawingsPath:
     not the stale fork."""
 
     def test_canonical_root_is_active_repo(self):
-        """When MAX_DRAWINGS_OUTPUT_DIR is unset, drawings land in the
-        live Workroom checkout (the marker root), not empire-repo-main."""
+        """When MAX_DRAWINGS_OUTPUT_DIR is unset, drawings land under
+        ~/empire-data (or $EMPIRE_DATA_DIR), never backend/data/drawings
+        inside the git checkout."""
         from app.services.drawing import canonical_path
-        from app.services.drawing.canonical_path import resolve_canonical_root
         # The autouse fixture set MAX_DRAWINGS_OUTPUT_DIR to tmp_path,
         # so unset it for this assertion.
         prev = os.environ.pop(canonical_path._ENV_OVERRIDE)
         try:
-            expected = resolve_canonical_root() / "backend" / "data" / "drawings"
-            # Resolution itself (pure, no writes) targets the live checkout.
+            expected = canonical_path._empire_data_dir() / "drawings"
             assert canonical_path._default_drawings_dir() == expected, (
-                f"drawings must land in the live checkout; got "
+                f"drawings must land under the data dir; got "
                 f"{canonical_path._default_drawings_dir()}"
             )
-            # The live-data firewall (tests/conftest.py) points the captured
-            # module default at a temp mirror, so the call (which mkdirs)
-            # never touches the live tree; it must still use that default.
             result = canonical_path.canonical_drawings_dir()
-            assert result == Path(canonical_path._DEFAULT_CANON_DIR), result
+            assert result == expected, result
+            assert "backend/data/drawings" not in str(result)
         finally:
             if prev is not None:
                 os.environ[canonical_path._ENV_OVERRIDE] = prev

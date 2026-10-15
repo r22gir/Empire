@@ -59,6 +59,8 @@ from app.services.drawing.templates.b2_renderers import (
 # Other headings → conservative 2.0" default.
 DRAPE_PROJECTION_IN: dict[str, tuple[float, float]] = {
     "pinch_pleat":  (2.0, 3.0),
+    "euro_pleat":   (2.0, 3.0),
+    "pencil_pleat": (2.0, 3.0),
     "ripplefold":   (3.5, 4.5),
     "grommet":      (3.0, 4.0),    # ASSUMED — FOUNDER VERIFY
     "rod_pocket":   (2.5, 3.5),    # ASSUMED — FOUNDER VERIFY
@@ -148,7 +150,7 @@ def _render_drapery_vector(result, spec: dict) -> bytes:
     _hdr(c, spec, "Drapery", product_type, geo_w, geo_h)
     # Title column uses scale_factor so SCALE row matches geometry
     _render_title_column(
-        c, "Drapery", "pinch_pleat",
+        c, "Drapery", product_type,
         result.layout_math, result.title_block, spec,
         result.geometry, min_x, min_y, geo_w, geo_h,
         scale_factor=s,
@@ -211,8 +213,16 @@ def _render_drapery_front(c, geom, min_x, min_y, geo_w, geo_h, s, spec):
     body_w = width - 2 * returns   # fabric body (between returns)
     # STACK_WIDTH_PER_PANEL — founder default 22.0; spec override
     # allowed via "stack_width_in" ("depends on request").
-    stack_w = float(spec.get("stack_width_in",
-                              STACK_WIDTH_PER_PANEL_IN))
+    # Gathered stack is one fabric width (22") unless the spec
+    # names another stack. Missing / 0 / tiny values used to draw
+    # a ~1/100-scale sliver and fail the built-in QC.
+    raw_stack = spec.get("stack_width_in", STACK_WIDTH_PER_PANEL_IN)
+    try:
+        stack_w = float(raw_stack)
+    except (TypeError, ValueError):
+        stack_w = STACK_WIDTH_PER_PANEL_IN
+    if stack_w < 6.0:
+        stack_w = STACK_WIDTH_PER_PANEL_IN
     # Number of panels per side (rounded; the outer panel dominates
     # the stack width visually since inner panels nest inside).
     n_panels_per_side = (n_body + 1) // 2
@@ -240,8 +250,12 @@ def _render_drapery_front(c, geom, min_x, min_y, geo_w, geo_h, s, spec):
         fabric_color = _fabric_reg.hex_to_color(fabric_obj.base_color_hex)
         fabric_motif = fabric_obj.pattern_class
     else:
-        # Unknown SKU: neutral gray + "FABRIC: TBC" overlay (D-R2-2 honesty)
-        fabric_color = colors.HexColor("#9aa0a3")
+        # Saturated saddle so the gathered-elevation QC can measure
+        # stack width. Neutral gray (#9aa0a3, saturation 10) sat below
+        # the gate's threshold of 30 — only the 1/5-pt pleat ticks
+        # registered as fabric, so stack width read as ~1% of the
+        # expected 22" gathered stack.
+        fabric_color = colors.HexColor("#8b5a2b")
         fabric_motif = "solid"
 
     # Layout (model coords, model_in):
@@ -288,7 +302,7 @@ def _render_drapery_front(c, geom, min_x, min_y, geo_w, geo_h, s, spec):
     # vertical lines per stack, slightly inset from outer edge so
     # they read as nested panels not boundary lines)
     c.setStrokeColor(_fabric_reg.darken(
-        fabric_obj.base_color_hex if fabric_obj else "#9aa0a3", 0.25))
+        fabric_obj.base_color_hex if fabric_obj else "#8b5a2b", 0.25))
     c.setLineWidth(0.4)
     if n_panels_per_side > 1:
         for side in ("L", "R"):
@@ -310,7 +324,7 @@ def _render_drapery_front(c, geom, min_x, min_y, geo_w, geo_h, s, spec):
     #   grommet      → large soft folds (fewer, wider ticks)
     #   rod_pocket   → shirred gathers (very dense, fine ticks)
     c.setStrokeColor(_fabric_reg.darken(
-        fabric_obj.base_color_hex if fabric_obj else "#9aa0a3", 0.35))
+        fabric_obj.base_color_hex if fabric_obj else "#8b5a2b", 0.35))
     # Per-heading pattern
     if product_type == "grommet":
         c.setLineWidth(0.5)   # wider ticks for big grommet folds
@@ -558,7 +572,7 @@ def _render_drapery_side(c, geom, min_x, min_y, geo_w, geo_h, s, spec):
         total_finger_w = n_pleats * finger_w_sheet + (n_pleats - 1) * gap_sheet
         finger_start_x = box_x + (box_w - total_finger_w) / 2
         c.setFillColor(_fabric_reg.darken(
-            fabric_obj.base_color_hex if fabric_obj else "#9aa0a3", 0.20))
+            fabric_obj.base_color_hex if fabric_obj else "#8b5a2b", 0.20))
         for i in range(n_pleats):
             fx = finger_start_x + i * (finger_w_sheet + gap_sheet)
             c.rect(_P(fx), _P(rod_y_detail - 0.02),

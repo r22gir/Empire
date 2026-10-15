@@ -671,7 +671,9 @@ class AIRouter:
         return self._find_file(filename)
 
     def _is_image(self, path: Path) -> bool:
-        return path.suffix.lower() in {'.png', '.jpg', '.jpeg', '.gif', '.webp'}
+        return path.suffix.lower() in {
+            '.png', '.jpg', '.jpeg', '.gif', '.webp', '.heic', '.heif', '.bmp',
+        }
 
     def _is_audio(self, path: Path) -> bool:
         return path.suffix.lower() in self.AUDIO_EXTS
@@ -1296,7 +1298,7 @@ class AIRouter:
             provider_unavailable=True,
         )
 
-    async def chat(self, messages: List[AIMessage], model: Optional[AIModel] = None, image_filename: Optional[str] = None, desk: Optional[str] = None, system_prompt: Optional[str] = None, tenant_id: str = "founder", source: str = "", conversation_id: str = "", tools: Optional[list] = None) -> AIResponse:
+    async def chat(self, messages: List[AIMessage], model: Optional[AIModel] = None, image_filename: Optional[str] = None, desk: Optional[str] = None, system_prompt: Optional[str] = None, tenant_id: str = "founder", source: str = "", conversation_id: str = "", tools: Optional[list] = None, skip_vision: bool = False) -> AIResponse:
         # Per-desk model routing: if no explicit model requested and desk has a preferred model, use it
         if model is None and desk and desk in DESK_MODEL_ROUTING:
             use_model = DESK_MODEL_ROUTING[desk]
@@ -1308,7 +1310,7 @@ class AIRouter:
 
         image_path = None
         local_attachment_answer = None
-        if image_filename:
+        if image_filename and not skip_vision:
             image_path, attachment_text = self._process_attachment(image_filename)
             if attachment_text and messages:
                 last = messages[-1]
@@ -1537,7 +1539,7 @@ class AIRouter:
 
     # ── Streaming chat ──────────────────────────────────────────────────
 
-    async def chat_stream(self, messages: List[AIMessage], model: Optional[AIModel] = None, image_filename: Optional[str] = None, desk: Optional[str] = None, system_prompt: Optional[str] = None, tenant_id: str = "founder", source: str = "", conversation_id: str = "") -> AsyncGenerator[tuple[str, str], None]:
+    async def chat_stream(self, messages: List[AIMessage], model: Optional[AIModel] = None, image_filename: Optional[str] = None, desk: Optional[str] = None, system_prompt: Optional[str] = None, tenant_id: str = "founder", source: str = "", conversation_id: str = "", skip_vision: bool = False) -> AsyncGenerator[tuple[str, str], None]:
         # Per-desk model routing
         if model is None and desk and desk in DESK_MODEL_ROUTING:
             use_model = DESK_MODEL_ROUTING[desk]
@@ -1549,7 +1551,7 @@ class AIRouter:
 
         image_path = None
         local_attachment_answer = None
-        if image_filename:
+        if image_filename and not skip_vision:
             image_path, attachment_text = self._process_attachment(image_filename)
             if attachment_text and messages:
                 last = messages[-1]

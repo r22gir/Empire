@@ -45,9 +45,26 @@ from app.services.max.runtime_truth_enforcer import (
 )
 from app.services.max.evaluation_service import evaluation_service
 from app.services.max.drawing_intent import (
+    HEADING_ASK,
     build_drawing_handoff,
     is_drawing_intent,
     is_text_measurement_drawing_request,
+    pending_should_resume,
+    resume_drawing_handoff,
+)
+from app.services.max.chat_attachments import (
+    apply_photo_context,
+    sanitize_attached_photo_reply,
+)
+from app.services.max.image_turn import (
+    describe_attached_image,
+    image_turn_reply_is_empty,
+    inject_vision_context,
+    last_conversation_vision,
+    next_stream_chunk,
+    remember_conversation_image,
+    resolve_turn_image,
+    stream_chunk_timeout,
 )
 from app.services.max.grounding_verifier import verify_web_response, log_to_audit
 from app.services.max.response_quality_engine import quality_engine, Channel
@@ -379,11 +396,130 @@ def _resolve_max_chat_timeout(message: str | None = None) -> float:
     return base
 
 
+# Re-export so existing tests / callers can keep using the router names.
+_STREAM_CHUNK_TIMEOUT_S = 15.0
+_STREAM_IMAGE_CHUNK_TIMEOUT_S = 60.0
+_stream_chunk_timeout = stream_chunk_timeout
+_next_stream_chunk = next_stream_chunk
+_image_turn_reply_is_empty = image_turn_reply_is_empty
+
+
 def _drawing_intent_active(message: str | None, image_filename: str | None) -> bool:
-    if image_filename:
-        return False
-    text = message or ""
-    return is_drawing_intent(text) or is_text_measurement_drawing_request(text)
+    from app.services.max.image_turn import drawing_intent_active
+    return drawing_intent_active(message, image_filename)
+
+
+def _resolve_request_image(request) -> str | None:
+    """Current upload, or the last photo this conversation still holds."""
+    return resolve_turn_image(
+        getattr(request, "conversation_id", None),
+        getattr(request, "message", None),
+        getattr(request, "image_filename", None),
+    )
+
+
+def _stored_vision_for(request, resolved_image: str | None) -> str:
+    """Reuse the stored MiniMax description — do not call vision again."""
+    if not resolved_image:
+        return ""
+    cid = getattr(request, "conversation_id", None)
+    stored = last_conversation_vision(cid)
+    if stored:
+        return stored
+    try:
+        from app.services.max.drawing_pending import get_pending
+        pending = get_pending(cid, getattr(request, "channel", None) or "")
+    except Exception:
+        pending = None
+    if pending and (pending.get("vision_text") or "").strip():
+        pending_image = pending.get("source_image") or pending.get("image_filename")
+        if not pending_image or Path(str(pending_image)).name == Path(str(resolved_image)).name:
+            return str(pending["vision_text"]).strip()
+    return ""
+
+
+async def _vision_for_request(request, resolved_image: str | None) -> tuple[str, str | None]:
+    """Run image description before any stream timeout starts.
+
+    Tests mock ``describe_attached_image`` — this path must not send.
+    Reuses last-image / pending vision so a heading answer or
+    "you have it" does not call MiniMax again.
+    """
+    if not resolved_image:
+        return "", None
+    reused = _stored_vision_for(request, resolved_image)
+    if reused:
+        remember_conversation_image(
+            getattr(request, "conversation_id", None),
+            resolved_image,
+            vision_text=reused,
+        )
+        return reused, None
+    for_drawing = _drawing_intent_active(request.message, resolved_image)
+    description, error, _raw = await describe_attached_image(
+        resolved_image, for_drawing=for_drawing,
+    )
+    if description:
+        remember_conversation_image(
+            getattr(request, "conversation_id", None),
+            resolved_image,
+            vision_text=description,
+        )
+    return description or "", error
+
+
+def _pending_channel(request) -> str:
+    return getattr(request, "channel", None) or ""
+
+
+def _load_pending_snapshot(request):
+    cid = getattr(request, "conversation_id", None)
+    if not cid:
+        return None
+    try:
+        from app.services.max.drawing_pending import get_pending
+        return get_pending(cid, _pending_channel(request))
+    except Exception:
+        return None
+
+
+def _resume_or_clear_pending(request, resolved_image: str | None):
+    """Return (merged_handoff, resolved_image) for a pending drawing draft."""
+    from app.services.max.drawing_pending import (
+        is_cancel_message, clear_pending, merge_founder_reply,
+    )
+    cid = getattr(request, "conversation_id", None)
+    channel = _pending_channel(request)
+    msg_text = getattr(request, "message", None) or ""
+    if not cid:
+        return None, resolved_image
+    if is_cancel_message(msg_text):
+        clear_pending(cid, channel)
+        return None, resolved_image
+    pending = _load_pending_snapshot(request)
+    if not pending:
+        return None, resolved_image
+    if pending_should_resume(msg_text, pending, getattr(request, "history", None)):
+        merged = merge_founder_reply(pending, msg_text)
+        image = resolved_image or merged.get("source_image") or merged.get("image_filename")
+        if image:
+            remember_conversation_image(cid, image, vision_text=merged.get("vision_text") or None)
+        return resume_drawing_handoff(merged, msg_text), image
+    clear_pending(cid, channel)
+    return None, resolved_image
+
+
+def _save_pending_drawing(request, handoff, vision_text: str | None) -> None:
+    cid = getattr(request, "conversation_id", None)
+    if not cid or not handoff or getattr(handoff, "ready", False):
+        return
+    try:
+        from app.services.max.drawing_pending import set_pending, snapshot_from_handoff
+        snap = snapshot_from_handoff(handoff, vision_text=vision_text)
+        if snap.get("missing") or snap.get("source_image"):
+            set_pending(cid, _pending_channel(request), snap)
+    except Exception:
+        pass
 
 
 def _db_query_cap_reached(message: str | None, tool_results: list[Any] | None) -> bool:
@@ -625,6 +761,17 @@ def _drawing_render(handoff) -> dict:
 
     # ── Incomplete: surface the template-truth missing list ──
     if not handoff.ready:
+        missing = list(getattr(handoff, "missing", None) or [])
+        if ("heading" in missing or "panel" in missing) and not handoff.b1_product_type:
+            return {
+                "ready": False,
+                "response_text": getattr(handoff, "response", None) or HEADING_ASK,
+                "tool_result_dict": {},
+                "missing_template_keys": list(handoff.missing_template_keys or ["heading"]),
+                "metadata_skill_used": "sketch_to_drawing",
+                "model_used": "drawing-router",
+                "status_event": None,
+            }
         if handoff.missing_template_keys and handoff.b1_product_type:
             return {
                 "ready": False,
@@ -677,6 +824,9 @@ def _drawing_render(handoff) -> dict:
             f"{', '.join(f'{k}={v!r}' for k, v in handoff.translated_dims.items())}) "
             f"→ {pdf_path}"
         )
+        notice = (getattr(handoff, "response", None) or "").strip()
+        if getattr(handoff, "panel_defaulted", False) and "largest face" in notice.lower():
+            body = f"{notice} {body}"
         # SSE-streaming status line (kept short — non-stream callers
         # ignore this and use response_text directly).
         status = f"B1 template {handoff.b1_product_type} rendered ({len(translated_dims)} dims)."
@@ -3385,6 +3535,22 @@ async def _chat_with_max_service_impl(
             metadata=_response_metadata(request.channel, skill_used=_unavail_skill),
         )
 
+    resolved_image = _resolve_request_image(request)
+    merged_handoff = None
+    try:
+        merged_handoff, resolved_image = _resume_or_clear_pending(request, resolved_image)
+    except Exception as exc:
+        logger.debug(f"pending_drawing_jobs lookup failed (non-fatal): {exc}")
+    vision_text, vision_error = await _vision_for_request(request, resolved_image)
+    if vision_error and request.image_filename:
+        return ChatResponse(
+            response=f"I could not analyze the image because MiniMax vision verification failed: {vision_error}",
+            model_used="mmx-vision",
+            fallback_used=False,
+            tool_results=[],
+            metadata=_response_metadata(request.channel, skill_used="mmx_vision"),
+        )
+
     # Sprint 1d Phase A Fix #3 — clear any stale handoff state at the start
     # of every chat turn (belt-and-suspenders for any future state-creep).
     try:
@@ -3393,57 +3559,15 @@ async def _chat_with_max_service_impl(
     except Exception:
         pass
 
-    # Sprint 1d Phase A Fix #2 — check for a pending drawing job (resume).
-    # Cancel keywords: drop pending, skip drawing route entirely.
-    # Otherwise: if a continuation reply matches, merge dims and use the
-    # merged snapshot; if it doesn't match, route normally and KEEP pending.
-    merged_handoff = None
-    if request.conversation_id and request.channel:
-        try:
-            from app.services.max.drawing_pending import (
-                is_cancel_message, clear_pending, get_pending,
-                is_continuation_reply, merge_founder_reply, set_pending,
-            )
-            msg_text = request.message or ""
-            # H57 FIX: explicit cancel keywords clear pending and
-            # RELEASE the turn back to MAX (no solicitation loop).
-            if is_cancel_message(msg_text):
-                clear_pending(request.conversation_id, request.channel)
-            # H57 FIX: if a pending exists but this turn is NOT a
-            # continuation reply, RELEASE the pending — do not keep
-            # it alive across turns. The user must never be trapped
-            # in a solicitation loop with no exit.
-            pending = get_pending(request.conversation_id, request.channel)
-            from app.services.max.drawing_intent import (
-                looks_like_dimension_reply,
-                pending_should_resume,
-            )
-            if pending and pending_should_resume(msg_text, pending, request.history):
-                if (
-                    is_continuation_reply(msg_text, pending.get("missing", []))
-                    or looks_like_dimension_reply(msg_text)
-                ):
-                    merged_handoff = merge_founder_reply(pending, msg_text)
-                else:
-                    # Non-continuation with drawing intent — release
-                    # the pending; this turn gets a fresh handoff.
-                    clear_pending(request.conversation_id, request.channel)
-            # If pending exists but this turn is NOT drawing intent
-            # (e.g. founder said something unrelated), the pending is
-            # abandoned — release it so it can't fire next turn.
-            elif pending:
-                clear_pending(request.conversation_id, request.channel)
-        except Exception as exc:
-            logger.debug(f"pending_drawing_jobs lookup failed (non-fatal): {exc}")
-
     drawing_handoff = (
         merged_handoff
         if merged_handoff is not None
         else (
             build_drawing_handoff(
                 request.message,
-                image_filename=request.image_filename,
+                image_filename=resolved_image,
                 history=request.history,
+                vision_text=vision_text,
             )
             if not _explicit_no_drawing_router(request.message) and not _prefer_archiveforge_over_drawing(request.message)
             else type("NoDrawingHandoff", (), {"is_drawing_intent": False, "ready": False, "missing": [], "intent_mode": "unknown"})()
@@ -3525,20 +3649,10 @@ async def _chat_with_max_service_impl(
         # the fix.
         render = _drawing_render(drawing_handoff)
 
-        # Resume snapshot: only when the legacy `missing` list is
-        # non-empty AND a tool_payload was built (Phase A Fix #2).
-        # Post-fix, the gate fires on template-validity, so this
-        # only fires on the legacy missing-keys path.
+        # Persist a heading-ask / missing-dims draft with the photo
+        # and stored vision so "you have it" or "pinch" can resume.
         if not render["ready"]:
-            try:
-                from app.services.max.drawing_pending import set_pending
-                if (drawing_handoff.missing
-                        and drawing_handoff.tool_payload):
-                    snap = dict(drawing_handoff.tool_payload)
-                    snap["missing"] = list(drawing_handoff.missing)
-                    set_pending(request.conversation_id, request.channel, snap)
-            except Exception:
-                pass
+            _save_pending_drawing(request, drawing_handoff, vision_text)
 
         return ChatResponse(
             response=render["response_text"],
@@ -3684,8 +3798,18 @@ async def _chat_with_max_service_impl(
         if _prelookup_msg:
             messages.insert(-1, AIMessage(role="system", content=_prelookup_msg))
 
+        _turn_image = resolved_image or request.image_filename
+        if _turn_image:
+            messages = apply_photo_context(messages, _turn_image)
+        if vision_text:
+            messages = inject_vision_context(messages, vision_text, resolved_image)
         response = await asyncio.wait_for(
-            ai_router.chat(messages, model=model, image_filename=request.image_filename, desk=request.desk, system_prompt=enriched_prompt, conversation_id=request.conversation_id or "", tools=_tools),
+            ai_router.chat(
+                messages, model=model, image_filename=_turn_image,
+                desk=request.desk, system_prompt=enriched_prompt,
+                conversation_id=request.conversation_id or "", tools=_tools,
+                skip_vision=bool(vision_text),
+            ),
             timeout=_resolve_max_chat_timeout(request.message),
         )
 
@@ -4026,6 +4150,8 @@ async def _chat_with_max_service_impl(
                 _final_resp = await ai_router.chat(
                     _final_msgs, model=model, desk=request.desk, system_prompt=enriched_prompt,
                     conversation_id=request.conversation_id or "",
+                    image_filename=resolved_image or request.image_filename,
+                    skip_vision=bool(vision_text),
                 )
                 _recovered = strip_tool_blocks(_final_resp.content or "")
                 if _recovered.strip():
@@ -4044,6 +4170,23 @@ async def _chat_with_max_service_impl(
                     + (f"Failed: {'; '.join(_bad)}. " if _bad else "")
                     + "The raw tool results are attached to this reply."
                 )
+
+        _turn_image = resolved_image or request.image_filename
+        if _turn_image and _image_turn_reply_is_empty(final_content):
+            try:
+                _img_retry = await ai_router.chat(
+                    messages, model=model, desk=request.desk,
+                    system_prompt=enriched_prompt,
+                    conversation_id=request.conversation_id or "",
+                    image_filename=_turn_image,
+                    skip_vision=bool(vision_text),
+                )
+                if (_img_retry.content or "").strip():
+                    final_content = strip_tool_blocks(_img_retry.content)
+                    if getattr(_img_retry, "model_used", None):
+                        response.model_used = _img_retry.model_used
+            except Exception as _img_retry_err:
+                logger.warning("[chat] image-turn empty retry failed: %s", _img_retry_err)
 
         # Grounding verification: strip hallucinated citations from web-sourced responses
         if tool_results_list:
@@ -4399,6 +4542,9 @@ async def _chat_with_max_service_impl(
         except Exception as _flag_err:
             logger.debug("[chat] quality flag logging failed: %s", _flag_err)
 
+        final_content = sanitize_attached_photo_reply(
+            final_content, resolved_image or request.image_filename,
+        )
         resp = ChatResponse(
             response=sanitize_output(final_content),
             model_used=resolve_display_model_used(response.model_used, request.model),
@@ -4710,35 +4856,18 @@ async def _chat_stream_impl(request: ChatRequest, _founder_session: dict | None 
             yield f"data: {_safe_dumps({'type': 'done', 'model_used': _unavail_model, 'metadata': _response_metadata(request.channel, skill_used=_unavail_skill)})}\n\n"
         return StreamingResponse(image_unavailable_gen(), media_type="text/event-stream", headers={"X-Accel-Buffering": "no", "Cache-Control": "no-cache"})
 
-    # H57 FIX M-bM-^@M-^T stream door: also release pending on non-continuation
-    # turns. Same logic as /chat non-stream (router.py:2356-2380).
+    resolved_image = _resolve_request_image(request)
     merged_handoff = None
-    if request.conversation_id and request.channel:
-        try:
-            from app.services.max.drawing_pending import (
-                is_cancel_message, clear_pending, get_pending,
-                is_continuation_reply, merge_founder_reply, set_pending,
-            )
-            msg_text = request.message or ""
-            if is_cancel_message(msg_text):
-                clear_pending(request.conversation_id, request.channel)
-            pending = get_pending(request.conversation_id, request.channel)
-            from app.services.max.drawing_intent import (
-                looks_like_dimension_reply,
-                pending_should_resume,
-            )
-            if pending and pending_should_resume(msg_text, pending, request.history):
-                if (
-                    is_continuation_reply(msg_text, pending.get("missing", []))
-                    or looks_like_dimension_reply(msg_text)
-                ):
-                    merged_handoff = merge_founder_reply(pending, msg_text)
-                else:
-                    clear_pending(request.conversation_id, request.channel)
-            elif pending:
-                clear_pending(request.conversation_id, request.channel)
-        except Exception as exc:
-            logger.debug(f"pending_drawing_jobs lookup failed (non-fatal): {exc}")
+    try:
+        merged_handoff, resolved_image = _resume_or_clear_pending(request, resolved_image)
+    except Exception as exc:
+        logger.debug(f"pending_drawing_jobs lookup failed (non-fatal): {exc}")
+    vision_text, vision_error = await _vision_for_request(request, resolved_image)
+    if vision_error and request.image_filename:
+        async def image_vision_error_gen():
+            yield f"data: {_safe_dumps({'type': 'text', 'content': f'I could not analyze the image because MiniMax vision verification failed: {vision_error}'})}\n\n"
+            yield f"data: {_safe_dumps({'type': 'done', 'model_used': 'mmx-vision', 'metadata': _response_metadata(request.channel, skill_used='mmx_vision')})}\n\n"
+        return StreamingResponse(image_vision_error_gen(), media_type="text/event-stream", headers={"X-Accel-Buffering": "no", "Cache-Control": "no-cache"})
 
     drawing_handoff = (
         merged_handoff
@@ -4746,8 +4875,9 @@ async def _chat_stream_impl(request: ChatRequest, _founder_session: dict | None 
         else (
             build_drawing_handoff(
                 request.message,
-                image_filename=request.image_filename,
+                image_filename=resolved_image,
                 history=request.history,
+                vision_text=vision_text,
             )
             if not _explicit_no_drawing_router(request.message) and not _prefer_archiveforge_over_drawing(request.message)
             else type("NoDrawingHandoff", (), {"is_drawing_intent": False, "ready": False, "missing": [], "intent_mode": "unknown"})()
@@ -4846,17 +4976,10 @@ async def _chat_stream_impl(request: ChatRequest, _founder_session: dict | None 
             if render["tool_result_dict"]:
                 yield f"data: {_safe_dumps({'type': 'tool_result', **render['tool_result_dict']})}\n\n"
 
-            # Resume snapshot — same wiring as /chat non-stream path.
+            # Persist a heading-ask / missing-dims draft with the photo
+            # and stored vision so "you have it" or "pinch" can resume.
             if not render["ready"]:
-                try:
-                    from app.services.max.drawing_pending import set_pending
-                    if (drawing_handoff.missing
-                            and drawing_handoff.tool_payload):
-                        snap = dict(drawing_handoff.tool_payload)
-                        snap["missing"] = list(drawing_handoff.missing)
-                        set_pending(request.conversation_id, request.channel, snap)
-                except Exception:
-                    pass
+                _save_pending_drawing(request, drawing_handoff, vision_text)
 
             yield (
                 "data: "
@@ -5018,21 +5141,32 @@ async def _chat_stream_impl(request: ChatRequest, _founder_session: dict | None 
         _stream_prelookup_entries, _stream_prelookup_msg = await _run_prelookups(request, founder)
         if _stream_prelookup_msg:
             messages.insert(-1, AIMessage(role="system", content=_stream_prelookup_msg))
+        _turn_image = resolved_image or request.image_filename
+        if _turn_image:
+            messages = apply_photo_context(messages, _turn_image)
+        if vision_text:
+            messages = inject_vision_context(messages, vision_text, resolved_image)
+        _chunk_timeout = _stream_chunk_timeout(_turn_image)
         try:
             # Buffer each model turn before publishing it. Tool calls are a
             # model-side protocol, not user-visible text; emitting chunks as
             # they arrive used to leak fenced JSON into the chat transcript.
+            # Vision already ran above — skip it here so the 15s waiter
+            # cannot cancel the image-bearing reply.
             _initial_iter = ai_router.chat_stream(
-                messages, model=model, image_filename=request.image_filename,
+                messages, model=model, image_filename=_turn_image,
                 desk=request.desk, system_prompt=enriched_prompt,
+                skip_vision=bool(vision_text),
                 source=request.channel or "", conversation_id=request.conversation_id or "",
             ).__aiter__()
+            _pending_chunk = None
             while True:
-                try:
-                    chunk, m_used = await asyncio.wait_for(_initial_iter.__anext__(), timeout=15)
-                except StopAsyncIteration:
+                chunk, m_used, _pending_chunk, _done = await _next_stream_chunk(
+                    _pending_chunk, _initial_iter, _chunk_timeout,
+                )
+                if _done:
                     break
-                except asyncio.TimeoutError:
+                if chunk is None:
                     yield f"data: {_safe_dumps({'type': 'heartbeat', 'phase': 'model'})}\n\n"
                     continue
                 model_used = m_used
@@ -5120,12 +5254,14 @@ async def _chat_stream_impl(request: ChatRequest, _founder_session: dict | None 
                             system_prompt=enriched_prompt, source=request.channel or "",
                             conversation_id=request.conversation_id or "",
                         ).__aiter__()
+                        _pending_action = None
                         while True:
-                            try:
-                                chunk, m_used = await asyncio.wait_for(_action_followup_iter.__anext__(), timeout=15)
-                            except StopAsyncIteration:
+                            chunk, m_used, _pending_action, _done = await _next_stream_chunk(
+                                _pending_action, _action_followup_iter, _chunk_timeout,
+                            )
+                            if _done:
                                 break
-                            except asyncio.TimeoutError:
+                            if chunk is None:
                                 yield f"data: {_safe_dumps({'type': 'heartbeat', 'phase': 'followup'})}\n\n"
                                 continue
                             model_used = m_used
@@ -5319,12 +5455,14 @@ async def _chat_stream_impl(request: ChatRequest, _founder_session: dict | None 
                     system_prompt=enriched_prompt, source=request.channel or "",
                     conversation_id=request.conversation_id or "",
                 ).__aiter__()
+                _pending_follow = None
                 while True:
-                    try:
-                        chunk, m_used = await asyncio.wait_for(_followup_iter.__anext__(), timeout=15)
-                    except StopAsyncIteration:
+                    chunk, m_used, _pending_follow, _done = await _next_stream_chunk(
+                        _pending_follow, _followup_iter, _chunk_timeout,
+                    )
+                    if _done:
                         break
-                    except asyncio.TimeoutError:
+                    if chunk is None:
                         yield f"data: {_safe_dumps({'type': 'heartbeat', 'phase': 'followup'})}\n\n"
                         continue
                     model_used = m_used
@@ -5350,6 +5488,8 @@ async def _chat_stream_impl(request: ChatRequest, _founder_session: dict | None 
                     _complete_resp = await ai_router.chat(
                         _complete_msgs, model=model, desk=request.desk, system_prompt=enriched_prompt,
                         conversation_id=request.conversation_id or "",
+                        image_filename=_turn_image,
+                        skip_vision=bool(vision_text),
                     )
                     _replacement = repair_reply_structure(strip_tool_blocks(_complete_resp.content or ""))
                     if _replacement:
@@ -5358,6 +5498,21 @@ async def _chat_stream_impl(request: ChatRequest, _founder_session: dict | None 
                         model_used = _complete_resp.model_used
                 except Exception as _complete_err:
                     logger.warning("[stream] completeness recovery failed: %s", _complete_err)
+            if _turn_image and _image_turn_reply_is_empty(full_response):
+                try:
+                    _img_retry = await ai_router.chat(
+                        messages, model=model, desk=request.desk,
+                        system_prompt=enriched_prompt,
+                        conversation_id=request.conversation_id or "",
+                        image_filename=_turn_image,
+                        skip_vision=bool(vision_text),
+                    )
+                    if (_img_retry.content or "").strip():
+                        full_response = strip_tool_blocks(_img_retry.content)
+                        if getattr(_img_retry, "model_used", None):
+                            model_used = _img_retry.model_used
+                except Exception as _img_retry_err:
+                    logger.warning("[stream] image-turn empty retry failed: %s", _img_retry_err)
             full_response = repair_reply_structure(full_response)
             truth_checked_response = _apply_truth_guardrails(
                 request.message, full_response, tool_results_list,
@@ -5603,6 +5758,9 @@ async def _chat_stream_impl(request: ChatRequest, _founder_session: dict | None 
                 request.message, full_response, tool_results=tool_results_list,
                 channel=request.channel,
                 is_founder=bool((_founder_session or {}).get("verified")),
+            )
+            full_response = sanitize_attached_photo_reply(
+                full_response, resolved_image or request.image_filename,
             )
             if full_response:
                 yield f"data: {_safe_dumps({'type': 'text', 'content': full_response})}\n\n"

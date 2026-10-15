@@ -146,6 +146,8 @@ _DATA_TABLES = [
     "founder_notifications",
     "orchestrator_runs",
     "pending_mail",
+    "pending_drawing_jobs",
+    "conversation_last_images",
     "family_help_tickets",
     "organizer_assignments",
     "organizer_items",

@@ -189,10 +189,54 @@ def merge_founder_reply(snapshot: dict, reply: str) -> dict:
         val = _match_dim(reply or "", key)
         if val is not None:
             out["dimensions"][key] = val
+    try:
+        from app.services.max.drawing_intent import parse_heading_reply, parse_panel_reply
+        heading = parse_heading_reply(reply)
+        if heading:
+            out["b1_product_type"] = heading
+        picked = parse_panel_reply(reply, out.get("panels") or [])
+        if picked:
+            out["chosen_panel"] = picked.get("label")
+            out["panel_defaulted"] = False
+            out["dimensions"] = dict(out.get("dimensions") or {})
+            out["dimensions"]["width"] = picked["width"]
+            out["dimensions"]["height"] = picked["height"]
+    except Exception:
+        pass
     # Re-derive missing list by intersecting with required_keys.
-    required = snapshot.get("required_keys") or []
-    out["missing"] = [k for k in required if not out["dimensions"].get(k)]
+    required = snapshot.get("required_keys") or list(out.get("missing") or [])
+    missing = [k for k in required if not out["dimensions"].get(k)]
+    if out.get("b1_product_type"):
+        missing = [k for k in missing if str(k).lower() not in {"heading", "b1_product_type", "style"}]
+    out["missing"] = missing
     return out
+
+
+def snapshot_from_handoff(handoff, vision_text: str | None = None) -> dict:
+    """Persist a pending drawing draft, including photo + stored vision."""
+    dims = dict(getattr(handoff, "dimensions", None) or {})
+    missing = list(getattr(handoff, "missing", None) or [])
+    vision = vision_text or getattr(handoff, "vision_text", "") or ""
+    return {
+        "is_drawing_intent": True,
+        "subject": getattr(handoff, "subject", "") or "",
+        "item_type": getattr(handoff, "item_type", "") or "",
+        "b1_product_type": getattr(handoff, "b1_product_type", None),
+        "dimensions": dims,
+        "translated_dims": dict(getattr(handoff, "translated_dims", None) or {}),
+        "missing": missing,
+        "missing_template_keys": list(getattr(handoff, "missing_template_keys", None) or []),
+        "required_keys": missing,
+        "source_image": getattr(handoff, "source_image", None),
+        "image_filename": getattr(handoff, "source_image", None),
+        "vision_text": vision,
+        "raw_message": getattr(handoff, "raw_message", "") or "",
+        "intent_mode": getattr(handoff, "intent_mode", "shop_drawing") or "shop_drawing",
+        "panels": list(getattr(handoff, "panels", None) or []),
+        "notes": getattr(handoff, "notes", "") or "",
+        "chosen_panel": getattr(handoff, "chosen_panel", "") or "",
+        "panel_defaulted": bool(getattr(handoff, "panel_defaulted", False)),
+    }
 
 
 def is_continuation_reply(text: str, missing_keys: list) -> bool:
