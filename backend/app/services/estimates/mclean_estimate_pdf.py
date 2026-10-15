@@ -589,6 +589,35 @@ def _draw_client_block(c: canvas.Canvas, quote: Dict[str, Any], y: float) -> flo
     return y - panel_h - 14
 
 
+def _paid_to_date(quote: Dict[str, Any]) -> float:
+    """Sum of recorded payments, else quotes_v2.deposit_paid / amount_paid."""
+    payments = quote.get("payments")
+    if isinstance(payments, list) and payments:
+        total = 0.0
+        for pay in payments:
+            if isinstance(pay, dict):
+                raw = pay.get("amount", pay.get("paid", pay.get("value")))
+            else:
+                raw = pay
+            try:
+                total += float(raw or 0)
+            except (TypeError, ValueError):
+                continue
+        if total > 0.005:
+            return round(total, 2)
+    for key in ("deposit_paid", "amount_paid", "paid_to_date"):
+        raw = quote.get(key)
+        if raw is None or raw == "":
+            continue
+        try:
+            val = float(raw)
+        except (TypeError, ValueError):
+            continue
+        if val > 0.005:
+            return round(val, 2)
+    return 0.0
+
+
 def _draw_totals(
     c: canvas.Canvas,
     quote: Dict[str, Any],
@@ -644,6 +673,8 @@ def _draw_totals(
     else:
         balance = round(total - deposit_f, 2)
     show_deposit = pct > 0 or deposit_f > 0
+    paid_f = _paid_to_date(quote)
+    show_paid = paid_f > 0.005
     client_safe = _client_safe(quote)
     no_extra_client_copy = client_safe and not has_extra_tbd
 
@@ -656,6 +687,8 @@ def _draw_totals(
     panel_h = 88 if has_extra_tbd else (72 if show_sub else 58)
     if not show_deposit:
         panel_h = 56 if has_extra_tbd else (44 if show_sub else 30)
+    if show_paid:
+        panel_h += 14
     c.setFillColor(PANEL)
     c.roundRect(panel_x, y - (panel_h - 16), 280, panel_h, 4, fill=1, stroke=0)
     c.setStrokeColor(GOLD)
@@ -701,6 +734,15 @@ def _draw_totals(
         c.setFont(sans_b, 9)
         c.setFillColor(DK)
         c.drawRightString(PW - MARGIN_R - 12, row, _money(deposit_f))
+
+        if show_paid:
+            row -= 12
+            c.setFont(sans, 8)
+            c.setFillColor(MUTE)
+            c.drawString(panel_x + 12, row, "Paid to date")
+            c.setFont(sans_b, 9)
+            c.setFillColor(DK)
+            c.drawRightString(PW - MARGIN_R - 12, row, _money(paid_f))
 
         row -= 12
         c.setFont(sans, 8)
@@ -1452,7 +1494,7 @@ def render_mclean_estimate_bytes(quote: Dict[str, Any]) -> bytes:
     """Render a McLean landscape estimate.
 
     Each section keeps its own lines. Columns are Description, Qty, Unit,
-    Sq ft, Price, Total, with a subtotal per area/room, then grand total,
+    Sq ft, Price/sq ft, Total, with a subtotal per area/room, then grand total,
     deposit and balance. Measurements render as fractions.
     """
     buf = BytesIO()
@@ -1475,10 +1517,10 @@ def render_mclean_estimate_bytes(quote: Dict[str, Any]) -> bytes:
     global _SQFT_DESC_W
     # Sq ft column only when a line has sq_ft or both width and height.
     sqft_mode = _sqft_layout(sections)
-    # Description | Qty | Unit | Sq ft | Price | Total
+    # Description | Qty | Unit | Sq ft | Price/sq ft | Total
     total_x = PW - MARGIN_R
-    price_x = total_x - 92
-    sqft_x = price_x - 72
+    price_x = total_x - 104
+    sqft_x = price_x - 68
     unit_x = sqft_x - 58
     qty6_x = unit_x - 48
     _SQFT_DESC_W = (qty6_x - 40 - MARGIN_L) if sqft_mode else None
@@ -1572,7 +1614,7 @@ def render_mclean_estimate_bytes(quote: Dict[str, Any]) -> bytes:
                 c.drawRightString(qty6_x, y, "Qty")
                 c.drawRightString(unit_x, y, "Unit")
                 c.drawRightString(sqft_x, y, "Sq ft")
-                c.drawRightString(price_x, y, "Price")
+                c.drawRightString(price_x, y, "Price/sq ft")
                 c.drawRightString(total_x, y, "Total")
                 _hr(c, y - 4, weight=0.7, col=GOLD)
                 y -= columns_h
@@ -1592,8 +1634,6 @@ def render_mclean_estimate_bytes(quote: Dict[str, Any]) -> bytes:
                         c.drawRightString(sqft_x, y, sqft_fraction(sq))
                         if sq is not None and pps is not None:
                             c.drawRightString(price_x, y, f"{pps:,.2f}")
-                        else:
-                            c.drawRightString(price_x, y, _rate_text(it).replace("$", ""))
                         c.drawRightString(total_x, y, _money(_line_amount_value(it)))
                     y -= _DESC_LEADING
                 y -= _ROW_GAP

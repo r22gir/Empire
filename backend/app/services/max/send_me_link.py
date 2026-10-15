@@ -17,7 +17,7 @@ from typing import Any, Optional
 
 logger = logging.getLogger("max.send_me_link")
 
-# Hardcoded. Not env. Not FOUNDER_SELF_EMAILS (that set includes rafa22giraldo).
+# Hardcoded. Not env. Not FOUNDER_SELF_EMAILS.
 SEND_ME_EMAIL = "empirebox2026@gmail.com"
 SEND_ME_EMAILS = frozenset({SEND_ME_EMAIL})
 BLOCKED_EMAILS = frozenset({

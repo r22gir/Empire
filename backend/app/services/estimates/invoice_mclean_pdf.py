@@ -156,8 +156,8 @@ def render_invoice_bytes(invoice: dict, customer: Optional[dict] = None, *, dry_
                                               "total": float(inv.get("subtotal") or 0)}])]
 
     total_x = PW - E.MARGIN_R
-    price_x = total_x - 92
-    sqft_x = price_x - 72
+    price_x = total_x - 104
+    sqft_x = price_x - 68
     unit_x = sqft_x - 58
     qty_x = unit_x - 48
     desc_w = qty_x - 40 - E.MARGIN_L
@@ -227,7 +227,7 @@ def render_invoice_bytes(invoice: dict, customer: Optional[dict] = None, *, dry_
                 nonlocal y
                 c.setFont(sans_b, 7.5); c.setFillColor(GOLD)
                 c.drawString(E.MARGIN_L, y, "Description")
-                for x, t in ((qty_x, "Qty"), (unit_x, "Unit"), (sqft_x, "Sq ft"), (price_x, "Price"), (total_x, "Total")):
+                for x, t in ((qty_x, "Qty"), (unit_x, "Unit"), (sqft_x, "Sq ft"), (price_x, "Price/sq ft"), (total_x, "Total")):
                     c.drawRightString(x, y, t)
                 E._hr(c, y - 4, weight=0.7, col=GOLD); y -= 16
             cols()
@@ -249,8 +249,8 @@ def render_invoice_bytes(invoice: dict, customer: Optional[dict] = None, *, dry_
                         c.drawRightString(qty_x, y, E._qty_text(it))
                         c.drawRightString(unit_x, y, E._unit_text(it))
                         c.drawRightString(sqft_x, y, E.sqft_fraction(sq))
-                        price = f"{pps:,.2f}" if (sq is not None and pps is not None) else E._rate_text(it).replace("$", "")
-                        c.drawRightString(price_x, y, price)
+                        if sq is not None and pps is not None:
+                            c.drawRightString(price_x, y, f"{pps:,.2f}")
                         c.drawRightString(total_x, y, E._money(amt))
                     y -= E._DESC_LEADING
                 y -= E._ROW_GAP

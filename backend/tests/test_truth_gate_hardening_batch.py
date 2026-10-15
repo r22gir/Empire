@@ -341,6 +341,7 @@ class TestEmailRecipientWhitelist:
             "customer@gmail.com",
             "attacker@evil.com",
             "randomuser@yahoo.com",
+            "rafa22giraldo@gmail.com",
         ]:
             v = authorize_email_recipient(blocked)
             assert not v["recipient_authorized"], (

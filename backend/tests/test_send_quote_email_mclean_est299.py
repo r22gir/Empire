@@ -133,8 +133,9 @@ def test_est299_email_uses_mclean_areas_columns_deposit_and_founder_inbox(
 
     for area in ("U BANQUETTE", "L BANQUETTE", "MATERIAL"):
         assert area in upper, f"missing area {area}"
-    for col in ("Description", "Qty", "Unit", "Sq ft", "Price", "Total"):
+    for col in ("Description", "Qty", "Unit", "Sq ft", "Price/sq ft", "Total"):
         assert col in text, f"missing column {col}"
+    assert text.count("1,785.88") == 1  # Total only; Price/sq ft blank on the lot row
     assert "MANUAL_LINE" not in upper
     assert "manual_line" not in text
     assert "Deposit" in text
@@ -189,13 +190,16 @@ def test_est299_refuses_rafa22_cc_and_clients(isolated_empire_db, pdf_tmpdir, mo
     assert "rafa22giraldo" not in str(mail.sent[-1].get("cc") or "").lower()
 
 
-def test_stale_pdf_is_regenerated_before_resend(isolated_empire_db, pdf_tmpdir, monkeypatch):
+def test_stale_pdf_newer_than_updated_at_is_replaced(isolated_empire_db, pdf_tmpdir, monkeypatch):
+    """mtime newer than updated_at is still stale — always re-render on send."""
+    import time
+
     quote = _make_est299(isolated_empire_db)
     pdf_path = pdf_tmpdir / f"{quote['quote_number']}.pdf"
-    pdf_path.write_bytes(b"%PDF-1.4 stale weasyprint MANUAL_LINE")
-    old_mtime = 1_000_000_000  # 2001
-    os.utime(pdf_path, (old_mtime, old_mtime))
-    assert te._pdf_is_stale(str(pdf_path), quote)
+    stale = b"%PDF-1.4 stale weasyprint MANUAL_LINE\n" + b"X" * 200
+    pdf_path.write_bytes(stale)
+    future = time.time() + 365 * 24 * 3600
+    os.utime(pdf_path, (future, future))
 
     mail = _FakeMail()
     monkeypatch.setattr("app.services.max.email_service.EmailService", lambda: mail)
@@ -203,10 +207,12 @@ def test_stale_pdf_is_regenerated_before_resend(isolated_empire_db, pdf_tmpdir, 
     assert result.success, result.error
     fresh = Path(mail.sent[0]["attachments"][0]).read_bytes()
     assert fresh[:4] == b"%PDF"
+    assert fresh != stale
     assert b"MANUAL_LINE" not in fresh
     text = _pdf_text(fresh)
     assert "U BANQUETTE" in text.upper()
     assert "Deposit" in text
+    assert "Price/sq ft" in text
 
 
 def test_generate_pdf_for_quote_skips_weasyprint(isolated_empire_db, pdf_tmpdir, monkeypatch):
@@ -221,3 +227,130 @@ def test_generate_pdf_for_quote_skips_weasyprint(isolated_empire_db, pdf_tmpdir,
     data = Path(path).read_bytes()
     assert data[:4] == b"%PDF"
     assert "MANUAL_LINE" not in _pdf_text(data).upper()
+
+
+def test_send_quote_email_accepts_quote_number(isolated_empire_db, pdf_tmpdir, monkeypatch):
+    quote = _make_est299(isolated_empire_db)
+    mail = _FakeMail()
+    monkeypatch.setattr("app.services.max.email_service.EmailService", lambda: mail)
+    result = te._send_quote_email({"quote_id": quote["quote_number"], "to": "me"})
+    assert result.success, result.error
+    assert result.result["quote_id"] == quote["id"]
+    assert mail.sent[0]["to"] == "empirebox2026@gmail.com"
+
+
+def test_send_quote_email_refuses_duplicate_quote_number(isolated_empire_db, pdf_tmpdir, monkeypatch):
+    from app.db.database import get_db
+    from app.services.quote_service import create_quote
+
+    potthast = create_quote({
+        "customer_name": "Potthast",
+        "business_unit": "workroom",
+        "status": "draft",
+        "pricing_mode": "flat",
+        "line_items": [{
+            "category": "manual_line",
+            "description": "Seat",
+            "quantity": 1,
+            "unit": "ea",
+            "unit_price": 637,
+        }],
+    })
+    live = _make_est299(isolated_empire_db)
+    with get_db() as conn:
+        conn.execute(
+            "UPDATE quotes_v2 SET quote_number = ?, total = 637, "
+            "created_at = ? WHERE id = ?",
+            ("EST-2026-299", "2026-10-03 12:00:00", potthast["id"]),
+        )
+        conn.execute(
+            "UPDATE quotes_v2 SET quote_number = ?, total = 11328.65, "
+            "created_at = ? WHERE id = ?",
+            ("EST-2026-299", "2026-10-10 12:00:00", live["id"]),
+        )
+        conn.commit()
+
+    mail = _FakeMail()
+    monkeypatch.setattr("app.services.max.email_service.EmailService", lambda: mail)
+    result = te._send_quote_email({"quote_id": "EST-2026-299", "to": "me"})
+    assert not result.success
+    err = result.error or ""
+    assert "duplicated" in err.lower()
+    assert "Potthast" in err
+    assert "637" in err
+    assert "which one" in err.lower()
+    assert mail.sent == []
+
+    by_id = te._send_quote_email({"quote_id": live["id"], "to": "me"})
+    assert by_id.success, by_id.error
+    assert mail.sent[-1]["to"] == "empirebox2026@gmail.com"
+
+
+def test_send_email_quote_pdf_reroutes_to_send_quote_email(
+    isolated_empire_db, pdf_tmpdir, monkeypatch,
+):
+    import time
+
+    quote = _make_est299(isolated_empire_db)
+    stale_path = pdf_tmpdir / f"{quote['quote_number']}.pdf"
+    stale_path.write_bytes(b"%PDF-1.4 STALE MANUAL_LINE\n")
+    os.utime(stale_path, (time.time() + 365 * 24 * 3600,) * 2)
+
+    mail = _FakeMail()
+    monkeypatch.setattr("app.services.max.email_service.EmailService", lambda: mail)
+    result = te._send_email({
+        "to": "rafa22giraldo@gmail.com",
+        "subject": "Estimate PDF",
+        "body": "Please find attached",
+        "attachments": [str(stale_path)],
+        "cc": "rafa22giraldo@gmail.com",
+    })
+    assert result.success, result.error
+    assert result.tool == "send_quote_email"
+    sent = mail.sent[0]
+    assert sent["to"] == "empirebox2026@gmail.com"
+    assert sent.get("cc") in (None, "", [])
+    assert "rafa22giraldo" not in str(sent).lower()
+    fresh = Path(sent["attachments"][0]).read_bytes()
+    assert fresh[:4] == b"%PDF"
+    assert b"MANUAL_LINE" not in fresh
+    assert "Price/sq ft" in _pdf_text(fresh)
+
+
+def test_send_email_blocks_rafa22_to_and_cc(isolated_empire_db, monkeypatch):
+    mail = _FakeMail()
+    monkeypatch.setattr("app.services.max.email_service.EmailService", lambda: mail)
+    to_rafa = te._send_email({
+        "to": "rafa22giraldo@gmail.com",
+        "subject": "hello",
+        "body": "no attachment",
+    })
+    assert not to_rafa.success
+    assert "recipient_not_in_whitelist" in (to_rafa.error or "")
+    cc_rafa = te._send_email({
+        "to": "empirebox2026@gmail.com",
+        "cc": "rafa22giraldo@gmail.com",
+        "subject": "hello",
+        "body": "no attachment",
+    })
+    assert not cc_rafa.success
+    assert mail.sent == []
+
+
+def test_send_email_doc_attachment_founder_inbox_no_cc(isolated_empire_db, tmp_path, monkeypatch):
+    mail = _FakeMail()
+    monkeypatch.setattr("app.services.max.email_service.EmailService", lambda: mail)
+    invoice = tmp_path / "INV-2026-100.pdf"
+    invoice.write_bytes(b"%PDF-1.4 invoice")
+    result = te._send_email({
+        "to": "max@empirebox.store",
+        "cc": "workroom@empirebox.store",
+        "subject": "Invoice",
+        "body": "invoice attached",
+        "attachments": [str(invoice)],
+    })
+    assert result.success, result.error
+    sent = mail.sent[0]
+    assert sent["to"] == "empirebox2026@gmail.com"
+    assert sent.get("cc") in (None, "", [])
+    assert "rafa22giraldo" not in str(sent).lower()

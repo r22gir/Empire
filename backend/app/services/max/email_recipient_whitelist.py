@@ -48,18 +48,24 @@ DEFAULT_ALLOWED_KEYS = (
 # not fail-open.
 _INTERNAL_FALLBACK_ADDRESSES = (
     "empirebox2026@gmail.com",  # FOUNDER_EMAIL default
-    "rafa22giraldo@gmail.com",  # standing founder CC / personal
     "max@empirebox.store",      # Max From/Reply-To alias (founder-facing)
     "workroom@empirebox.store",
     "woodcraft@empirebox.store",
 )
 
 # Addresses that are Rafael himself — send_email to these needs no extra
-# chat confirmation beyond him asking Max to email him.
+# chat confirmation beyond him asking Max to email him. rafa22giraldo is
+# not a Max outbound destination (doc/invoice/estimate mail goes only to
+# empirebox2026@gmail.com).
 FOUNDER_SELF_EMAILS = frozenset({
     "empirebox2026@gmail.com",
-    "rafa22giraldo@gmail.com",
     "max@empirebox.store",
+})
+
+# Never an allowed send_email to/cc, even if FOUNDER_EMAIL or
+# MAX_EMAIL_ALLOWED_RECIPIENTS lists it.
+SEND_EMAIL_BLOCKED = frozenset({
+    "rafa22giraldo@gmail.com",
 })
 
 # Max estimate emails (send_quote_email) go only to this inbox. The Oct 8
@@ -158,6 +164,13 @@ def authorize_email_recipient(recipient: str | None) -> dict:
     (information leak); we DO surface enough metadata for the
     founder to fix the misconfiguration."""
     address = normalize_address(recipient)
+    if address in SEND_EMAIL_BLOCKED:
+        return {
+            "recipient_address": address,
+            "recipient_authorized": False,
+            "blocked_reason": "recipient_not_in_whitelist",
+            "whitelist_configured": True,
+        }
     allowed = allowed_recipient_addresses()
     configured = bool(allowed)
     authorized = bool(address and address in allowed)

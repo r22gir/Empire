@@ -3199,8 +3199,11 @@ def _send_quote_telegram(params: dict, desk: Optional[str] = None) -> ToolResult
         return ToolResult(tool="send_quote_telegram", success=False, error="No quote_id provided")
 
     # PHASE 2 · F5.2 — shared canonical-first resolver (not legacy JSON direct)
-    from app.services.quote_service import resolve_quote
-    quote = resolve_quote(quote_id)
+    from app.services.quote_service import DuplicateQuoteNumberError, resolve_quote_ref
+    try:
+        quote = resolve_quote_ref(quote_id)
+    except DuplicateQuoteNumberError as e:
+        return ToolResult(tool="send_quote_telegram", success=False, error=str(e))
     if not quote:
         return ToolResult(tool="send_quote_telegram", success=False, error=f"Quote {quote_id} not found")
 
@@ -3273,22 +3276,31 @@ def _quote_pdf_path(quote: dict) -> str:
     return os.path.join(str(dp.quote_pdf_dir()), f"{qn}.pdf")
 
 
-def _pdf_is_stale(pdf_path: str, quote: dict) -> bool:
-    """True when the on-disk PDF is missing or older than the quote's latest edit."""
-    if not os.path.exists(pdf_path) or os.path.getsize(pdf_path) < 8:
+_EST_PDF_NAME_RE = re.compile(r"^(EST-\d{4}-\d+)\.pdf$", re.I)
+_QUOTE_PDF_DIR_RE = re.compile(r"(?:^|[/\\])quotes[/\\]pdf[/\\]([^/\\]+)\.pdf$", re.I)
+
+
+def _is_quote_pdf_attachment(path: str) -> bool:
+    """True for quotes/pdf/*.pdf or EST-YYYY-NNN.pdf filenames."""
+    if not path:
+        return False
+    text = str(path)
+    base = os.path.basename(text)
+    if _EST_PDF_NAME_RE.match(base):
         return True
-    try:
-        with open(pdf_path, "rb") as handle:
-            if handle.read(4) != b"%PDF":
-                return True
-    except OSError:
-        return True
-    from app.services.quote_service import _as_utc
-    edited = _as_utc(quote.get("updated_at") or quote.get("created_at"))
-    if not edited:
-        return True
-    mtime = datetime.fromtimestamp(os.path.getmtime(pdf_path), tz=timezone.utc)
-    return mtime < edited
+    return bool(_QUOTE_PDF_DIR_RE.search(text.replace("\\", "/")))
+
+
+def _quote_ref_from_pdf_attachment(path: str) -> str | None:
+    text = str(path or "")
+    base = os.path.basename(text)
+    m = _EST_PDF_NAME_RE.match(base)
+    if m:
+        return m.group(1)
+    m = _QUOTE_PDF_DIR_RE.search(text.replace("\\", "/"))
+    if m:
+        return m.group(1)
+    return None
 
 
 def _estimate_email_stamp(quote: dict) -> str:
@@ -3309,12 +3321,15 @@ def _estimate_email_stamp(quote: dict) -> str:
 
 
 async def _generate_pdf_for_quote(quote_id: str) -> str:
-    """Generate the McLean estimate PDF (same renderer as GET /quotes/{id}/pdf).
+    """Generate the estimate PDF for a quote.
 
-    Writes quotes/pdf/<number>.pdf. v2 quotes never go through the WeasyPrint
-    portrait template. PHASE 2 · F5.2: uses the shared resolver.
+    Quotes WITH line items use the McLean landscape renderer (same as
+    GET /quotes/{id}/pdf). Quotes WITHOUT line items (legacy room/tier)
+    keep the WeasyPrint generate_pdf path, including skip/verification
+    and QuotePdfGenerationError when verification returns JSON.
     """
     from fastapi import HTTPException
+    from starlette.responses import JSONResponse
 
     from app.services.quote_service import resolve_quote
     from app.services.estimates.mclean_estimate_pdf import render_and_save_mclean_pdf
@@ -3322,10 +3337,35 @@ async def _generate_pdf_for_quote(quote_id: str) -> str:
     quote = resolve_quote(quote_id)
     if not quote:
         raise HTTPException(status_code=404, detail=f"Quote {quote_id} not found")
+
+    items = quote.get("line_items") or quote.get("items") or []
     pdf_dir = str(dp.quote_pdf_dir())
     os.makedirs(pdf_dir, exist_ok=True)
-    _pdf_bytes, pdf_path = render_and_save_mclean_pdf(quote, pdf_dir=pdf_dir)
-    if not os.path.exists(pdf_path) or os.path.getsize(pdf_path) == 0:
+
+    if items:
+        _pdf_bytes, pdf_path = render_and_save_mclean_pdf(quote, pdf_dir=pdf_dir)
+        if not os.path.exists(pdf_path) or os.path.getsize(pdf_path) == 0:
+            raise QuotePdfGenerationError("PDF generation failed: file was not written")
+        return pdf_path
+
+    from app.routers.quotes import generate_pdf as _gen_pdf_endpoint
+    status = (quote.get("status") or "").lower()
+    verified_statuses = {"sent", "accepted", "in_production", "completed", "cancelled"}
+    skip = (
+        (quote.get("source") or "").startswith("max_")
+        or status in verified_statuses
+    )
+    response = await _gen_pdf_endpoint(quote_id, skip_verification=skip)
+    if isinstance(response, JSONResponse):
+        try:
+            content = json.loads(response.body.decode())
+        except Exception:
+            content = {}
+        raise QuotePdfGenerationError(_pdf_error_from_verification_payload(content))
+
+    quote_number = quote.get("quote_number", quote_id)
+    pdf_path = os.path.join(pdf_dir, f"{quote_number}.pdf")
+    if not os.path.exists(pdf_path):
         raise QuotePdfGenerationError("PDF generation failed: file was not written")
     return pdf_path
 
@@ -3433,8 +3473,41 @@ def _send_email(params: dict, desk: Optional[str] = None) -> ToolResult:
     # structured verdict (no address exposed in the error). The cc
     # list is checked too — passing `to=okaddress, cc=client@x.com`
     # is also rejected.
-    attachments = params.get("attachments", [])
+    attachments = params.get("attachments") or []
+    if isinstance(attachments, (str, dict)):
+        attachments = [attachments]
     cc = params.get("cc")
+
+    # Quote PDFs must go through send_quote_email (fresh McLean render,
+    # founder inbox only). Max cannot attach quotes/pdf/EST-*.pdf here
+    # to skip regeneration or the founder-only rule.
+    quote_refs: list[str] = []
+    leftover_atts: list = []
+    for att in attachments:
+        path = att
+        if isinstance(att, dict):
+            path = att.get("path") or att.get("file") or att.get("file_id") or ""
+        path_s = str(path or "")
+        ref = _quote_ref_from_pdf_attachment(path_s) if _is_quote_pdf_attachment(path_s) else None
+        if ref:
+            if ref not in quote_refs:
+                quote_refs.append(ref)
+        else:
+            leftover_atts.append(att)
+    if quote_refs:
+        from app.services.max.email_recipient_whitelist import ESTIMATE_EMAIL_ONLY
+        routed = dict(params)
+        routed["quote_ids"] = quote_refs
+        routed["to"] = ESTIMATE_EMAIL_ONLY
+        routed["cc"] = None
+        routed["attachments"] = leftover_atts
+        return _send_quote_email(routed, desk)
+
+    # Document / invoice attachments go only to empirebox2026@gmail.com, no CC.
+    if leftover_atts:
+        to = MAX_DOC_EMAIL_TO
+        cc = None
+
     verdict_to = authorize_email_recipient(to)
     if not verdict_to["recipient_authorized"]:
         logger.warning(
@@ -3618,7 +3691,7 @@ def _send_quote_email(params: dict, desk: Optional[str] = None) -> ToolResult:
             f"Attachment not available: {bad_ref}. Run find_files and pass its file_id or path "
             "(secrets and family-edition files are never attached). Nothing was sent."))
 
-    from app.services.quote_service import resolve_quote
+    from app.services.quote_service import DuplicateQuoteNumberError, resolve_quote_ref
 
     pdf_dir = str(dp.quote_pdf_dir())
     os.makedirs(pdf_dir, exist_ok=True)
@@ -3626,23 +3699,26 @@ def _send_quote_email(params: dict, desk: Optional[str] = None) -> ToolResult:
     quotes: list[dict] = []
     pdf_paths: list[str] = []
     for qid in quote_ids:
-        quote = resolve_quote(qid)
+        try:
+            quote = resolve_quote_ref(qid)
+        except DuplicateQuoteNumberError as e:
+            return ToolResult(tool="send_quote_email", success=False, error=str(e))
         if not quote:
             return ToolResult(
                 tool="send_quote_email", success=False,
                 error=f"Quote {qid} not found",
             )
-        pdf_path = _quote_pdf_path(quote)
-        if _pdf_is_stale(pdf_path, quote):
-            try:
-                pdf_path = _run_async(_generate_pdf_for_quote(quote["id"]))
-            except QuotePdfGenerationError as e:
-                return ToolResult(tool="send_quote_email", success=False, error=str(e))
-            except Exception as e:
-                return ToolResult(
-                    tool="send_quote_email", success=False,
-                    error=f"PDF generation failed for {qid}: {e}",
-                )
+        # Always re-render. An on-disk PDF with mtime newer than updated_at
+        # can still be a pre-PR / stale bytes copy.
+        try:
+            pdf_path = _run_async(_generate_pdf_for_quote(quote["id"]))
+        except QuotePdfGenerationError as e:
+            return ToolResult(tool="send_quote_email", success=False, error=str(e))
+        except Exception as e:
+            return ToolResult(
+                tool="send_quote_email", success=False,
+                error=f"PDF generation failed for {qid}: {e}",
+            )
         quotes.append(quote)
         pdf_paths.append(pdf_path)
 
@@ -6450,7 +6526,7 @@ If a tool call fails with "Unknown tool", check the name against this list.
 - **draft_estimate_and_presentation** — Draft only. Builds the header-B estimate and the landscape presentation from `openings` (width, height, panels, optional sheers, install_flat, photos). Saves a draft quote. Never emails, never creates a Square link. The deposit line stays `Pay deposit online: [Square payment link]`. Re-line options per opening: default is "Re-line with lining and bump" ($150/width + lining + bump yardage); pass `"bump": false` for **"Re-line with lining (no bump)"** — lining only, no bump material, labor $125/width (Pricing Studio rule `reline_no_bump_per_width`). Widths are counted the same way for both (per 48" finished panel at 100% fullness). Use the no-bump option only when the founder/client asks for it; never change existing quotes.
   `{"tool": "draft_estimate_and_presentation", "billed_by": "nelmas_workroom", "project": {"address": "9408 Old Courthouse Rd"}, "openings": [{"room": "Living Room", "width": 160, "height": 119.75, "panels": 2}]}`
 - **create_engine_quote** — CANONICAL. Creates a quote in `quotes_v2` (SQL) via `quote_service.create_quote`. Catalog categories route through the pricing engine (proposed_price + computed_json returned). Multi-line: pass `line_items[]`. Accepts `business_unit` (default "workroom"). Returns `store: "quotes_v2"`, `engine: "pricing_engine_v1"`, per-line `proposed_price` + `final_price`, plus `quote_number`. **Use this for all new quotes.** For drawn pieces (bench, banquette, cushion, back, headboard, panel, pillow) put the real inch dimensions on each line (`width`, `height`, `depth`, or `inputs`) so its idea diagram renders; a line without dimensions simply gets no diagram.
-  Upholstery estimates (Rafael 10/8): group lines by area with `room` ("U banquette", "L banquette", "Material"); for pieces priced by area pass `sq_ft` (per item) and `price_per_sqft` (category "manual_line"; the total is computed); description = piece name, then a second line with the measurements in fractions (e.g. "Seat back — main\n249 3/4\" run · back 26 3/4\" · 12\" channels"). The PDF shows Description | Qty | Unit | Sq ft | Price | Total, a subtotal per area, then grand total, deposit and balance.
+  Upholstery estimates (Rafael 10/8): group lines by area with `room` ("U banquette", "L banquette", "Material"); for pieces priced by area pass `sq_ft` (per item) and `price_per_sqft` (category "manual_line"; the total is computed); description = piece name, then a second line with the measurements in fractions (e.g. "Seat back — main\n249 3/4\" run · back 26 3/4\" · 12\" channels"). The PDF shows Description | Qty | Unit | Sq ft | Price/sq ft | Total, a subtotal per area, then grand total, deposit and balance.
   `{"tool": "create_engine_quote", "customer_name": "...", "business_unit": "workroom", "line_items": [{"category": "drapery", "description": "...", "inputs": {"window_width_in": 84, "length_in": 96, "fullness": 2.5, "lining_type": "blackout"}}, {"category": "hardware_rod_1_1_8", "inputs": {"width_in": 84}}, {"category": "hardware_rings", "inputs": {"widths": 4, "packs": 4}}, {"category": "hardware_brackets", "inputs": {"width_in": 84}}]}`
   Categories (from PRICING_SPECS in `backend/app/data/product_catalog.py`): `drapery`, `roman_shade`, `valance`, `cornice`, `fabric_only`, `hardware_rod_1_1_8`, `hardware_ripplefold_track`, `hardware_rings`, `hardware_brackets`, `labor`, `pillow`, `cover`. NEW (D38 / H77): `com_fabric` (the one permitted $0 line — pass `customer_supplied: true` with `fabric_name` and `quantity`), `hardware_rod_set` ($325 flat for 4-8 ft, founder supplies `override_price` beyond), `hardware_ripplefold_set` ($250 flat for 4-8 ft, founder supplies `override_price` beyond), `installation` (pass `treatment: roman_shade` $95/each or `treatment: drapery` $145 for first 8 ft), `manual_line` (pass-through: `description` + `unit_price` + `quantity`). PricingInputError → HTTP 400 (never silent fallback for catalog items).
 
@@ -6514,10 +6590,10 @@ State machine: `draft → founder_review → sent → accepted → in_production
 - **send_quote_telegram** — Generate a quote PDF and send it to the founder via Telegram
   `{"tool": "send_quote_telegram", "quote_id": "abc123"}`
   Use this after creating/saving a quote to deliver the PDF directly to Telegram.
-- **send_email** — Send an email with optional file attachments
-  `{"tool": "send_email", "to": "client@example.com", "subject": "Your Estimate", "body": "<h2>Hello</h2><p>HTML body here</p>", "attachments": ["/path/to/file.pdf"], "cc": "optional@cc.com"}`
+- **send_email** — Send an email with optional file attachments. Document and invoice emails go ONLY to empirebox2026@gmail.com with no CC. Never to/cc rafa22giraldo@gmail.com. Attaching a quote PDF (quotes/pdf/EST-*.pdf) is rerouted through send_quote_email (fresh render, founder inbox).
+  `{"tool": "send_email", "to": "me", "subject": "Document", "body": "<h2>Hello</h2><p>HTML body here</p>", "attachments": ["/path/to/file.pdf"]}`
   IMPORTANT: When sending a PDF, you MUST include the file path in the "attachments" array. Without it, the email arrives with no attachment.
-- **send_quote_email** — Generate McLean estimate PDF(s) and email them in ONE email, only to empirebox2026@gmail.com (use to="me"). Never CC rafa22giraldo@gmail.com, never email clients. Several quotes → `quote_ids: [...]`; mockups, drawings or other files from find_files ride along in the same email with `attachments: [file_id or path, ...]`. Never split one send into several emails.
+- **send_quote_email** — Re-render McLean estimate PDF(s) on every send and email them in ONE email, only to empirebox2026@gmail.com (use to="me"). Accepts quote id or quote number (EST-2026-299). If the number is duplicated, the tool refuses and asks which id. Never CC rafa22giraldo@gmail.com, never email clients. Several quotes → `quote_ids: [...]`; mockups, drawings or other files from find_files ride along in the same email with `attachments: [file_id or path, ...]`. Never split one send into several emails.
   `{"tool": "send_quote_email", "quote_id": "abc123", "to": "me"}`
   `{"tool": "send_quote_email", "quote_ids": ["EST-2026-299", "EST-2026-300"], "attachments": ["/home/rg/jobs/marleys-hyattsville/x/MOCKUP.pdf"], "to": "me"}`
   Use this after creating/saving a quote to email the PDF to the founder inbox.

@@ -1,7 +1,7 @@
 """2026-10-08 (Rafael): upholstery estimate format.
 
 Grouped by area (U banquette, L banquette, material); columns Description | Qty | Unit |
-Sq ft | Price | Total; subtotal per area, then grand total, deposit, balance; measurements in
+Sq ft | Price/sq ft | Total; subtotal per area, then grand total, deposit, balance; measurements in
 the sub-text in fractions. Runs on the isolated test DB (never live data).
 """
 import subprocess
@@ -49,13 +49,16 @@ def test_create_and_render_grouped_sqft_estimate(isolated_empire_db):
     assert round(items[0]["subtotal"], 2) == round(46.39 * 65, 2)
     assert round(items[1]["subtotal"], 2) == round(31.22 * 45, 2)
     text = _pdf_text(render_mclean_estimate_bytes(q))
-    for col in ("Description", "Qty", "Unit", "Sq ft", "Price", "Total"):
+    for col in ("Description", "Qty", "Unit", "Sq ft", "Price/sq ft", "Total"):
         assert col in text
     for area in ("U BANQUETTE", "L BANQUETTE", "MATERIAL"):
         assert area in text.upper()
     # Sq ft is a fraction (46 3/8), never the stored decimal 46.39.
     assert "65.00" in text and "$3,015.35" in text
-    assert "46 3/8" in text or "46.39" not in text
+    assert "46 3/8" in text
+    assert "46.39" not in text
+    # Material lot is not priced per sq ft — that cell is blank (rate is Total only).
+    assert text.count("1,785.88") == 1
     u_sub = round(46.39 * 65 + 31.22 * 45, 2)
     assert f"${u_sub:,.2f}" in text  # U banquette subtotal
     assert "SUBTOTAL" in text.upper() and "TOTAL" in text.upper()
@@ -66,6 +69,20 @@ def test_create_and_render_grouped_sqft_estimate(isolated_empire_db):
     # totals: area subtotals in the table, then Grand total / Deposit / Balance (no "Quoted / already given")
     assert "Grand total" in text and "Deposit (50%)" in text and "Balance" in text
     assert "already given" not in text and "priced / quoted only" not in text
+    assert "Paid to date" not in text
+
+
+def test_paid_to_date_line_before_balance_when_payments_exist(isolated_empire_db):
+    res = execute_tool({"tool": "create_engine_quote", "customer_name": "Paid Banquette Co",
+                        "line_items": _lines()})
+    assert res.success, res.error
+    q = dict(get_quote(res.result["quote_id"]))
+    q["deposit_paid"] = 500.0
+    q["payments"] = [{"amount": 500.0, "date": "2026-10-01"}]
+    text = _pdf_text(render_mclean_estimate_bytes(q))
+    assert "Paid to date" in text
+    assert "$500.00" in text
+    assert text.index("Paid to date") < text.index("Balance")
 
 
 def test_plain_fractions_in_replies():

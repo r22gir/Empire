@@ -52,6 +52,46 @@ async def test_generate_pdf_for_quote_canonical_manual_lines(draft_manual_line_q
     assert __import__("os").path.getsize(pdf_path) > 0
 
 
+def test_send_quote_email_surfaces_verifier_reasons_for_legacy_quote(tmp_path, monkeypatch):
+    """Legacy tier quotes that fail verification return specific reasons, not a generic error."""
+    from app.services.data_paths import quotes_data_dir
+    from app.services.max.tool_executor import _send_quote_email
+
+    legacy_id = f"leg{uuid.uuid4().hex[:6]}"
+    quote_number = f"EST-LEG-{legacy_id}"
+    legacy = {
+        "id": legacy_id,
+        "quote_number": quote_number,
+        "customer_name": "Legacy Tier Fail",
+        "total": 100,
+        "status": "draft",
+        "rooms": [{
+            "name": "LR",
+            "windows": [{"name": "W1", "treatmentType": "ripplefold"}],
+        }],
+    }
+    quotes_dir = quotes_data_dir()
+    quotes_dir.mkdir(parents=True, exist_ok=True)
+    legacy_path = quotes_dir / f"{legacy_id}.json"
+    try:
+        with open(legacy_path, "w") as f:
+            json.dump(legacy, f)
+
+        monkeypatch.setenv("FOUNDER_EMAIL", "empirebox2026@gmail.com")
+        result = _send_quote_email({
+            "quote_id": legacy_id,
+            "to": "empirebox2026@gmail.com",
+        })
+        assert not result.success
+        err = result.error or ""
+        assert "PDF generation failed" in err
+        assert "No pricing tiers found in quote" in err
+        assert err != "PDF generation failed"
+    finally:
+        if legacy_path.exists():
+            legacy_path.unlink()
+
+
 def test_send_quote_email_json_quote_uses_mclean_not_weasy_verification(tmp_path, monkeypatch):
     """Email attachments render through McLean; WeasyPrint verification is not the gate."""
     from app.services.data_paths import quotes_data_dir

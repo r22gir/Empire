@@ -1552,6 +1552,84 @@ def resolve_quote(quote_id: str) -> Optional[dict]:
     return None
 
 
+class DuplicateQuoteNumberError(ValueError):
+    """More than one quote shares a human-facing number (e.g. EST-2026-299)."""
+
+    def __init__(self, quote_number: str, candidates: list[dict]):
+        self.quote_number = quote_number
+        self.candidates = candidates
+        super().__init__(_format_duplicate_quote_number(quote_number, candidates))
+
+
+def _format_duplicate_quote_number(quote_number: str, candidates: list[dict]) -> str:
+    lines = [f"Quote number {quote_number} is duplicated. Which one?"]
+    for q in candidates:
+        name = (q.get("customer_name") or "Unknown").strip() or "Unknown"
+        try:
+            total = float(q.get("total") or 0)
+        except (TypeError, ValueError):
+            total = 0.0
+        dt = _as_utc(q.get("created_at") or q.get("updated_at"))
+        when = dt.strftime("%b %d, %Y").replace(" 0", " ") if dt else "unknown date"
+        qid = q.get("id") or "?"
+        lines.append(f"- {qid}: {name} ${total:,.2f} ({when})")
+    lines.append("Give the quote id, not just the number.")
+    return "\n".join(lines)
+
+
+def list_quotes_by_number(quote_number: str) -> list[dict]:
+    """Every quotes_v2 row and legacy JSON file with this quote number."""
+    if not quote_number:
+        return []
+    wanted = str(quote_number).strip()
+    wanted_upper = wanted.upper()
+    out: list[dict] = []
+    seen: set[str] = set()
+    try:
+        with get_db() as conn:
+            rows = conn.execute(
+                "SELECT * FROM quotes_v2 WHERE upper(quote_number) = ? "
+                "ORDER BY created_at, id",
+                (wanted_upper,),
+            ).fetchall()
+            for row in rows:
+                q = _hydrate_quote_row(conn, row)
+                qid = str(q.get("id") or "")
+                if not qid or qid in seen:
+                    continue
+                seen.add(qid)
+                out.append(q)
+    except Exception:
+        pass
+    for data in _legacy_jsons_by_number(wanted):
+        qid = str(data.get("id") or "")
+        if not qid or qid in seen:
+            continue
+        seen.add(qid)
+        out.append(data)
+    return out
+
+
+def resolve_quote_ref(ref: str) -> Optional[dict]:
+    """Resolve a quote by id or by quote number.
+
+    Id wins (even when the number is duplicated). A bare number that matches
+    two rows raises DuplicateQuoteNumberError so the caller can ask which one.
+    """
+    if not ref:
+        return None
+    token = str(ref).strip()
+    q = resolve_quote(token)
+    if q:
+        return q
+    matches = list_quotes_by_number(token)
+    if not matches:
+        return None
+    if len(matches) == 1:
+        return matches[0]
+    raise DuplicateQuoteNumberError(token, matches)
+
+
 def _legacy_json_path(quote_id: str):
     from pathlib import Path
     from app.services.data_paths import quotes_data_dir
@@ -1572,14 +1650,15 @@ def _load_legacy_json_file(quote_id: str) -> Optional[dict]:
     return None
 
 
-def _legacy_json_by_number(quote_number: str) -> Optional[dict]:
+def _legacy_jsons_by_number(quote_number: str) -> list[dict]:
     if not quote_number:
-        return None
+        return []
+    found: list[dict] = []
     try:
         from app.services.data_paths import quotes_data_dir
         folder = quotes_data_dir()
         if not folder.exists():
-            return None
+            return []
         wanted = str(quote_number).strip().upper()
         for path in folder.glob("*.json"):
             if path.name.startswith("_") or "_verification" in path.name:
@@ -1592,10 +1671,15 @@ def _legacy_json_by_number(quote_number: str) -> Optional[dict]:
                 continue
             if str(data.get("quote_number") or "").strip().upper() == wanted:
                 data.setdefault("id", path.stem)
-                return data
+                found.append(data)
     except Exception as exc:
         logger.warning("legacy quote scan failed: %s", exc)
-    return None
+    return found
+
+
+def _legacy_json_by_number(quote_number: str) -> Optional[dict]:
+    found = _legacy_jsons_by_number(quote_number)
+    return found[0] if found else None
 
 
 def _utc_now() -> datetime:
