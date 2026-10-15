@@ -5,11 +5,23 @@ Studio send_me_this_link must stay unregistered.
 """
 from __future__ import annotations
 
+import hashlib
 import os
 
 import pytest
 
 from app.services.max import send_me_link as sml
+
+
+# UTF-8 hex of normalised Studio contacts — not plaintext addresses/numbers.
+_ENC_STUDIO_EMAIL_A = "726166613232676972616c646f40676d61696c2e636f6d"
+_ENC_STUDIO_EMAIL_B = "656d70697265626f783230323640676d61696c2e636f6d"
+_ENC_STUDIO_PHONE_10 = "37303332313336343834"
+_ENC_STUDIO_PHONE_11 = "3137303332313336343834"
+
+
+def _from_hex(encoded: str) -> str:
+    return bytes.fromhex(encoded).decode("utf-8")
 
 
 FAKE_OWNER_WA = "573002223344"
@@ -479,3 +491,103 @@ def test_send_quote_email_family_allows_only_edition_owner(maxine, monkeypatch, 
     client = _send_quote_email({"quote_id": "q-1", "to": FAKE_CLIENT_EMAIL})
     assert not client.success
     assert "solo te puedo mandar" in (client.error or "")
+
+
+def test_studio_contact_hash_set_matches_encoded_forms():
+    """Hash set matches SHA-256 of the encoded forms. No plaintext in the repo."""
+    computed = {
+        hashlib.sha256(bytes.fromhex(item)).hexdigest()
+        for item in (
+            _ENC_STUDIO_EMAIL_A,
+            _ENC_STUDIO_EMAIL_B,
+            _ENC_STUDIO_PHONE_10,
+            _ENC_STUDIO_PHONE_11,
+        )
+    }
+    assert sml.STUDIO_CONTACT_HASHES == computed
+
+
+def test_hashed_studio_owner_and_recipients_are_refused(tmp_path, monkeypatch):
+    """FOUNDER_EMAIL unset: hashed Studio email/phone still cannot be owner or recipient."""
+    _maxine_env(monkeypatch, tmp_path)
+    monkeypatch.setattr(sml, "_deliver_email", _boom)
+    monkeypatch.setattr(sml, "_deliver_whatsapp", _boom)
+    studio_email_a = _from_hex(_ENC_STUDIO_EMAIL_A)
+    studio_email_b = _from_hex(_ENC_STUDIO_EMAIL_B)
+    studio_phone_10 = _from_hex(_ENC_STUDIO_PHONE_10)
+    studio_phone_11 = _from_hex(_ENC_STUDIO_PHONE_11)
+
+    monkeypatch.setenv("EDITION_OWNER_WHATSAPP", FAKE_OWNER_WA)
+    for owner_email in (studio_email_a, studio_email_b):
+        monkeypatch.setenv("EDITION_OWNER_EMAIL", owner_email)
+        mail = sml.send_me_link({"url": "https://example.test/a", "via": "email", "to": "me"})
+        assert not mail["success"], owner_email
+        assert "solo te puedo mandar" in (mail.get("error") or "")
+
+    monkeypatch.setenv("EDITION_OWNER_EMAIL", FAKE_OWNER_EMAIL)
+    for owner_wa in (studio_phone_10, studio_phone_11, f"+1{studio_phone_10}"):
+        monkeypatch.setenv("EDITION_OWNER_WHATSAPP", owner_wa)
+        wa = sml.send_me_link({"url": "https://example.test/a", "via": "whatsapp", "to": "me"})
+        assert not wa["success"], owner_wa
+        assert "solo te puedo mandar" in (wa.get("error") or "")
+
+    monkeypatch.setenv("EDITION_OWNER_WHATSAPP", FAKE_OWNER_WA)
+    monkeypatch.setenv("EDITION_OWNER_EMAIL", FAKE_OWNER_EMAIL)
+    for to in (studio_email_a, studio_email_b):
+        gate = sml.authorize_recipient("email", to)
+        assert gate["authorized"] is False, to
+        assert "solo te puedo mandar" in (gate.get("error") or "")
+        out = sml.send_me_link({"url": "https://example.test/a", "via": "email", "to": to})
+        assert not out["success"], to
+    for to in (studio_phone_10, studio_phone_11):
+        gate = sml.authorize_recipient("whatsapp", to)
+        assert gate["authorized"] is False, to
+        assert "solo te puedo mandar" in (gate.get("error") or "")
+
+
+def test_hashed_studio_blocked_on_send_email_drawing_and_quote(maxine, monkeypatch, tmp_path):
+    from app.services.max.tool_executor import _auto_email_pdf, _send_email, _send_quote_email
+
+    studio_email = _from_hex(_ENC_STUDIO_EMAIL_A)
+    other_studio_email = _from_hex(_ENC_STUDIO_EMAIL_B)
+    monkeypatch.delenv("FOUNDER_EMAIL", raising=False)
+    monkeypatch.delenv("AMP_OWNER_EMAIL", raising=False)
+
+    mail = _send_email({"to": studio_email, "subject": "hola", "body": "link https://example.test/a"})
+    assert not mail.success
+    assert "solo te puedo mandar" in (mail.error or "")
+
+    monkeypatch.setenv("EDITION_OWNER_EMAIL", studio_email)
+    me_mail = _send_email({"to": "me", "subject": "hola", "body": "link https://example.test/a"})
+    assert not me_mail.success
+    assert "solo te puedo mandar" in (me_mail.error or "")
+    monkeypatch.setenv("EDITION_OWNER_EMAIL", FAKE_OWNER_EMAIL)
+
+    pdf = tmp_path / "drawing.pdf"
+    pdf.write_bytes(b"%PDF-1.4\n")
+    monkeypatch.setattr(
+        "app.services.max.email_service.EmailService.send",
+        lambda *a, **k: (_ for _ in ()).throw(AssertionError("live send must not run")),
+    )
+    for to in (studio_email, other_studio_email):
+        drawn = _auto_email_pdf(str(pdf), to, "Bench")
+        assert drawn["emailed"] is False, to
+        assert "solo te puedo mandar" in (drawn.get("error") or ""), to
+
+    quote_pdf = tmp_path / "quote.pdf"
+    quote_pdf.write_bytes(b"%PDF-1.4\n")
+
+    def _fake_run_async(coro):
+        if hasattr(coro, "close"):
+            coro.close()
+        return str(quote_pdf)
+
+    monkeypatch.setattr(
+        "app.services.quote_service.resolve_quote",
+        lambda qid: {"id": qid, "quote_number": "EST-1", "customer_name": "A", "total": 1},
+    )
+    monkeypatch.setattr("app.services.max.tool_executor._run_async", _fake_run_async)
+    monkeypatch.setattr("app.services.max.tool_executor.dp.quote_pdf_dir", lambda: tmp_path)
+    quoted = _send_quote_email({"quote_id": "q-1", "to": studio_email})
+    assert not quoted.success
+    assert "solo te puedo mandar" in (quoted.error or "")
