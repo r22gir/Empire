@@ -13,17 +13,6 @@ import pytest
 from app.services.max import send_me_link as sml
 
 
-# UTF-8 hex of normalised Studio contacts — not plaintext addresses/numbers.
-_ENC_STUDIO_EMAIL_A = "726166613232676972616c646f40676d61696c2e636f6d"
-_ENC_STUDIO_EMAIL_B = "656d70697265626f783230323640676d61696c2e636f6d"
-_ENC_STUDIO_PHONE_10 = "37303332313336343834"
-_ENC_STUDIO_PHONE_11 = "3137303332313336343834"
-
-
-def _from_hex(encoded: str) -> str:
-    return bytes.fromhex(encoded).decode("utf-8")
-
-
 FAKE_OWNER_WA = "573002223344"
 FAKE_OWNER_EMAIL = "camilo.owner@example.com"
 FAKE_OWNER_EMAIL_2 = "camilo.work@example.com"
@@ -33,6 +22,29 @@ FAKE_CLIENT_EMAIL = "client@example.com"
 FAKE_CLIENT_WA = "15551234999"
 FAKE_FOUNDER_EMAIL = "founder.internal@example.com"
 FAKE_AMP_OWNER_EMAIL = "amp.env-owner@example.com"
+FAKE_DENIED_EMAIL = "studio.denied@example.com"
+FAKE_DENIED_EMAIL_2 = "founder.denied@example.com"
+FAKE_DENIED_PHONE_10 = "5550100999"
+FAKE_DENIED_PHONE_11 = "15550100999"
+
+
+def _sha(value: str) -> str:
+    return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+
+def _patch_studio_hashes(monkeypatch):
+    monkeypatch.setattr(
+        sml,
+        "STUDIO_CONTACT_HASHES",
+        frozenset(
+            {
+                _sha(FAKE_DENIED_EMAIL),
+                _sha(FAKE_DENIED_EMAIL_2),
+                _sha(FAKE_DENIED_PHONE_10),
+                _sha(FAKE_DENIED_PHONE_11),
+            }
+        ),
+    )
 
 
 def _maxine_env(monkeypatch, tmp_path):
@@ -493,15 +505,36 @@ def test_send_quote_email_family_allows_only_edition_owner(maxine, monkeypatch, 
     assert "solo te puedo mandar" in (client.error or "")
 
 
-def test_studio_contact_hash_set_matches_encoded_forms():
-    """Hash set matches SHA-256 of the encoded forms. No plaintext in the repo."""
+def test_studio_contact_hash_set_is_opaque():
+    """Production hashes are opaque SHA-256 hex. No decodable contacts in tests."""
+    hashes = sml.STUDIO_CONTACT_HASHES
+    assert len(hashes) == 4
+    for item in hashes:
+        assert isinstance(item, str)
+        assert len(item) == 64
+        assert all(c in "0123456789abcdef" for c in item)
+    for fake in (
+        FAKE_OWNER_EMAIL,
+        FAKE_OWNER_EMAIL_2,
+        FAKE_SIBLING_EMAIL,
+        FAKE_DENIED_EMAIL,
+        FAKE_DENIED_EMAIL_2,
+        FAKE_DENIED_PHONE_10,
+        FAKE_DENIED_PHONE_11,
+    ):
+        assert _sha(fake) not in hashes
+
+
+def test_studio_contact_hash_set_matches_fake_forms(monkeypatch):
+    """Hash set matches SHA-256 of fake example.com emails and fake phones."""
+    _patch_studio_hashes(monkeypatch)
     computed = {
-        hashlib.sha256(bytes.fromhex(item)).hexdigest()
+        _sha(item)
         for item in (
-            _ENC_STUDIO_EMAIL_A,
-            _ENC_STUDIO_EMAIL_B,
-            _ENC_STUDIO_PHONE_10,
-            _ENC_STUDIO_PHONE_11,
+            FAKE_DENIED_EMAIL,
+            FAKE_DENIED_EMAIL_2,
+            FAKE_DENIED_PHONE_10,
+            FAKE_DENIED_PHONE_11,
         )
     }
     assert sml.STUDIO_CONTACT_HASHES == computed
@@ -510,22 +543,19 @@ def test_studio_contact_hash_set_matches_encoded_forms():
 def test_hashed_studio_owner_and_recipients_are_refused(tmp_path, monkeypatch):
     """FOUNDER_EMAIL unset: hashed Studio email/phone still cannot be owner or recipient."""
     _maxine_env(monkeypatch, tmp_path)
+    _patch_studio_hashes(monkeypatch)
     monkeypatch.setattr(sml, "_deliver_email", _boom)
     monkeypatch.setattr(sml, "_deliver_whatsapp", _boom)
-    studio_email_a = _from_hex(_ENC_STUDIO_EMAIL_A)
-    studio_email_b = _from_hex(_ENC_STUDIO_EMAIL_B)
-    studio_phone_10 = _from_hex(_ENC_STUDIO_PHONE_10)
-    studio_phone_11 = _from_hex(_ENC_STUDIO_PHONE_11)
 
     monkeypatch.setenv("EDITION_OWNER_WHATSAPP", FAKE_OWNER_WA)
-    for owner_email in (studio_email_a, studio_email_b):
+    for owner_email in (FAKE_DENIED_EMAIL, FAKE_DENIED_EMAIL_2):
         monkeypatch.setenv("EDITION_OWNER_EMAIL", owner_email)
         mail = sml.send_me_link({"url": "https://example.test/a", "via": "email", "to": "me"})
         assert not mail["success"], owner_email
         assert "solo te puedo mandar" in (mail.get("error") or "")
 
     monkeypatch.setenv("EDITION_OWNER_EMAIL", FAKE_OWNER_EMAIL)
-    for owner_wa in (studio_phone_10, studio_phone_11, f"+1{studio_phone_10}"):
+    for owner_wa in (FAKE_DENIED_PHONE_10, FAKE_DENIED_PHONE_11, f"+1{FAKE_DENIED_PHONE_10}"):
         monkeypatch.setenv("EDITION_OWNER_WHATSAPP", owner_wa)
         wa = sml.send_me_link({"url": "https://example.test/a", "via": "whatsapp", "to": "me"})
         assert not wa["success"], owner_wa
@@ -533,13 +563,13 @@ def test_hashed_studio_owner_and_recipients_are_refused(tmp_path, monkeypatch):
 
     monkeypatch.setenv("EDITION_OWNER_WHATSAPP", FAKE_OWNER_WA)
     monkeypatch.setenv("EDITION_OWNER_EMAIL", FAKE_OWNER_EMAIL)
-    for to in (studio_email_a, studio_email_b):
+    for to in (FAKE_DENIED_EMAIL, FAKE_DENIED_EMAIL_2):
         gate = sml.authorize_recipient("email", to)
         assert gate["authorized"] is False, to
         assert "solo te puedo mandar" in (gate.get("error") or "")
         out = sml.send_me_link({"url": "https://example.test/a", "via": "email", "to": to})
         assert not out["success"], to
-    for to in (studio_phone_10, studio_phone_11):
+    for to in (FAKE_DENIED_PHONE_10, FAKE_DENIED_PHONE_11):
         gate = sml.authorize_recipient("whatsapp", to)
         assert gate["authorized"] is False, to
         assert "solo te puedo mandar" in (gate.get("error") or "")
@@ -548,8 +578,9 @@ def test_hashed_studio_owner_and_recipients_are_refused(tmp_path, monkeypatch):
 def test_hashed_studio_blocked_on_send_email_drawing_and_quote(maxine, monkeypatch, tmp_path):
     from app.services.max.tool_executor import _auto_email_pdf, _send_email, _send_quote_email
 
-    studio_email = _from_hex(_ENC_STUDIO_EMAIL_A)
-    other_studio_email = _from_hex(_ENC_STUDIO_EMAIL_B)
+    _patch_studio_hashes(monkeypatch)
+    studio_email = FAKE_DENIED_EMAIL
+    other_studio_email = FAKE_DENIED_EMAIL_2
     monkeypatch.delenv("FOUNDER_EMAIL", raising=False)
     monkeypatch.delenv("AMP_OWNER_EMAIL", raising=False)
 
