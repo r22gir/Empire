@@ -552,26 +552,13 @@ def run_voice_tool(name: str, arguments: dict[str, Any], *, call_id: str = "",
     if name == STUDIO_SEND_ME_TOOL:
         return {"success": False, "error": "send_me_this_link is not available in this instance."}
     if name == SEND_ME_TOOL:
-        via = str(call.get("via") or "whatsapp").strip().lower()
-        if via not in ("whatsapp", "email"):
-            via = "whatsapp"
-        call["via"] = via
-        from app.services.max.send_me_link import asked_to_send, send_me_link
-        blob = " ".join(
-            str(x) for x in (
-                user_text,
-                call.get("query"),
-                call.get("what"),
-                call.get("url"),
-                call.get("caption"),
-                call.get("subject"),
-                call.get("body"),
-            ) if x
-        )
-        if not asked_to_send(blob):
+        from app.services.max.send_me_link import asked_to_send, infer_via, send_me_link
+        if not asked_to_send(user_text):
             return {"success": False, "tool": SEND_ME_TOOL, "error": (
                 "Not sent: the owner did not ask to send this. Name the link here "
                 "and offer to send it if he wants.")}
+        call["via"] = infer_via(user_text, call.get("via"))
+        call["user_text"] = user_text
         data = send_me_link(call)
         return {
             "success": bool(data.get("success")),

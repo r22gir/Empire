@@ -56,7 +56,46 @@ MAX_PER_BLOCK_ERRORS = 16
 # allowlist check passes. Reply-To is set to max@empirebox.store (the
 # address the future inbound poller — SendGrid Inbound Parse webhook at
 # /webhooks/email/inbound AND Gmail check_inbox — will watch).
-DEFAULT_EMAIL_CC = ("rafa22giraldo@gmail.com",)
+def default_email_cc() -> tuple[str, ...]:
+    """Standing CC for Studio send_email. Empty on family editions — never CC Rafael."""
+    try:
+        from app.edition import is_family_edition
+        if is_family_edition():
+            return ()
+    except Exception:
+        pass
+    return ("rafa22giraldo@gmail.com",)
+
+
+class _DefaultEmailCC:
+    """Studio standing CC; empty on family so Rafael is never cc'd."""
+
+    def _values(self) -> tuple[str, ...]:
+        return default_email_cc()
+
+    def __iter__(self):
+        return iter(self._values())
+
+    def __contains__(self, item):
+        return item in self._values()
+
+    def __len__(self):
+        return len(self._values())
+
+    def __bool__(self):
+        return bool(self._values())
+
+    def __getitem__(self, idx):
+        return self._values()[idx]
+
+    def __repr__(self):
+        return repr(self._values())
+
+    def __eq__(self, other):
+        return self._values() == tuple(other)
+
+
+DEFAULT_EMAIL_CC = _DefaultEmailCC()
 DEFAULT_REPLY_TO = "max@empirebox.store"
 
 # ── Dangerous Tool PIN Gate ───────────────────────────────────────
@@ -3161,9 +3200,22 @@ def _send_email(params: dict, desk: Optional[str] = None) -> ToolResult:
     subject = params.get("subject", "").strip()
     body = params.get("body", "").strip()
 
-    # Resolve founder aliases to FOUNDER_EMAIL from .env
-    if not to or to.lower() in ("me", "owner", "founder", "my email", "myself"):
-        to = os.getenv("FOUNDER_EMAIL", "empirebox2026@gmail.com")
+    family = False
+    try:
+        from app.edition import is_family_edition
+        family = bool(is_family_edition())
+    except Exception:
+        family = False
+
+    # Resolve "me" / owner aliases. Family uses EDITION_OWNER_EMAIL, never FOUNDER_EMAIL.
+    if not to or to.lower() in ("me", "owner", "founder", "my email", "myself", "mi correo", "mi email"):
+        if family:
+            from app.services.max.send_me_link import MISSING_EMAIL_ES, owner_email
+            to = owner_email()
+            if not to:
+                return ToolResult(tool="send_email", success=False, error=MISSING_EMAIL_ES)
+        else:
+            to = os.getenv("FOUNDER_EMAIL", "empirebox2026@gmail.com")
 
     if not subject or not body:
         return ToolResult(tool="send_email", success=False, error="subject and body are required")
@@ -3177,8 +3229,17 @@ def _send_email(params: dict, desk: Optional[str] = None) -> ToolResult:
     # list is checked too — passing `to=okaddress, cc=client@x.com`
     # is also rejected.
     attachments = params.get("attachments", [])
-    cc = params.get("cc")
-    verdict_to = authorize_email_recipient(to)
+    cc = None if family else params.get("cc")
+    if family:
+        from app.services.max.send_me_link import (
+            NOT_OWNER_ES, extract_email, is_denied_email, owner_emails,
+        )
+        asked = extract_email(to)
+        if not asked or asked not in owner_emails() or is_denied_email(asked):
+            return ToolResult(tool="send_email", success=False, error=NOT_OWNER_ES)
+        verdict_to = {"recipient_authorized": True}
+    else:
+        verdict_to = authorize_email_recipient(to)
     if not verdict_to["recipient_authorized"]:
         logger.warning(
             f"send_email BLOCKED: recipient_authorized=False "

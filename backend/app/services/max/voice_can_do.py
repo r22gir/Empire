@@ -10,12 +10,13 @@ import re
 from typing import Any, Optional
 
 _CAN_YOU_RE = re.compile(
-    r"(?i)^\s*(?:"
+    r"(?i)^\s*(?:¿\s*)?(?:"
     r"(?:hey\s+|ok\s+|okay\s+)?(?:max(?:ine)?[, ]+)?"
     r"(?:can|could|will|would)\s+you\s+(?:please\s+)?"
     r"|(?:are|is)\s+you\s+able\s+to\s+"
     r"|(?:do\s+you\s+(?:know\s+how\s+to|support|handle|have))\s+"
-    r"|(?:puedes|podr[ií]as|podes|sos\s+capaz\s+de)\s+(?:hacer\s+)?"
+    r"|(?:me\s+)?(?:puedes|podr[ií]as|podes)\s+(?:hacer\s+)?"
+    r"|(?:sos\s+capaz\s+de)\s+(?:hacer\s+)?"
     r")"
     r"(.+?)\s*\??\s*$"
 )
@@ -29,9 +30,19 @@ _PURE_CAPABILITY = re.compile(
 )
 
 _ACTION_TOOLS: tuple[tuple[re.Pattern[str], str], ...] = (
-    (re.compile(r"(?i)\b(?:send|email|whatsapp|m[aá]nda|env[ií]a)\b.+\b(?:drawing|dibujo|link|enlace|doc|file|3\s*-?\s*d)\b"
-                r"|\b(?:3\s*-?\s*d|drawing|dibujo).+\b(?:whatsapp|email|send)\b"
-                r"|\b(?:send|m[aá]nda|env[ií]a)\s+me\b"),
+    (re.compile(
+        r"(?i)(?:"
+        r"\b(?:send|email|whatsapp|m[aá]nda|env[ií]a)\b.+\b(?:drawing|dibujo|link|enlace|doc|file|3\s*-?\s*d)\b|"
+        r"\b(?:3\s*-?\s*d|drawing|dibujo).+\b(?:whatsapp|email|send)\b|"
+        r"\b(?:send|m[aá]nda|env[ií]a)\s+me\b|"
+        r"\benviar(?:me|lo|la)?\b|"
+        r"\benv[ií]ame\b|"
+        r"\bmandar(?:me|lo|la)?\b|"
+        r"\bm[aá]ndame\b|\bmandame\b|\bm[aá]ndalo\b|"
+        r"\bp[aá]same\b|\bpasame\b|\bp[aá]salo\b|\bpasalo\b|"
+        r"\bme\s+puedes\s+(?:mandar|enviar|pasar)\b"
+        r")"
+    ),
      "send_me_link"),
     (re.compile(r"(?i)\b(?:check|see|show|list|look\s*up)\b.+\b(?:calendar|schedule|agenda|horario|calendario)\b"
                 r"|\b(?:calendar|schedule|agenda)\b"),
@@ -227,15 +238,24 @@ def can_you_do(params: dict) -> dict[str, Any]:
     asked = q if is_capability_question(q) else f"can you {q}"
     action = matching_action_tool(asked)
     if action:
+        via = None
+        if action == "send_me_link":
+            from app.services.max.send_me_link import infer_via
+            via = infer_via(asked)
         return {
             "success": True,
             "result": {
                 "question": q,
                 "answer": None,
                 "action_tool": action,
+                "via": via,
                 "capability": None,
                 "can": True,
-                "instruction": f"This is an action request. Call {action} now. Do not answer with a capability yes.",
+                "instruction": (
+                    f"This is an action request. Call {action} now"
+                    + (f" with via={via}" if via else "")
+                    + ". Do not answer with a capability yes."
+                ),
             },
         }
     text = answer_can_you_do(asked)
