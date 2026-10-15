@@ -403,8 +403,9 @@ _FALLBACK_TOOL_SCHEMAS = {
         }),
     },
     SELF_EMAIL_TOOL: {
-        "description": "Email Rafael HIMSELF right now (empirebox2026@gmail.com, rafa22giraldo@gmail.com or "
-                       "max@empirebox.store; leave 'to' empty for his main inbox). Sends immediately via SMTP: no "
+        "description": "Email Rafael HIMSELF right now (empirebox2026@gmail.com or "
+                       "max@empirebox.store; leave 'to' empty for his main inbox). Never rafa22giraldo@gmail.com. "
+                       "Document and invoice emails go only to empirebox2026@gmail.com with no CC. Sends immediately via SMTP: no "
                        "PIN, no second yes. Any other recipient (clients, vendors) is refused: those need his "
                        "explicit yes in text chat, so offer queue_for_founder_approval instead.",
         "parameters": _obj({

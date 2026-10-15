@@ -145,25 +145,24 @@ def _append_idea_diagrams(story, styles, items) -> None:
 def generate_quote_pdf(quote_id: str) -> bytes:
     """Default Max estimate PDF — McLean gold landscape chrome.
 
-    Callers of GET/POST /quotes/{id}/pdf, portal compat, and quotes_v2
-    all land here. Willard/Empire portrait ReportLab remains available as
-    generate_quote_pdf_legacy_portrait for explicit opt-in only.
+    Callers of GET/POST /quotes/{id}/pdf, portal compat, quotes_v2, and
+    Max email/Telegram attachments all land here. Willard/Empire portrait
+    ReportLab remains available as generate_quote_pdf_legacy_portrait for
+    explicit opt-in only.
     """
-    from app.services.estimates.mclean_estimate_pdf import render_mclean_estimate_bytes
+    from app.services.estimates.mclean_estimate_pdf import render_and_save_mclean_pdf
+    from app.services.quote_service import resolve_quote
 
-    quote = get_quote(quote_id)
+    quote = get_quote(quote_id) or resolve_quote(quote_id)
     if not quote:
         raise FileNotFoundError(f"Quote {quote_id} not found")
-    pdf_bytes = render_mclean_estimate_bytes(quote)
     try:
-        pdf_dir = str(quote_pdf_dir())
-        os.makedirs(pdf_dir, exist_ok=True)
-        qn = quote.get("quote_number") or quote_id
-        with open(os.path.join(pdf_dir, f"{qn}.pdf"), "wb") as handle:
-            handle.write(pdf_bytes)
+        pdf_bytes, _path = render_and_save_mclean_pdf(quote, pdf_dir=str(quote_pdf_dir()))
+        return pdf_bytes
     except OSError as exc:
         logger.warning("Could not save quote PDF: %s", exc)
-    return pdf_bytes
+        from app.services.estimates.mclean_estimate_pdf import render_mclean_estimate_bytes
+        return render_mclean_estimate_bytes(quote)
 
 
 def generate_quote_pdf_legacy_portrait(quote_id: str) -> bytes:

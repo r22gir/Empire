@@ -400,7 +400,7 @@ def test_send_quote_email_accepts_multiple_quote_ids(monkeypatch, tmp_path):
 
     result = _send_quote_email({
         "quote_ids": ["q-a", "q-b"],
-        "to": "founder@example.com",
+        "to": "me",
     })
     assert result.success, result.error
     assert result.result.get("attachments_sent") == 2

@@ -430,8 +430,8 @@ class _FakeResult:
         return self._d
 
 
-@pytest.mark.parametrize("to", ["", "me", "empirebox2026@gmail.com", "rafa22giraldo@gmail.com",
-                                "max@empirebox.store", "Rafael <RAFA22GIRALDO@gmail.com>"])
+@pytest.mark.parametrize("to", ["", "me", "empirebox2026@gmail.com",
+                                "max@empirebox.store"])
 def test_voice_self_email_sends_immediately_no_pin(monkeypatch, to):
     import app.services.max.tool_executor as te
     calls = []
@@ -448,6 +448,17 @@ def test_voice_self_email_sends_immediately_no_pin(monkeypatch, to):
     assert call["tool"] == "send_email" and call["subject"] == "Voice test"
     assert kw.get("founder") is False and kw.get("access_context") is None  # no PIN / confirm session
     assert "attachments" not in call
+
+
+def test_voice_self_email_refuses_rafa22(monkeypatch):
+    import app.services.max.tool_executor as te
+    called = []
+    monkeypatch.setattr(te, "execute_tool", lambda *a, **k: called.append(a))
+    out = vl.run_voice_tool("send_email", {
+        "to": "rafa22giraldo@gmail.com", "subject": "s", "body": "b",
+    })
+    assert out["success"] is False
+    assert called == []
 
 
 @pytest.mark.parametrize("args", [

@@ -3195,12 +3195,41 @@ def _discount_html(quote: dict) -> str:
 async def generate_pdf(quote_id: str, skip_verification: bool = False):
     """Generate PDF for a quote with room-level detail, drawings, and mockups.
 
-    Gate 2: Runs verification before PDF generation.
-    If errors exist, blocks PDF unless skip_verification=True.
+    v2 quotes (line_items) use the same McLean renderer as GET /quotes/{id}/pdf.
+    Legacy room/tier quotes without line_items keep the WeasyPrint path.
     """
     quote = _load_quote(quote_id)
+    items = quote.get("line_items") or quote.get("items") or []
+    if items:
+        from app.services.quote_pdf_service import generate_quote_pdf
+        from app.services.estimates.mclean_estimate_pdf import render_and_save_mclean_pdf
+        try:
+            pdf_bytes = generate_quote_pdf(quote.get("id") or quote_id)
+        except FileNotFoundError:
+            pdf_bytes, _path = render_and_save_mclean_pdf(
+                quote, pdf_dir=str(quote_pdf_dir()),
+            )
+        pdf_dir = str(quote_pdf_dir())
+        os.makedirs(pdf_dir, exist_ok=True)
+        pdf_path = os.path.join(pdf_dir, f"{quote.get('quote_number', quote_id)}.pdf")
+        if not os.path.exists(pdf_path):
+            with open(pdf_path, "wb") as handle:
+                handle.write(pdf_bytes)
+        logger.info(
+            "McLean PDF generated: %s (%s bytes) -> %s",
+            quote.get("quote_number", quote_id), len(pdf_bytes), pdf_path,
+        )
+        return Response(
+            content=pdf_bytes,
+            media_type="application/pdf",
+            headers={
+                "Content-Disposition": (
+                    f'attachment; filename="{quote.get("quote_number", quote_id)}.pdf"'
+                )
+            },
+        )
 
-    # ── GATE 2: Pre-PDF verification ──
+    # ── GATE 2: Pre-PDF verification (legacy room/tier quotes) ──
     if not skip_verification:
         from app.services.quote_engine.verification import verify_quote, save_verification
 

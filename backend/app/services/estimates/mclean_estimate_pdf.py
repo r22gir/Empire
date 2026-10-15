@@ -142,6 +142,35 @@ def _fmt_date_long(raw: Any) -> str:
     return s[:10]
 
 
+# Internal pricing slugs — never printed on a client estimate (not even as a
+# section name). Area/room/phase labels are the grouping the founder wants.
+_INTERNAL_CATEGORIES = {
+    "manual_line",
+    "com_fabric",
+    "note",
+    "open_tbd",
+    "extra_tbd",
+    "tbd",
+    "section_header",
+    "section",
+    "subtotal",
+    "subtotal_row",
+    "rate_needed",
+}
+
+
+def _client_description(it: Dict[str, Any]) -> str:
+    """Line text for the PDF. Never the internal category slug."""
+    desc = str(it.get("description") or "").strip()
+    cat = str(it.get("category") or "").strip()
+    if not desc:
+        return "Item"
+    if cat and desc.lower().replace(" ", "_") == cat.lower().replace(" ", "_"):
+        if cat.lower() in _INTERNAL_CATEGORIES:
+            return "Item"
+    return desc
+
+
 def _scrub_client_facing_desc(desc: str) -> str:
     """Strip brand / SKU / yardage; keep F-IDs and workroom language only."""
     s = (desc or "").strip()
@@ -176,7 +205,7 @@ def _scrub_client_facing_desc(desc: str) -> str:
 
 
 def _title_detail(it: Dict[str, Any]) -> Tuple[str, List[str]]:
-    desc = _scrub_client_facing_desc(it.get("description") or "Item")
+    desc = _scrub_client_facing_desc(_client_description(it))
     if "\n" in desc:
         parts = [p.strip() for p in desc.split("\n") if p.strip()]
         title, details = parts[0], []
@@ -560,6 +589,35 @@ def _draw_client_block(c: canvas.Canvas, quote: Dict[str, Any], y: float) -> flo
     return y - panel_h - 14
 
 
+def _paid_to_date(quote: Dict[str, Any]) -> float:
+    """Sum of recorded payments, else quotes_v2.deposit_paid / amount_paid."""
+    payments = quote.get("payments")
+    if isinstance(payments, list) and payments:
+        total = 0.0
+        for pay in payments:
+            if isinstance(pay, dict):
+                raw = pay.get("amount", pay.get("paid", pay.get("value")))
+            else:
+                raw = pay
+            try:
+                total += float(raw or 0)
+            except (TypeError, ValueError):
+                continue
+        if total > 0.005:
+            return round(total, 2)
+    for key in ("deposit_paid", "amount_paid", "paid_to_date"):
+        raw = quote.get(key)
+        if raw is None or raw == "":
+            continue
+        try:
+            val = float(raw)
+        except (TypeError, ValueError):
+            continue
+        if val > 0.005:
+            return round(val, 2)
+    return 0.0
+
+
 def _draw_totals(
     c: canvas.Canvas,
     quote: Dict[str, Any],
@@ -584,23 +642,39 @@ def _draw_totals(
     if q_total_f is not None and abs(q_total_f - total) < 0.02:
         total = q_total_f
 
-    deposit = quote.get("deposit_required")
-    # Respect explicit 0 — `or 50` would treat 0 as missing (falsy).
+    # Deposit / balance come from quotes_v2 columns when present
+    # (deposit_required, balance_due). Do not re-derive from quote["deposit"]
+    # or snap to a percent of a different total — that hid v2 money.
+    def _money_col(key: str) -> float | None:
+        raw = quote.get(key)
+        if raw is None or raw == "":
+            return None
+        try:
+            return float(raw)
+        except (TypeError, ValueError):
+            return None
+
     _raw_pct = quote.get("deposit_percent")
     pct = 50.0 if _raw_pct is None else float(_raw_pct)
-    # Deposit is pct% of PRICED only (quoted), never of invented TBD
     expected_deposit = round(total * pct / 100.0, 2)
-    try:
-        deposit_f = float(deposit) if deposit is not None else expected_deposit
-    except (TypeError, ValueError):
-        deposit_f = expected_deposit
-    # If stale deposit equals old full-total math, snap to priced deposit
-    if abs(deposit_f - expected_deposit) > 0.02:
-        deposit_f = expected_deposit
-    if pct == 0:
+    stored_deposit = _money_col("deposit_required")
+    stored_balance = _money_col("balance_due")
+    if stored_deposit is not None:
+        deposit_f = stored_deposit
+    elif pct == 0:
         deposit_f = 0.0
-    balance = round(total - deposit_f, 2)
-    show_deposit = pct > 0
+    else:
+        deposit_f = expected_deposit
+    # quotes_v2.balance_due is AR remaining (total − paid). On an unpaid
+    # estimate that equals the grand total; the client-facing Balance is
+    # remaining after the required deposit. After a payment, use the column.
+    if stored_balance is not None and abs(stored_balance - total) > 0.02:
+        balance = stored_balance
+    else:
+        balance = round(total - deposit_f, 2)
+    show_deposit = pct > 0 or deposit_f > 0
+    paid_f = _paid_to_date(quote)
+    show_paid = paid_f > 0.005
     client_safe = _client_safe(quote)
     no_extra_client_copy = client_safe and not has_extra_tbd
 
@@ -613,6 +687,8 @@ def _draw_totals(
     panel_h = 88 if has_extra_tbd else (72 if show_sub else 58)
     if not show_deposit:
         panel_h = 56 if has_extra_tbd else (44 if show_sub else 30)
+    if show_paid:
+        panel_h += 14
     c.setFillColor(PANEL)
     c.roundRect(panel_x, y - (panel_h - 16), 280, panel_h, 4, fill=1, stroke=0)
     c.setStrokeColor(GOLD)
@@ -658,6 +734,15 @@ def _draw_totals(
         c.setFont(sans_b, 9)
         c.setFillColor(DK)
         c.drawRightString(PW - MARGIN_R - 12, row, _money(deposit_f))
+
+        if show_paid:
+            row -= 12
+            c.setFont(sans, 8)
+            c.setFillColor(MUTE)
+            c.drawString(panel_x + 12, row, "Paid to date")
+            c.setFont(sans_b, 9)
+            c.setFillColor(DK)
+            c.drawRightString(PW - MARGIN_R - 12, row, _money(paid_f))
 
         row -= 12
         c.setFont(sans, 8)
@@ -1191,7 +1276,7 @@ def _line_section_name(it: Dict[str, Any], header: str | None) -> str:
     if _explicit_extra_line(it):
         return "Extra work"
     cat = str(it.get("category") or "").strip()
-    if cat and not _is_rate_marker(cat) and cat.lower() not in {"com_fabric", "manual_line", "note"}:
+    if cat and not _is_rate_marker(cat) and cat.lower() not in _INTERNAL_CATEGORIES:
         return cat.replace("_", " ").title()
     return "Quoted"
 
@@ -1282,9 +1367,8 @@ def _line_sqft(it: Dict[str, Any]) -> Tuple[float | None, float | None]:
     unit = str(it.get("unit") or "").strip().lower()
     if unit in _SQFT_UNITS:
         return _num(it.get("quantity")), _line_rate(it)
-    m = _SQFT_DESC_RE.search(str(it.get("description") or ""))
-    if m:
-        return float(m.group(1)), float(m.group(2))
+    # Sq ft / price-per-sq-ft come from stored width×height, sq_ft, or rate —
+    # never parsed out of the description.
     return None, None
 
 
@@ -1360,7 +1444,7 @@ def _wrap_to_width(text: str, font: str, size: float, max_width: float) -> List[
 def _description_lines(it: Dict[str, Any], max_width: float | None = None) -> List[str]:
     _serif, sans, _sans_b, _mono = _ensure_body_fonts()
     width = max_width or _description_max_width()
-    raw_desc = str(it.get("description") or "Item")
+    raw_desc = _client_description(it)
     if _line_sqft(it)[0] is not None:
         raw_desc = _SQFT_DESC_RE.sub("", raw_desc)
     raw_desc = inches_to_fractions(raw_desc)
@@ -1410,7 +1494,7 @@ def render_mclean_estimate_bytes(quote: Dict[str, Any]) -> bytes:
     """Render a McLean landscape estimate.
 
     Each section keeps its own lines. Columns are Description, Qty, Unit,
-    Sq ft, Price, Total, with a subtotal per area/room, then grand total,
+    Sq ft, Price/sq ft, Total, with a subtotal per area/room, then grand total,
     deposit and balance. Measurements render as fractions.
     """
     buf = BytesIO()
@@ -1433,10 +1517,10 @@ def render_mclean_estimate_bytes(quote: Dict[str, Any]) -> bytes:
     global _SQFT_DESC_W
     # Sq ft column only when a line has sq_ft or both width and height.
     sqft_mode = _sqft_layout(sections)
-    # Description | Qty | Unit | Sq ft | Price | Total
+    # Description | Qty | Unit | Sq ft | Price/sq ft | Total
     total_x = PW - MARGIN_R
-    price_x = total_x - 92
-    sqft_x = price_x - 72
+    price_x = total_x - 104
+    sqft_x = price_x - 68
     unit_x = sqft_x - 58
     qty6_x = unit_x - 48
     _SQFT_DESC_W = (qty6_x - 40 - MARGIN_L) if sqft_mode else None
@@ -1530,7 +1614,7 @@ def render_mclean_estimate_bytes(quote: Dict[str, Any]) -> bytes:
                 c.drawRightString(qty6_x, y, "Qty")
                 c.drawRightString(unit_x, y, "Unit")
                 c.drawRightString(sqft_x, y, "Sq ft")
-                c.drawRightString(price_x, y, "Price")
+                c.drawRightString(price_x, y, "Price/sq ft")
                 c.drawRightString(total_x, y, "Total")
                 _hr(c, y - 4, weight=0.7, col=GOLD)
                 y -= columns_h
@@ -1550,8 +1634,6 @@ def render_mclean_estimate_bytes(quote: Dict[str, Any]) -> bytes:
                         c.drawRightString(sqft_x, y, sqft_fraction(sq))
                         if sq is not None and pps is not None:
                             c.drawRightString(price_x, y, f"{pps:,.2f}")
-                        else:
-                            c.drawRightString(price_x, y, _rate_text(it).replace("$", ""))
                         c.drawRightString(total_x, y, _money(_line_amount_value(it)))
                     y -= _DESC_LEADING
                 y -= _ROW_GAP
@@ -1639,49 +1721,62 @@ def render_mclean_estimate_bytes(quote: Dict[str, Any]) -> bytes:
     return buf.getvalue()
 
 
+def render_and_save_mclean_pdf(
+    quote: Dict[str, Any],
+    pdf_dir: str | os.PathLike | None = None,
+) -> Tuple[bytes, str]:
+    """Render the McLean estimate and write quotes/pdf/<number>.pdf."""
+    pdf_bytes = render_mclean_estimate_bytes(quote)
+    if pdf_dir is None:
+        from app.services.data_paths import quote_pdf_dir
+        pdf_dir = str(quote_pdf_dir())
+    else:
+        pdf_dir = str(pdf_dir)
+    os.makedirs(pdf_dir, exist_ok=True)
+    qn = quote.get("quote_number") or quote.get("id") or "estimate"
+    pdf_path = os.path.join(pdf_dir, f"{qn}.pdf")
+    with open(pdf_path, "wb") as f:
+        f.write(pdf_bytes)
+    return pdf_bytes, pdf_path
+
+
 def generate_mclean_estimate_pdf(quote_id: str, save: bool = True) -> bytes:
     """Load quote and render McLean gold PDF. Optionally persist to disk."""
-    from app.services.quote_service import get_quote
+    from app.services.quote_service import get_quote, resolve_quote
     from app.services.data_paths import quote_pdf_dir
 
-    quote = get_quote(quote_id)
+    quote = get_quote(quote_id) or resolve_quote(quote_id)
     if not quote:
         raise FileNotFoundError(f"Quote {quote_id} not found")
 
-    pdf_bytes = render_mclean_estimate_bytes(quote)
+    if not save:
+        return render_mclean_estimate_bytes(quote)
 
-    if save:
-        pdf_dir = str(quote_pdf_dir())
-        os.makedirs(pdf_dir, exist_ok=True)
-        qn = quote.get("quote_number") or quote_id
-        pdf_path = os.path.join(pdf_dir, f"{qn}.pdf")
-        with open(pdf_path, "wb") as f:
+    pdf_bytes, pdf_path = render_and_save_mclean_pdf(quote, pdf_dir=str(quote_pdf_dir()))
+    qn = quote.get("quote_number") or quote_id
+    alt = f"/home/rg/empire-data/quotes/pdf/{qn}.pdf"
+    try:
+        os.makedirs(os.path.dirname(alt), exist_ok=True)
+        with open(alt, "wb") as f:
             f.write(pdf_bytes)
+    except OSError as e:
+        logger.warning("Could not mirror PDF to empire-data: %s", e)
 
-        alt = f"/home/rg/empire-data/quotes/pdf/{qn}.pdf"
-        try:
-            os.makedirs(os.path.dirname(alt), exist_ok=True)
-            with open(alt, "wb") as f:
-                f.write(pdf_bytes)
-        except OSError as e:
-            logger.warning("Could not mirror PDF to empire-data: %s", e)
+    try:
+        from app.db.database import get_db
+        from app.services.quote_service import apply_quote_v2_update
 
-        try:
-            from app.db.database import get_db
-            from app.services.quote_service import apply_quote_v2_update
+        with get_db() as conn:
+            cols = {r[1] for r in conn.execute("PRAGMA table_info(quotes_v2)").fetchall()}
+            if "pdf_path" in cols:
+                apply_quote_v2_update(conn, quote_id, {"pdf_path": pdf_path})
+    except Exception as e:  # noqa: BLE001
+        logger.debug("pdf_path update skipped: %s", e)
 
-            with get_db() as conn:
-                cols = {r[1] for r in conn.execute("PRAGMA table_info(quotes_v2)").fetchall()}
-                if "pdf_path" in cols:
-                    apply_quote_v2_update(conn, quote_id, {"pdf_path": pdf_path})
-        except Exception as e:  # noqa: BLE001
-            logger.debug("pdf_path update skipped: %s", e)
-
-        logger.info(
-            "McLean gold estimate PDF: %s (%s bytes) format=%s",
-            pdf_path,
-            len(pdf_bytes),
-            MCLEAN_FORMAT_NAME,
-        )
-
+    logger.info(
+        "McLean gold estimate PDF: %s (%s bytes) format=%s",
+        pdf_path,
+        len(pdf_bytes),
+        MCLEAN_FORMAT_NAME,
+    )
     return pdf_bytes
