@@ -762,7 +762,7 @@ def _drawing_render(handoff) -> dict:
     # ── Incomplete: surface the template-truth missing list ──
     if not handoff.ready:
         missing = list(getattr(handoff, "missing", None) or [])
-        if "heading" in missing and not handoff.b1_product_type:
+        if ("heading" in missing or "panel" in missing) and not handoff.b1_product_type:
             return {
                 "ready": False,
                 "response_text": getattr(handoff, "response", None) or HEADING_ASK,
@@ -824,6 +824,9 @@ def _drawing_render(handoff) -> dict:
             f"{', '.join(f'{k}={v!r}' for k, v in handoff.translated_dims.items())}) "
             f"→ {pdf_path}"
         )
+        notice = (getattr(handoff, "response", None) or "").strip()
+        if getattr(handoff, "panel_defaulted", False) and "largest face" in notice.lower():
+            body = f"{notice} {body}"
         # SSE-streaming status line (kept short — non-stream callers
         # ignore this and use response_text directly).
         status = f"B1 template {handoff.b1_product_type} rendered ({len(translated_dims)} dims)."

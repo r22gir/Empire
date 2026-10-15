@@ -219,8 +219,10 @@ def test_describe_attached_image_is_mocked_no_send(monkeypatch, tmp_path):
     assert err is None
     assert "80 inches wide" in desc
     assert calls["n"] == 1
+    assert "Panel:" in image_turn.DRAWING_VISION_PROMPT
     assert "Width:" in image_turn.DRAWING_VISION_PROMPT
     assert "Height:" in image_turn.DRAWING_VISION_PROMPT
+    assert "Notes:" in image_turn.DRAWING_VISION_PROMPT
     assert "Style:" in image_turn.DRAWING_VISION_PROMPT
     assert "pinch pleat" not in image_turn.DRAWING_VISION_PROMPT.lower()
     assert "euro" not in image_turn.DRAWING_VISION_PROMPT.lower()
@@ -418,6 +420,83 @@ def test_heading_answer_and_you_have_it_resume_pending_without_second_vision(mon
     assert you_have_it.b1_product_type is None
     assert HEADING_ASK in you_have_it.response
     assert vision_calls["n"] == 0
+
+
+IMG_2265_PANELS = """
+Hand sketch of a drapery, two sizes labeled.
+
+Panel: top / face | Width: 160" | Height: 120"
+Panel: lining | Width: 143 3/4" | Height: 119 3/4"
+Notes: lining marked on the sketch; no blackout or interlining written
+Style: unknown
+"""
+
+
+def test_two_panel_img_2265_defaults_to_largest_face_and_renders_160x120():
+    """MiniMax used to return only the lining pair. Face 160 x 120 must win."""
+    from app.services.max.drawing_intent import (
+        HEADING_ASK,
+        build_drawing_handoff,
+        extract_labeled_panels,
+        extract_vision_notes,
+        resume_drawing_handoff,
+    )
+    from app.services.max.drawing_pending import snapshot_from_handoff
+    from app.services.max.image_turn import extract_dims_from_vision_text
+
+    panels = extract_labeled_panels(IMG_2265_PANELS)
+    assert len(panels) == 2
+    assert extract_vision_notes(IMG_2265_PANELS)
+    dims = extract_dims_from_vision_text(IMG_2265_PANELS)
+    assert float(str(dims["width"]).rstrip('"')) == 160
+    assert float(str(dims["height"]).rstrip('"')) == 120
+
+    first = build_drawing_handoff(
+        "Give a drawing",
+        image_filename="IMG_2265.jpeg",
+        vision_text=IMG_2265_PANELS,
+    )
+    assert first.ready is False
+    assert HEADING_ASK in first.response
+    assert "Which panel" in first.response
+    assert "160" in first.response
+    assert first.notes
+    assert "lining" in first.notes.lower()
+    assert "Notes:" in first.vision_text
+    assert float(str(first.dimensions["width"]).rstrip('"')) == 160
+    assert float(str(first.dimensions["height"]).rstrip('"')) == 120
+
+    snap = snapshot_from_handoff(first, vision_text=IMG_2265_PANELS)
+    assert snap.get("notes")
+    resumed = resume_drawing_handoff(snap, "pinch")
+    assert resumed.ready is True
+    assert resumed.b1_product_type == "pinch_pleat"
+    assert resumed.panel_defaulted is True
+    assert "largest face" in resumed.response.lower()
+    assert float(str(resumed.translated_dims["width"]).rstrip('"')) == 160
+    assert float(str(resumed.translated_dims["height"]).rstrip('"')) == 120
+
+    pytest.importorskip("pdfplumber")
+    from app.services.drawing.templates import render_spec
+
+    pdf = render_spec({
+        "product_type": resumed.b1_product_type,
+        "dims": {
+            "width": 160,
+            "height": 120,
+            "returns": 4,
+            "fullness": 2.5,
+        },
+        "client_name": "Test Client",
+    })
+    assert isinstance(pdf, (bytes, bytearray))
+    assert len(pdf) > 1024
+    import pdfplumber
+    import io
+    with pdfplumber.open(io.BytesIO(pdf)) as doc:
+        text = "".join((page.extract_text() or "") for page in doc.pages)
+    assert "160" in text
+    assert "120" in text
 
 
 # ── drapery plumb QC at 160x120 and 87x84 ─────────────────────────

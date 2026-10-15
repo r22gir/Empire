@@ -116,15 +116,22 @@ _PHOTO_DRAW_NEGATION = (
 )
 
 # Vision prompt for a photo that is becoming a shop drawing.
-# Fixed lines so the parser does not have to guess a markdown table.
+# One line per labeled panel — a single Width/Height pair made MiniMax
+# return the inner lining (143 3/4 x 119 3/4) instead of the face.
 # Do not name heading styles — that made MiniMax invent pinch/euro/pencil.
 DRAWING_VISION_PROMPT = (
     "Describe this photo for a workroom shop drawing. "
-    "Write every readable measurement as fractions of an inch "
-    "on these exact lines:\n"
-    "Width: …\n"
-    "Height: …\n"
+    "Write every readable measurement as fractions of an inch. "
+    "List every labeled panel, one line each, exactly like:\n"
+    "Panel: <label> | Width: … | Height: …\n"
+    "Use the label written on the sketch (top, face, lining, and so on). "
+    "Do not collapse the sketch to a single Width/Height pair.\n"
+    "Then write these lines:\n"
+    "Notes: …\n"
     "Style: … or unknown\n"
+    "Notes is a short free-text line for linings, blackout, interlining, "
+    "or other sketch notes. Keep that text so later questions still "
+    "have the sketch notes.\n"
     "If a heading style is written on the photo, copy it after Style. "
     "If no heading is written, write Style: unknown. "
     "Do not guess a heading. "

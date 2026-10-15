@@ -413,6 +413,11 @@ class DrawingHandoff:
     # Stored MiniMax description for this photo. Resume paths reuse it
     # instead of calling vision a second time.
     vision_text: str = ""
+    # Every labeled panel from the sketch (face, lining, …) plus notes.
+    panels: list[dict[str, Any]] = field(default_factory=list)
+    notes: str = ""
+    chosen_panel: str = ""
+    panel_defaulted: bool = False
 
     @property
     def ready(self) -> bool:
@@ -1501,7 +1506,209 @@ def extract_all_dimensions(text: str | None, item_type: str | None = None) -> di
     for source in (labeled, compact):
         for key, value in source.items():
             dims.setdefault(key, value)
+    face = largest_face_panel(extract_labeled_panels(text))
+    if face:
+        dims["width"] = face["width"]
+        dims["height"] = face["height"]
     return dims
+
+
+_PANEL_LINE_RE = re.compile(
+    r"(?i)^\s*panel:\s*(?P<label>[^|\n]+?)\s*\|\s*width:\s*(?P<w>[^|\n]+?)\s*"
+    r"\|\s*height:\s*(?P<h>[^\n]+?)\s*$",
+    re.MULTILINE,
+)
+_NOTES_LINE_RE = re.compile(r"(?i)^\s*notes:\s*(?P<notes>.+?)\s*$", re.MULTILINE)
+_LINING_LABEL_RE = re.compile(
+    r"(?i)\b(linings?|interlin(?:ing|ed)?|blackouts?|underlin(?:ing|ed)?)\b"
+)
+
+
+def _inch_token(raw: str | None) -> tuple[float | None, str]:
+    if not raw:
+        return None, ""
+    token = str(raw).strip().rstrip(".").strip()
+    token = token.replace("″", '"').replace("”", '"')
+    inches = _parse_dimension_value(token.strip().rstrip('"').strip())
+    if inches is None:
+        match = re.search(rf"({_INCH_TOKEN})", token)
+        if match:
+            inches = _parse_dimension_value(match.group(1))
+            token = match.group(1)
+    if inches is None or inches < _DIMENSION_BOUNDS[0] or inches > _DIMENSION_BOUNDS[1]:
+        return None, ""
+    shown = token.strip().rstrip('"').strip()
+    return inches, f'{shown}"'
+
+
+def _panel_is_lining(label: str) -> bool:
+    return bool(_LINING_LABEL_RE.search(label or ""))
+
+
+def _panel_area(panel: dict[str, Any]) -> float:
+    return float(panel.get("width_in") or 0) * float(panel.get("height_in") or 0)
+
+
+def _panel_size_key(panel: dict[str, Any]) -> tuple[float, float]:
+    return (round(float(panel.get("width_in") or 0), 4), round(float(panel.get("height_in") or 0), 4))
+
+
+def extract_vision_notes(text: str | None) -> str:
+    if not text:
+        return ""
+    match = _NOTES_LINE_RE.search(text)
+    if not match:
+        return ""
+    return str(match.group("notes") or "").strip()
+
+
+def extract_labeled_panels(text: str | None) -> list[dict[str, Any]]:
+    """Parse ``Panel: <label> | Width: … | Height: …`` and table groups."""
+    if not text:
+        return []
+    panels: list[dict[str, Any]] = []
+    seen: set[tuple[str, float, float]] = set()
+
+    def _add(label: str, width_raw: str, height_raw: str) -> None:
+        width_in, width = _inch_token(width_raw)
+        height_in, height = _inch_token(height_raw)
+        name = re.sub(r"\s+", " ", (label or "").strip(" -|:"))
+        if not name or width_in is None or height_in is None:
+            return
+        key = (name.lower(), round(width_in, 4), round(height_in, 4))
+        if key in seen:
+            return
+        seen.add(key)
+        panels.append({
+            "label": name,
+            "width": width,
+            "height": height,
+            "width_in": width_in,
+            "height_in": height_in,
+            "lining": _panel_is_lining(name),
+        })
+
+    for match in _PANEL_LINE_RE.finditer(text):
+        _add(match.group("label"), match.group("w"), match.group("h"))
+
+    grouped: dict[str, dict[str, str]] = {}
+    for raw_line in text.splitlines():
+        line = raw_line.strip()
+        if "|" not in line or _PANEL_LINE_RE.match(line):
+            continue
+        cells = [c.strip() for c in line.strip("|").split("|")]
+        cells = [c for c in cells if c and not re.fullmatch(r":?-{3,}:?", c)]
+        if len(cells) < 2:
+            continue
+        label = cells[0].strip()
+        lowered = label.lower()
+        if lowered in {"item", "measurement", "piece", "part", "size", "value", "panel"}:
+            continue
+        rest = " ".join(cells[1:])
+        pair = _extract_quote_x_dimensions(rest)
+        if pair.get("width") and pair.get("height"):
+            _add(label, pair["width"], pair["height"])
+            continue
+        width_hit = any(token in lowered for token in ("width", "wide"))
+        height_hit = any(token in lowered for token in ("height", "high", "length", "long", "drop"))
+        token = re.search(rf"({_INCH_TOKEN})", rest)
+        if not token or not (width_hit or height_hit):
+            continue
+        group = re.sub(r"\b(width|wide|height|high|length|long|drop)\b", "", lowered, flags=re.I)
+        group = re.sub(r"\s+", " ", group).strip(" -|:") or label
+        slot = grouped.setdefault(group, {})
+        slot["width" if width_hit else "height"] = token.group(1)
+    for group, slot in grouped.items():
+        if slot.get("width") and slot.get("height"):
+            _add(group, slot["width"], slot["height"])
+    return panels
+
+
+def largest_face_panel(panels: list[dict[str, Any]] | None) -> dict[str, Any] | None:
+    """Largest non-lining / non-blackout panel; else the largest panel."""
+    if not panels:
+        return None
+    face = [p for p in panels if not p.get("lining")]
+    pool = face or list(panels)
+    return max(pool, key=_panel_area)
+
+
+def parse_panel_reply(
+    text: str | None,
+    panels: list[dict[str, Any]] | None,
+) -> dict[str, Any] | None:
+    """Match a founder reply to a stored panel label (top, face, lining, …)."""
+    if not text or not panels:
+        return None
+    lowered = text.lower()
+    hits: list[dict[str, Any]] = []
+    for panel in panels:
+        label = str(panel.get("label") or "").strip()
+        if not label:
+            continue
+        tokens = [t for t in re.split(r"[^a-z0-9]+", label.lower()) if len(t) >= 3]
+        if any(re.search(rf"\b{re.escape(tok)}\b", lowered) for tok in tokens):
+            hits.append(panel)
+    if len(hits) == 1:
+        return hits[0]
+    if re.search(r"(?i)\b(face|top|outer|finished)\b", lowered):
+        face = largest_face_panel(panels)
+        if face:
+            return face
+    return None
+
+
+def distinct_panel_sizes(panels: list[dict[str, Any]] | None) -> list[dict[str, Any]]:
+    out: list[dict[str, Any]] = []
+    seen: set[tuple[float, float]] = set()
+    for panel in panels or []:
+        key = _panel_size_key(panel)
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(panel)
+    return out
+
+
+def which_panel_ask(panels: list[dict[str, Any]], default: dict[str, Any] | None = None) -> str:
+    default = default or largest_face_panel(panels)
+    choices = ", ".join(
+        f"{p.get('label')} ({p.get('width')} x {p.get('height')})"
+        for p in panels
+    )
+    if not default:
+        return f"Which panel: {choices}?"
+    return (
+        f"Which panel: {choices}? "
+        f"If you don't pick, I'll use the largest face panel "
+        f"({default.get('label')}, {default.get('width')} x {default.get('height')})."
+    )
+
+
+def resolve_sketch_panel(
+    panels: list[dict[str, Any]] | None,
+    message: str | None,
+    *,
+    heading_known: bool,
+) -> tuple[dict[str, Any] | None, bool, str]:
+    """Return (panel, defaulted, notice). Default = largest face when unchosen."""
+    if not panels:
+        return None, False, ""
+    picked = parse_panel_reply(message, panels)
+    if picked:
+        return picked, False, ""
+    default = largest_face_panel(panels)
+    multi = len(distinct_panel_sizes(panels)) > 1
+    if multi and heading_known and default:
+        return (
+            default,
+            True,
+            (
+                f"Using the largest face panel ({default.get('label')}, "
+                f"{default.get('width')} x {default.get('height')})."
+            ),
+        )
+    return default, False, ""
 
 
 def _enrich_ul_banquette_dims(text: str, dims: dict[str, str]) -> dict[str, str]:
@@ -1642,6 +1849,8 @@ def pending_should_resume(message: str, pending: dict | None, history: Any = Non
         return False
     if parse_heading_reply(message):
         return True
+    if parse_panel_reply(message, pending.get("panels") or []):
+        return True
     try:
         from app.services.max.image_turn import refers_to_last_image
         if refers_to_last_image(message):
@@ -1702,6 +1911,12 @@ def build_drawing_handoff(
         for key, value in vision_dims.items():
             dimensions.setdefault(key, value)
     views = _extract_views(message)
+    panels = extract_labeled_panels(vision_text or "")
+    if not panels:
+        panels = extract_labeled_panels(message)
+    notes = extract_vision_notes(vision_text or "") or extract_vision_notes(message)
+    if vision_text and notes and not re.search(r"(?i)^\s*notes:", vision_text, re.M):
+        vision_text = f"{vision_text.rstrip()}\nNotes: {notes}"
 
     # HOTFIX 4.0b — resolve B1 product_type, alias-translate dims,
     # and validate the translated set against the template's required
@@ -1719,6 +1934,13 @@ def build_drawing_handoff(
     if not b1_product_type and vision_text:
         if not re.search(r"(?i)style\s*:\s*unknown\b", vision_text):
             b1_product_type = _try_resolve_b1_type(vision_text, item_type)
+    chosen_panel, panel_defaulted, panel_notice = resolve_sketch_panel(
+        panels, message, heading_known=bool(b1_product_type),
+    )
+    if chosen_panel:
+        dimensions["width"] = chosen_panel["width"]
+        dimensions["height"] = chosen_panel["height"]
+    multi_panel = len(distinct_panel_sizes(panels)) > 1
     translated_dims = _translate_dims_for_b1_product(
         dimensions, b1_product_type
     )
@@ -1754,6 +1976,10 @@ def build_drawing_handoff(
         intent_mode=intent_mode,
         raw_message=message,
         vision_text=vision_text or "",
+        panels=list(panels),
+        notes=notes,
+        chosen_panel=str((chosen_panel or {}).get("label") or ""),
+        panel_defaulted=panel_defaulted,
     )
 
     # Migration: while the router is being updated for HOTFIX 4.0b,
@@ -1775,9 +2001,15 @@ def build_drawing_handoff(
         handoff.missing = missing_template_keys
     elif not b1_product_type and dimensions.get("width") and dimensions.get("height"):
         # Dims from the photo (or text) but no written heading — ask, never guess.
+        # More than one size: ask which panel in the same turn.
         handoff.missing = ["heading"]
         handoff.missing_template_keys = ["heading"]
-        handoff.response = HEADING_ASK
+        ask = HEADING_ASK
+        if multi_panel:
+            handoff.missing.append("panel")
+            handoff.missing_template_keys.append("panel")
+            ask = f"{HEADING_ASK}\n{which_panel_ask(panels, chosen_panel)}"
+        handoff.response = ask
         return handoff
     elif image_filename and not dimensions:
         handoff.missing = [
@@ -1786,8 +2018,7 @@ def build_drawing_handoff(
         ]
     elif b1_product_type:
         # B1 product_type resolved and template satisfied — ready.
-        # No missing.
-        pass
+        handoff.missing = []
     elif not subject:
         handoff.missing = ["subject/item", "dimensions or source image"]
     elif not enough:
@@ -1855,7 +2086,8 @@ def build_drawing_handoff(
         payload["source_image"] = image_filename
 
     handoff.tool_payload = payload
-    handoff.response = "Starting the drawing workflow. I will return the generated drawing artifact here."
+    start = "Starting the drawing workflow. I will return the generated drawing artifact here."
+    handoff.response = f"{panel_notice} {start}".strip() if panel_notice else start
     return handoff
 
 
@@ -1867,6 +2099,18 @@ def resume_drawing_handoff(snapshot: dict, message: str) -> DrawingHandoff:
     """
     snapshot = dict(snapshot or {})
     vision = snapshot.get("vision_text") or ""
+    notes = snapshot.get("notes") or extract_vision_notes(vision)
+    if notes and vision and not re.search(r"(?i)^\s*notes:", vision, re.M):
+        vision = f"{vision.rstrip()}\nNotes: {notes}"
+    stored_panels = list(snapshot.get("panels") or [])
+    if stored_panels and "Panel:" not in vision:
+        extra = []
+        for panel in stored_panels:
+            extra.append(
+                f"Panel: {panel.get('label')} | Width: {panel.get('width')} | "
+                f"Height: {panel.get('height')}"
+            )
+        vision = (vision.rstrip() + "\n" + "\n".join(extra)).strip()
     image = snapshot.get("source_image") or snapshot.get("image_filename")
     heading = parse_heading_reply(message) or snapshot.get("b1_product_type")
     seed = message or ""

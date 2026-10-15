@@ -190,10 +190,17 @@ def merge_founder_reply(snapshot: dict, reply: str) -> dict:
         if val is not None:
             out["dimensions"][key] = val
     try:
-        from app.services.max.drawing_intent import parse_heading_reply
+        from app.services.max.drawing_intent import parse_heading_reply, parse_panel_reply
         heading = parse_heading_reply(reply)
         if heading:
             out["b1_product_type"] = heading
+        picked = parse_panel_reply(reply, out.get("panels") or [])
+        if picked:
+            out["chosen_panel"] = picked.get("label")
+            out["panel_defaulted"] = False
+            out["dimensions"] = dict(out.get("dimensions") or {})
+            out["dimensions"]["width"] = picked["width"]
+            out["dimensions"]["height"] = picked["height"]
     except Exception:
         pass
     # Re-derive missing list by intersecting with required_keys.
@@ -225,6 +232,10 @@ def snapshot_from_handoff(handoff, vision_text: str | None = None) -> dict:
         "vision_text": vision,
         "raw_message": getattr(handoff, "raw_message", "") or "",
         "intent_mode": getattr(handoff, "intent_mode", "shop_drawing") or "shop_drawing",
+        "panels": list(getattr(handoff, "panels", None) or []),
+        "notes": getattr(handoff, "notes", "") or "",
+        "chosen_panel": getattr(handoff, "chosen_panel", "") or "",
+        "panel_defaulted": bool(getattr(handoff, "panel_defaulted", False)),
     }
 
 
