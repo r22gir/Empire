@@ -26,6 +26,9 @@ OWNER_ALIASES = frozenset({
 SIBLING_NAMES = frozenset({
     "juan", "juan diego", "juan diego giraldo",
 })
+STUDIO_NAMES = frozenset({
+    "rafael", "rafa", "rafa22", "rafa22giraldo",
+})
 MISSING_WHATSAPP_ES = (
     "Manito, todavía no tengo tu WhatsApp configurado. "
     "Pídele a Rafael que ponga EDITION_OWNER_WHATSAPP en esta instancia."
@@ -52,11 +55,12 @@ _ASKED_TO_SEND = re.compile(
     r"\b(?:send|sent|resend|forward|e-?mail|whats\s?app)\b|"
     r"\bcorreo\b|"
     r"\benviar(?:me|lo|la|te|nos)?\b|"
-    r"\benv[ií]a(?:me|lo|la|nos)?\b|"
+    r"\benv[ií]a(?:me|lo|la|nos|melo|mela)?\b|"
     r"\bmandar(?:me|lo|la|te|nos)?\b|"
-    r"\bm[aá]nda(?:me|lo|la|nos)?\b|"
-    r"\bp[aá]sa(?:me|lo|la|nos)?\b|"
-    r"\bme\s+puedes\s+(?:mandar|enviar|pasar)\b"
+    r"\bm[aá]nda(?:me|lo|la|nos|melo|mela)?\b|"
+    r"\bp[aá]sa(?:me|lo|la|nos|melo|mela)?\b|"
+    r"\bme\s+puedes\s+(?:mandar|enviar|pasar)\b|"
+    r"\bme\s+lo\s+(?:env[ií]as|pasas|mandas)\b"
     r")"
 )
 
@@ -127,17 +131,11 @@ def sibling_deny_phones() -> set[str]:
     return out
 
 
-def studio_business_phone() -> str:
-    """Workroom business_phone at runtime, if this process can see it. Deny only."""
-    try:
-        from app.edition import workroom_business_config
-        return str((workroom_business_config() or {}).get("business_phone") or "")
-    except Exception:
-        return ""
-
-
 def runtime_denied_emails() -> set[str]:
-    """EDITION_DENY_EMAIL plus FOUNDER_EMAIL / AMP_OWNER_EMAIL from env."""
+    """EDITION_DENY_EMAIL plus FOUNDER_EMAIL / AMP_OWNER_EMAIL from env.
+
+    Family editions do not load business.json, so denial cannot depend on it.
+    """
     out = sibling_deny_emails()
     for key in ("FOUNDER_EMAIL", "AMP_OWNER_EMAIL"):
         for part in _split_csv(os.getenv(key) or ""):
@@ -148,10 +146,40 @@ def runtime_denied_emails() -> set[str]:
 
 
 def runtime_denied_phones() -> set[str]:
-    """EDITION_DENY_WHATSAPP plus business_phone from runtime config."""
-    out = sibling_deny_phones()
-    out |= _phone_variants(studio_business_phone())
+    """EDITION_DENY_WHATSAPP only. Family editions do not load business.json."""
+    return sibling_deny_phones()
+
+
+def owner_email_env_values() -> list[str]:
+    """Raw EDITION_OWNER_EMAIL entries, including any that later get denied."""
+    out: list[str] = []
+    for part in _split_csv(os.getenv("EDITION_OWNER_EMAIL") or ""):
+        email = extract_email(part)
+        if email and email not in out:
+            out.append(email)
     return out
+
+
+def owner_email_env_is_denied() -> bool:
+    """True when EDITION_OWNER_EMAIL is set but every value is denied."""
+    return bool(owner_email_env_values()) and not owner_emails()
+
+
+def owner_whatsapp_env_is_denied() -> bool:
+    """True when EDITION_OWNER_WHATSAPP is set but equals a denied number."""
+    raw = digits_only((os.getenv("EDITION_OWNER_WHATSAPP") or "").strip())
+    return bool(raw) and not owner_whatsapp()
+
+
+def owner_env_denied_reason(via: str | None = None) -> str | None:
+    """NOT_OWNER_ES when EDITION_OWNER_* equals FOUNDER/AMP_OWNER/EDITION_DENY_*."""
+    check_email = via in (None, "email")
+    check_wa = via in (None, "whatsapp")
+    if check_email and owner_email_env_is_denied():
+        return NOT_OWNER_ES
+    if check_wa and owner_whatsapp_env_is_denied():
+        return NOT_OWNER_ES
+    return None
 
 
 def denylist_emails() -> set[str]:
@@ -177,9 +205,11 @@ def is_sibling_recipient(to: str | None) -> bool:
     raw = (to or "").strip().lower()
     if not raw:
         return False
-    if raw in SIBLING_NAMES:
+    if raw in SIBLING_NAMES or raw in STUDIO_NAMES:
         return True
     if re.search(r"\bjuan\b", raw):
+        return True
+    if re.search(r"\brafael\b|\brafa22\b", raw):
         return True
     email = extract_email(raw)
     if email and email in sibling_deny_emails():
@@ -244,6 +274,13 @@ def authorize_recipient(via: str, to: str | None) -> dict[str, Any]:
     if is_sibling_recipient(raw) or is_denied_email(raw) or (digits_only(raw) and is_denied_phone(raw)):
         return {"authorized": False, "via": via, "to": raw, "error": NOT_OWNER_ES}
 
+    denied_cfg = owner_env_denied_reason(via)
+    if denied_cfg:
+        logger.error(
+            "EDITION_OWNER_* equals FOUNDER_EMAIL, AMP_OWNER_EMAIL, or EDITION_DENY_*; refusing send"
+        )
+        return {"authorized": False, "via": via, "to": email or raw, "error": denied_cfg}
+
     if via == "email":
         allowed = owner_emails()
         if not allowed:
@@ -257,6 +294,8 @@ def authorize_recipient(via: str, to: str | None) -> dict[str, Any]:
 
     if via == "whatsapp":
         configured_wa = owner_whatsapp()
+        if owner_whatsapp_env_is_denied():
+            return {"authorized": False, "via": "whatsapp", "to": digits_only(raw) or raw, "error": NOT_OWNER_ES}
         if not configured_wa:
             return {"authorized": False, "via": "whatsapp", "to": digits_only(raw) or raw, "error": MISSING_WHATSAPP_ES}
         if _is_owner_alias(raw):
