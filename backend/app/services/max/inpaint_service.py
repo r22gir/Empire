@@ -28,7 +28,6 @@ from app.services.max.token_tracker import token_tracker
 logger = logging.getLogger("max.inpaint")
 
 GENERATED_DIR = Path(__file__).resolve().parent.parent.parent.parent / "data" / "generated"
-GENERATED_DIR.mkdir(parents=True, exist_ok=True)
 
 MAX_IMAGE_DIM = 1024
 MASK_PADDING = 0.12
@@ -46,6 +45,7 @@ from app.services.max.inpaint_prompts import (
 
 def _save_image(data: bytes, prefix: str = "inpaint") -> str:
     """Save image bytes to disk, return serve URL."""
+    GENERATED_DIR.mkdir(parents=True, exist_ok=True)
     fname = f"{prefix}-{int(time.time())}-{uuid.uuid4().hex[:6]}.png"
     (GENERATED_DIR / fname).write_bytes(data)
     return f"/api/v1/vision/images/{fname}"

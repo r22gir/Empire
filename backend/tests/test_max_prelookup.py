@@ -29,6 +29,17 @@ def test_weather_and_brief():
     calls = ap.prelookup_calls("What's the weather in Hyattsville tomorrow?")
     assert calls == [{"tool": "get_weather", "city": "Hyattsville"}]
     assert "get_tasks" in _tools("Morning Max, brief me on today's jobs")
+    assert "get_today_agenda" not in _tools("Morning Max, brief me on today's jobs")
+    assert "get_today_agenda" not in _tools("What's on today's jobs")
+    assert "get_tasks" in _tools("What's on today's jobs")
+
+
+def test_whats_on_today_uses_calendar_not_open_projects():
+    tools = _tools("what's on today")
+    assert tools[:3] == ["get_today_agenda", "list_schedule", "get_tasks"]
+    note = ap.prelookup_message("what's on today", [("get_today_agenda", "empty")])
+    assert "unavailable or unreliable" in note.lower()
+    assert "open projects" in note.lower()
 
 
 def test_no_prelookup_for_small_talk_or_research():

@@ -237,8 +237,15 @@ VOICE_CAPABILITIES = (
     "or quote number. If it says Gmail needs re-auth or Drive is not connected, say that source was not "
     "searched; never say the file does not exist. Say how many "
     "matched and name the top ones (e.g. both Nehal phases). share_file sends one to Rafael by email, WhatsApp "
-    "or a studio link. Never say you found or sent a file without a tool result; if nothing matched, say so "
+    "or a studio link. send_me_this_link sends a link or document ONLY to Rafael's WhatsApp and "
+    "empirebox2026@gmail.com — never clients, the brothers, or rafa22giraldo@gmail.com. "
+    "'the 3D drawing' or 'that drawing' means the most recent matching drawing or doc. "
+    "Never say you found or sent a file without a tool result; if nothing matched, say so "
     "and name the closest files.\n"
+    "Today / schedule / agenda / qué hay hoy: call get_today_agenda (and list_schedule / get_tasks). "
+    "List those items. Never answer from open projects. Never say you have no reliable calendar.\n"
+    "If Rafael says you missed the point, call the tools for his last question again before offering Chief e.\n"
+    "'Can you do X' / 'puedes hacer X': call can_you_do or answer from the capability list. Do not guess.\n"
     "Email to anyone else (clients, vendors) needs Rafael's explicit yes in text chat: offer "
     "queue_for_founder_approval. You CANNOT send texts or messages, run shell commands, write or delete "
     "files, approve or reject quotes, create deposit or payment links, or delete anything from voice. If "
@@ -297,10 +304,16 @@ def chief_e_brief() -> str:
 
 def assemble(*, model: str, read_tools: list[str], core: str, snapshot: str,
              brain: str, memory: str, brief: str = "") -> str:
+    try:
+        from app.services.max.voice_can_do import capability_list_for_prompt
+        cap_list = capability_list_for_prompt()
+    except Exception:
+        cap_list = ""
     parts = [
         VOICE_ROLE.format(model=model),
         VOICE_STYLE,
         VOICE_CAPABILITIES.format(read_tools=", ".join(read_tools)),
+        cap_list,
         VOICE_TRUTH,
     ]
     if brief:

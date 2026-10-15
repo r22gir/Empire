@@ -79,12 +79,28 @@ VOICE_READ_ONLY_TOOLS = (
     "check_email", "list_job_images", "search_conversations", "get_weather",
     "list_quotes_awaiting_review", "show_quote_for_review",
     "get_revenue_chart", "web_search", "find_files", "open_final_doc", "max_status",
+    "get_today_agenda", "list_schedule", "can_you_do",
 )
 QUEUE_TOOL = "queue_for_founder_approval"
 IMPROVE_TOOL = "request_improvement"  # writes a change request only; builds need Rafael's tap in the studio
 SELF_EMAIL_TOOL = "send_email"  # Rafael's own addresses only (server-enforced in run_voice_tool)
 SHARE_TOOL = "share_file"  # found file -> Rafael only (studio link / his email / his WhatsApp); enforced in tools_files
-VOICE_TOOL_ALLOWLIST = frozenset(VOICE_READ_ONLY_TOOLS + (QUEUE_TOOL, IMPROVE_TOOL, SELF_EMAIL_TOOL, SHARE_TOOL))
+SEND_ME_TOOL = "send_me_this_link"  # WhatsApp + empirebox2026@gmail.com only
+
+
+def voice_tool_allowlist() -> frozenset[str]:
+    """Founder Studio gets send_me_this_link. Family editions (amp / maxine) do not."""
+    base = VOICE_READ_ONLY_TOOLS + (QUEUE_TOOL, IMPROVE_TOOL, SELF_EMAIL_TOOL, SHARE_TOOL)
+    try:
+        from app.edition import is_family_edition
+        if is_family_edition():
+            return frozenset(base)
+    except Exception:
+        pass
+    return frozenset(base + (SEND_ME_TOOL,))
+
+
+VOICE_TOOL_ALLOWLIST = voice_tool_allowlist()  # founder default; runtime uses voice_tool_allowlist()
 READ_ONLY_TOOLS = VOICE_READ_ONLY_TOOLS  # backwards-compatible name
 # Explicitly named so logs/tests are clear; the allowlist above is what enforces.
 VOICE_DENIED_EXAMPLES = frozenset({
@@ -134,7 +150,7 @@ def voice_status() -> dict[str, Any]:
         "sample_rate": SAMPLE_RATE,
         "active_calls": len(_active_calls),
         "text_routing_xai_disabled": _flag("MAX_DISABLE_XAI", False),
-        "tools": sorted(VOICE_TOOL_ALLOWLIST),
+        "tools": sorted(voice_tool_allowlist()),
         "transcripts_saved": True,
     }
 
@@ -359,6 +375,33 @@ _FALLBACK_TOOL_SCHEMAS = {
         "parameters": _obj({"file_id": {"type": "string", "description": "file_id from find_files"},
                             "via": {"type": "string", "enum": ["email", "whatsapp", "studio"]}}, ["file_id"]),
     },
+    "get_today_agenda": {
+        "description": "Today's calendar, Organizer items and due tasks. Use for 'what's on today', "
+                       "schedule, agenda, qué hay hoy. Never guess from open projects.",
+        "parameters": _obj({"date": {"type": "string", "description": "YYYY-MM-DD (default today ET)"}}),
+    },
+    "list_schedule": {
+        "description": "Calendar events in a date range. For today, prefer get_today_agenda.",
+        "parameters": _obj({
+            "start_date": {"type": "string"},
+            "end_date": {"type": "string"},
+        }),
+    },
+    "can_you_do": {
+        "description": "Answer 'can you do X' from the voice capability list. Do not guess.",
+        "parameters": _obj({"question": {"type": "string", "description": "Rafael's 'can you…' question"}},
+                           ["question"]),
+    },
+    SEND_ME_TOOL: {
+        "description": "Send a link or document ONLY to Rafael's WhatsApp or empirebox2026@gmail.com. "
+                       "'the 3D drawing' / 'that drawing' resolve to the most recent match. "
+                       "Never clients, brothers, or rafa22giraldo@gmail.com.",
+        "parameters": _obj({
+            "query": {"type": "string", "description": "e.g. 'the 3D drawing'"},
+            "via": {"type": "string", "enum": ["whatsapp", "email"]},
+            "file_id": {"type": "string"},
+        }),
+    },
     SELF_EMAIL_TOOL: {
         "description": "Email Rafael HIMSELF right now (empirebox2026@gmail.com, rafa22giraldo@gmail.com or "
                        "max@empirebox.store; leave 'to' empty for his main inbox). Sends immediately via SMTP: no "
@@ -483,7 +526,10 @@ def realtime_tool_definitions() -> list[dict[str, Any]]:
     except Exception as exc:  # pragma: no cover - defensive
         logger.warning("voice_live: canonical tool schemas unavailable: %s", exc)
     out = []
-    for name in VOICE_READ_ONLY_TOOLS + (QUEUE_TOOL, IMPROVE_TOOL, SELF_EMAIL_TOOL, SHARE_TOOL):
+    names = list(VOICE_READ_ONLY_TOOLS + (QUEUE_TOOL, IMPROVE_TOOL, SELF_EMAIL_TOOL, SHARE_TOOL))
+    if SEND_ME_TOOL in voice_tool_allowlist():
+        names.append(SEND_ME_TOOL)
+    for name in names:
         fn = canonical.get(name) or _FALLBACK_TOOL_SCHEMAS[name]
         out.append({
             "type": "function",
@@ -589,14 +635,58 @@ def voice_self_email(arguments: dict[str, Any], *, call_id: str = "") -> dict[st
 
 
 def run_voice_tool(name: str, arguments: dict[str, Any], *, call_id: str = "",
-                   conversation_id: str = "") -> dict[str, Any]:
+                   conversation_id: str = "", user_text: str = "") -> dict[str, Any]:
     """Execute one allowlisted voice tool (sync). Server-side allowlist enforced here."""
-    if name not in VOICE_TOOL_ALLOWLIST:
+    allowed = voice_tool_allowlist()
+    if name not in allowed:
         logger.warning("voice_live[%s]: refused non-allowlisted tool %r", call_id or "-", name)
         return {"success": False, "error": f"Tool '{name}' is not available in voice mode (read-only tools, "
                                            f"self-email and queue_for_founder_approval only). Offer to queue it for "
                                            f"Rafael's approval instead."}
     call = {k: v for k, v in (arguments or {}).items() if not str(k).startswith("_")}
+    if name == SEND_ME_TOOL:
+        via = str(call.get("via") or "whatsapp").strip().lower()
+        if via not in ("whatsapp", "email"):
+            via = "whatsapp"
+        call["via"] = via
+        to = str(call.get("to") or "").strip()
+        if to and to.lower() not in ("", "me", "myself", "rafael", "founder", "owner",
+                                     "my email", "my whatsapp", "empirebox2026@gmail.com"):
+            return {"success": False, "tool": SEND_ME_TOOL, "error": (
+                "send_me_this_link only reaches Rafael's WhatsApp and empirebox2026@gmail.com. "
+                "Never clients, the brothers, or rafa22giraldo@gmail.com.")}
+        from app.services.max.answer_policy import asked_to_send
+        blob = " ".join(
+            str(x) for x in (
+                user_text,
+                call.get("query"),
+                call.get("what"),
+                call.get("caption"),
+                call.get("subject"),
+                call.get("body"),
+            ) if x
+        )
+        if not asked_to_send(blob):
+            return {"success": False, "tool": SEND_ME_TOOL, "error": (
+                "Not sent: Rafael did not ask to send this. Find or name the file here "
+                "and offer to send it if he wants.")}
+        from app.services.max.send_me_link import send_me_this_link
+        data = send_me_this_link(call)
+        return {
+            "success": bool(data.get("success")),
+            "tool": SEND_ME_TOOL,
+            "result": data.get("result"),
+            "error": data.get("error"),
+        }
+    if name == "can_you_do":
+        from app.services.max.voice_can_do import can_you_do
+        data = can_you_do(call)
+        return {"success": True, "tool": "can_you_do", "result": data.get("result")}
+    if name == "get_today_agenda":
+        from app.services.max.today_agenda import collect_today_agenda
+        day = str(call.get("date") or call.get("day") or "").strip()
+        return {"success": True, "tool": "get_today_agenda",
+                "result": collect_today_agenda(day or None)}
     if name == SELF_EMAIL_TOOL:
         return voice_self_email(call, call_id=call_id)
     if name == QUEUE_TOOL:
@@ -823,12 +913,14 @@ class LiveCall:
             if etype == "ping":
                 await self.send_client_json({"type": "pong", "remaining": self.remaining()})
             elif etype == "text" and str(event.get("text") or "").strip():
+                typed = str(event["text"])[:2000]
                 self._turn_started = time.monotonic()
-                self._record("add_user", str(event["text"])[:2000], "typed")
+                self.last_user_text = typed
+                self._record("add_user", typed, "typed")
                 await self.send_upstream({
                     "type": "conversation.item.create",
                     "item": {"type": "message", "role": "user",
-                             "content": [{"type": "input_text", "text": str(event["text"])[:2000]}]},
+                             "content": [{"type": "input_text", "text": typed}]},
                 })
                 await self.send_upstream({"type": "response.create"})
             elif etype == "audio" and event.get("audio"):
@@ -990,7 +1082,8 @@ class LiveCall:
         started = time.monotonic()
         try:
             data = await asyncio.to_thread(run_voice_tool, name, args, call_id=self.call_id,
-                                           conversation_id=self.conversation_id)
+                                           conversation_id=self.conversation_id,
+                                           user_text=self.last_user_text)
         except Exception as exc:
             data = {"success": False, "error": f"{type(exc).__name__}: {exc}"}
         ok = bool(data.get("success"))

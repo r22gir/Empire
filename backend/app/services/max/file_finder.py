@@ -112,8 +112,13 @@ def is_excluded(path: str | Path) -> bool:
 
 
 def _edition_allowed() -> bool:
-    ed = (os.getenv("EMPIRE_EDITION") or "main").strip().lower()
-    return ed in ("main", "workroom", "empire", "founder", "")
+    """Studio / workroom only. EMPIRE_DATA_DIR=/data/amp is family even if EMPIRE_EDITION is unset."""
+    try:
+        from app.edition import is_family_edition
+        return not is_family_edition()
+    except Exception:
+        ed = (os.getenv("EMPIRE_EDITION") or "main").strip().lower()
+        return ed in ("main", "workroom", "empire", "founder", "studio", "")
 
 
 def search_roots() -> list[Path]:

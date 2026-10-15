@@ -21,7 +21,6 @@ from contextvars import ContextVar
 from app.config.business_config import biz
 from app.db.database import get_db, dict_row, dict_rows
 from app.services import data_paths as dp
-from app.services.max.inpaint_service import inpaint_service
 
 try:
     from app.services.max.access_control import access_controller
@@ -2253,6 +2252,7 @@ def _create_quick_quote(params: dict, desk: Optional[str] = None) -> ToolResult:
 
     if photo_b64 and rooms and design_proposals:
         try:
+            from app.services.max.inpaint_service import inpaint_service
             mockup_result = _run_async(inpaint_service.generate_all_mockups(
                 photo_b64=photo_b64,
                 rooms=rooms,
@@ -3092,6 +3092,9 @@ def _get_services_health(params: dict, desk: Optional[str] = None) -> ToolResult
                 results[name] = {"status": "online", "port": svc["port"], "description": svc["description"], "type": "port"}
         except Exception:
             results[name] = {"status": "offline", "port": svc["port"], "description": svc["description"]}
+
+    from app.services.max.desks.live_services import avatar_service_status
+    results["avatar"] = avatar_service_status()
 
     online = sum(1 for s in results.values() if s["status"] == "online")
     return ToolResult(tool="get_services_health", success=True, result={
@@ -6673,9 +6676,14 @@ Delegate-first: use run_desk_task for desk-owned work (not only "complex" tasks)
 # ── DEV TOOLS (Atlas/Orion) ─────────────────────────────────────────
 
 from app.services.max.tool_safety import validate_path, validate_command, is_critical_file
-from app.services.max.tool_audit import log_execution
 import subprocess
 import time as _time
+
+
+def log_execution(*args, **kwargs):
+    """Lazy import — tool_audit.init_audit_db() mkdirs on load; tests must not."""
+    from app.services.max.tool_audit import log_execution as _log
+    return _log(*args, **kwargs)
 
 
 _REPO_SECRET_NAME = re.compile(
@@ -8716,6 +8724,36 @@ try:
     TOOLS_DOC = TOOLS_DOC + _tools_ui_map.UI_MAP_TOOLS_DOC
 except Exception as _ui_map_err:
     logger.error(f"tools_ui_map not loaded: {_ui_map_err}")
+
+# Today's calendar + Organizer + tasks (Fix A).
+try:
+    _today_name = "app.services.max.today_agenda"
+    _today_agenda = (_importlib.reload(_sys.modules[_today_name]) if _today_name in _sys.modules
+                     else _importlib.import_module(_today_name))
+    _today_agenda.register_tools(tool, ToolResult)
+    TOOLS_DOC = TOOLS_DOC + _today_agenda.TODAY_AGENDA_DOC
+except Exception as _today_err:
+    logger.error(f"today_agenda not loaded: {_today_err}")
+
+# Founder-only send-me-this-link (Fix B).
+try:
+    _send_me_name = "app.services.max.send_me_link"
+    _send_me_link = (_importlib.reload(_sys.modules[_send_me_name]) if _send_me_name in _sys.modules
+                     else _importlib.import_module(_send_me_name))
+    if not _send_me_link.family_edition_blocked():
+        _send_me_link.register_tools(tool, ToolResult)
+        TOOLS_DOC = TOOLS_DOC + _send_me_link.SEND_ME_LINK_DOC
+except Exception as _send_me_err:
+    logger.error(f"send_me_link not loaded: {_send_me_err}")
+
+# Voice "can you do X" from the capability list.
+try:
+    _can_do_name = "app.services.max.voice_can_do"
+    _can_do = (_importlib.reload(_sys.modules[_can_do_name]) if _can_do_name in _sys.modules
+               else _importlib.import_module(_can_do_name))
+    _can_do.register_tools(tool, ToolResult)
+except Exception as _can_do_err:
+    logger.error(f"voice_can_do not loaded: {_can_do_err}")
 
 # QuoteIQ job-request chain (intake → CRM → dims → Pricing Studio → DRAFT).
 try:

@@ -5,6 +5,8 @@ parameters, result, access level, and desk. Never crashes on failure.
 """
 import os
 import sqlite3
+import sys
+import tempfile
 import time
 import json
 import logging
@@ -12,7 +14,15 @@ from datetime import datetime
 
 logger = logging.getLogger("max.tool_audit")
 
-AUDIT_DB = os.path.expanduser("~/empire-repo/backend/data/tool_audit.db")
+def _audit_db_path() -> str:
+    """Live path in production; temp under pytest so tests never mkdir ~/empire-repo."""
+    if "pytest" in sys.modules:
+        root = os.environ.get("EMPIRE_DATA_DIR") or tempfile.gettempdir()
+        return os.path.join(root, "tool_audit.db")
+    return os.path.expanduser("~/empire-repo/backend/data/tool_audit.db")
+
+
+AUDIT_DB = _audit_db_path()
 
 
 def init_audit_db():

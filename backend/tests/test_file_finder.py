@@ -226,3 +226,16 @@ def test_voice_has_file_search_and_share():
 def test_truth_guard_accepts_find_files_proof():
     from app.services.max.runtime_truth_enforcer import PROOF_TOOL_EXACT
     assert {"find_files", "share_file"} <= PROOF_TOOL_EXACT
+
+
+def test_edition_uses_is_family_edition_data_dir_amp(monkeypatch):
+    monkeypatch.setenv("EMPIRE_DATA_DIR", "/data/amp")
+    monkeypatch.delenv("EMPIRE_EDITION", raising=False)
+    assert ff._edition_allowed() is False
+    assert ff.find_files("drawing")["found"] is False
+
+
+def test_edition_uses_is_family_edition_maxine(monkeypatch):
+    monkeypatch.setenv("EMPIRE_EDITION", "maxine")
+    assert ff._edition_allowed() is False
+    assert ff.find_files("drawing")["found"] is False

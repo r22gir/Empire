@@ -18,6 +18,7 @@ LIVE_SERVICES: list[dict[str, Any]] = [
     {"id": "empire-portal", "name": "empire-portal", "kind": "tcp", "port": 3005},
     {"id": "empire-amp", "name": "empire-amp", "kind": "systemd", "unit": "empire-amp"},
     {"id": "empire-maxine", "name": "empire-maxine", "kind": "systemd", "unit": "empire-maxine"},
+    {"id": "avatar", "name": "avatar", "kind": "avatar", "module": "app.routers.avatar"},
     {"id": "tunnel", "name": "tunnel", "kind": "process", "process": "cloudflared"},
     {"id": "disk", "name": "disk", "kind": "disk", "path": "/"},
 ]
@@ -93,6 +94,67 @@ def _disk_status(path: str = "/") -> dict[str, Any]:
     }
 
 
+def avatar_readiness() -> dict[str, Any]:
+    """Same checks as GET /avatar/status: Simli, TTS, STT, live voice."""
+    checks: dict[str, bool] = {}
+    details: dict[str, Any] = {}
+    try:
+        from app.services.max.simli_avatar import simli_status
+        simli = simli_status("workroom")
+        checks["simli"] = bool(simli.get("enabled"))
+        details["simli"] = simli.get("status") or simli.get("reason")
+    except Exception as exc:
+        checks["simli"] = False
+        details["simli"] = type(exc).__name__
+    try:
+        from app.services.max.tts_service import tts_service
+        checks["tts"] = bool(tts_service.is_configured)
+    except Exception as exc:
+        checks["tts"] = False
+        details["tts"] = type(exc).__name__
+    try:
+        from app.services.max.stt_service import stt_service
+        checks["stt"] = bool(stt_service.is_configured)
+    except Exception as exc:
+        checks["stt"] = False
+        details["stt"] = type(exc).__name__
+    try:
+        from app.services.max.voice_live import voice_status
+        vs = voice_status()
+        checks["voice"] = bool(vs.get("enabled"))
+        details["voice"] = vs.get("reason")
+    except Exception as exc:
+        checks["voice"] = False
+        details["voice"] = type(exc).__name__
+    return {
+        "online": all(checks.values()) if checks else False,
+        "checks": checks,
+        "details": details,
+    }
+
+
+def avatar_service_status() -> dict[str, Any]:
+    """Avatar / Presentation Mode — down when Simli, TTS, STT or live voice is off."""
+    ready = avatar_readiness()
+    return {
+        "status": "online" if ready["online"] else "offline",
+        "port": 8000,
+        "description": "Avatar / Presentation Mode (served on backend port 8000)",
+        "type": "avatar",
+        "checks": ready["checks"],
+        "detail": ready["details"],
+    }
+
+
+def _module_importable(name: str) -> bool:
+    try:
+        import importlib
+        importlib.import_module(name)
+        return True
+    except Exception:
+        return False
+
+
 def check_live_services(
     *,
     port_checker=port_open,
@@ -100,6 +162,7 @@ def check_live_services(
     systemd_checker=_systemd_active,
     process_checker=_process_running,
     disk_checker=_disk_status,
+    module_checker=_module_importable,
 ) -> list[dict[str, Any]]:
     """Return a status row for each live service. Inject checkers in tests."""
     rows: list[dict[str, Any]] = []
@@ -125,6 +188,20 @@ def check_live_services(
                 **svc,
                 "up": up,
                 "detail": f"container {svc.get('container')} {'running' if up else 'not running'}",
+            })
+        elif kind == "avatar":
+            row = avatar_service_status()
+            rows.append({
+                **svc,
+                "up": row["status"] == "online",
+                "detail": row.get("detail") or row.get("status"),
+            })
+        elif kind == "module":
+            up = bool(module_checker(svc.get("module") or svc.get("name")))
+            rows.append({
+                **svc,
+                "up": up,
+                "detail": f"module {svc.get('module')} {'loaded' if up else 'missing'}",
             })
         elif kind == "process":
             up = bool(process_checker(svc["process"]))
