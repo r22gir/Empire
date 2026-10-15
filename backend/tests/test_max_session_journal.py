@@ -154,13 +154,22 @@ def test_family_edition_refused(env, monkeypatch, tmp_path):
 
 
 def test_export_endpoint_family_and_unknown_editions_are_403(env, monkeypatch, tmp_path):
-    """POST /sessions/export maps FamilyEditionError to HTTP 403 without writing."""
+    """POST /sessions/export maps FamilyEditionError to HTTP 403 without writing.
+
+    Load sessions.py by file path so app.routers.max.__init__ (Telegram) stays out.
+    """
+    import importlib.util
     from fastapi import FastAPI
     from fastapi.testclient import TestClient
-    from app.routers.max.sessions import router
+
+    path = Path(__file__).resolve().parents[1] / "app" / "routers" / "max" / "sessions.py"
+    spec = importlib.util.spec_from_file_location("max_sessions_export_router", path)
+    mod = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    spec.loader.exec_module(mod)
 
     app = FastAPI()
-    app.include_router(router)
+    app.include_router(mod.router)
     client = TestClient(app)
     for ed in ("amp", "maxine", "max-e", "maxe", "unknown"):
         monkeypatch.setenv("EMPIRE_EDITION", ed)
