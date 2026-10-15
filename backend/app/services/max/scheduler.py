@@ -7,8 +7,6 @@ import logging
 import asyncio
 import os
 from datetime import datetime
-from apscheduler.schedulers.asyncio import AsyncIOScheduler
-from apscheduler.triggers.cron import CronTrigger
 
 from pathlib import Path
 
@@ -17,14 +15,177 @@ from app.edition import brain_sync_storage_paths
 
 logger = logging.getLogger("max.scheduler")
 
+_DAYS_ES = (
+    "lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo",
+)
+_MONTHS_ES = (
+    "enero", "febrero", "marzo", "abril", "mayo", "junio",
+    "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre",
+)
+
+
+def _family_mode() -> bool:
+    try:
+        from app.edition import is_family_edition
+        return bool(is_family_edition())
+    except Exception:
+        return False
+
+
+def format_brief_date_es(now: datetime) -> str:
+    return f"{_DAYS_ES[now.weekday()]} {now.day} de {_MONTHS_ES[now.month - 1]} de {now.year}"
+
+
+def _refuse_live_brief_send() -> None:
+    """Tests must mock EmailService.send. Never hit SMTP from pytest."""
+    if os.environ.get("PYTEST_CURRENT_TEST"):
+        raise RuntimeError("morning brief email blocked under pytest — mock EmailService.send")
+
+
+def family_morning_brief_recipient() -> str:
+    """First EDITION_OWNER_EMAIL that is not denied. Empty if unset or denied."""
+    from app.services.max.send_me_link import (
+        is_denied_email, owner_email, owner_email_env_is_denied,
+    )
+    if owner_email_env_is_denied():
+        return ""
+    to = owner_email()
+    if not to or is_denied_email(to):
+        return ""
+    return to
+
+
+def compile_daily_brief(now: datetime | None = None) -> str:
+    """Build this instance's morning brief. Family: Spanish, edition data only."""
+    import psutil
+    from app.edition import brain_sync_storage_paths
+
+    now = now or datetime.now()
+    cpu = psutil.cpu_percent(interval=0)
+    ram = psutil.virtual_memory()
+    disk = psutil.disk_usage("/")
+
+    open_tasks = 0
+    overdue_tasks = 0
+    try:
+        from app.db.database import get_db
+        with get_db() as db:
+            cursor = db.execute("SELECT COUNT(*) FROM tasks WHERE status IN ('todo','in_progress')")
+            open_tasks = cursor.fetchone()[0]
+            cursor = db.execute(
+                "SELECT COUNT(*) FROM tasks WHERE status IN ('todo','in_progress') "
+                "AND due_date IS NOT NULL AND due_date < ?",
+                (now.strftime("%Y-%m-%d"),)
+            )
+            overdue_tasks = cursor.fetchone()[0]
+    except Exception:
+        pass
+
+    inbox_count = 0
+    if _family_mode():
+        inbox_dir = brain_sync_storage_paths()["inbox"]
+    else:
+        inbox_dir = Path.home() / "empire-repo" / "backend" / "data" / "inbox"
+    if inbox_dir.exists():
+        inbox_count = len(list(inbox_dir.glob("*.json")))
+
+    if _family_mode():
+        from app.edition import greeting
+        date_es = format_brief_date_es(now)
+        brief = (
+            f"{greeting('es')}\n\n"
+            f"<b>☀️ Resumen de la mañana</b>\n"
+            f"<i>{date_es}</i>\n\n"
+            f"📋 <b>Tareas:</b> {open_tasks} abiertas"
+        )
+        if overdue_tasks:
+            brief += f" ({overdue_tasks} vencidas ⚠️)"
+        brief += (
+            f"\n📥 <b>Bandeja:</b> {inbox_count} elementos\n"
+            f"💻 <b>Sistema:</b> CPU {cpu}% | RAM {ram.percent}% | Disco {disk.percent}%\n"
+        )
+        if overdue_tasks:
+            brief += f"\n⚠️ {overdue_tasks} tarea(s) vencida(s)"
+        if ram.percent > 85:
+            brief += f"\n⚠️ Uso de RAM alto ({ram.percent}%)"
+        if disk.percent > 90:
+            brief += f"\n⚠️ Uso de disco alto ({disk.percent}%)"
+        try:
+            from app.edition import is_maxine
+            if is_maxine():
+                from app.services.voice_doc.deals import overdue_brief_text
+                overdue = overdue_brief_text()
+                if overdue:
+                    import html as _html
+                    brief += "\n\n" + _html.escape(overdue)
+        except Exception:
+            logger.debug("Maxine overdue payments were not added to the brief", exc_info=True)
+        return brief
+
+    brief = (
+        f"<b>☀️ {biz.business_name} Morning Brief</b>\n"
+        f"<i>{now.strftime('%A, %B %d, %Y')}</i>\n\n"
+        f"📋 <b>Tasks:</b> {open_tasks} open"
+    )
+    if overdue_tasks:
+        brief += f" ({overdue_tasks} overdue ⚠️)"
+    brief += (
+        f"\n📥 <b>Inbox:</b> {inbox_count} items\n"
+        f"💻 <b>System:</b> CPU {cpu}% | RAM {ram.percent}% | Disk {disk.percent}%\n"
+    )
+    if overdue_tasks:
+        brief += f"\n⚠️ {overdue_tasks} task(s) overdue — check /tasks"
+    if ram.percent > 85:
+        brief += f"\n⚠️ RAM usage high ({ram.percent}%)"
+    if disk.percent > 90:
+        brief += f"\n⚠️ Disk usage high ({disk.percent}%)"
+    return brief
+
+
+def email_daily_brief(brief: str, now: datetime | None = None) -> dict:
+    """Email the morning brief. Family: EDITION_OWNER_EMAIL only, cc=None."""
+    now = now or datetime.now()
+    family = _family_mode()
+    if family:
+        to = family_morning_brief_recipient()
+        if not to:
+            logger.info("Morning brief skipped: EDITION_OWNER_EMAIL is unset or denied")
+            return {"sent": False, "skipped": True, "to": None, "cc": None}
+        subject = f"☀️ Resumen de la mañana — {format_brief_date_es(now)}"
+    else:
+        to = os.environ.get("FOUNDER_EMAIL", "empirebox2026@gmail.com")
+        subject = f"☀️ Empire Morning Brief — {now.strftime('%A, %B %d')}"
+
+    _refuse_live_brief_send()
+
+    from app.services.max.email_service import EmailService
+    svc = EmailService()
+    if not svc.is_configured:
+        logger.info("Morning brief not emailed: email is not configured")
+        return {"sent": False, "skipped": True, "to": to, "cc": None}
+    email_body = brief.replace("\n", "<br>")
+    sent = svc.send(
+        to=to,
+        subject=subject,
+        body_html=email_body,
+        cc=None,
+    )
+    if sent:
+        logger.info("Morning brief emailed to owner")
+        return {"sent": True, "skipped": False, "to": to, "cc": None}
+    logger.warning("Morning brief email was not accepted")
+    return {"sent": False, "skipped": False, "to": to, "cc": None}
+
 
 class MaxScheduler:
     def __init__(self):
+        from apscheduler.schedulers.asyncio import AsyncIOScheduler
         self.scheduler = AsyncIOScheduler(timezone=biz.timezone)
         self._started = False
         self._last_brief = None  # Cached for on-demand retrieval
 
     async def start(self):
+        from apscheduler.triggers.cron import CronTrigger
         if self._started:
             return
         self._started = True
@@ -98,99 +259,22 @@ class MaxScheduler:
             logger.exception("Nightly Drive export failed")
 
     async def send_daily_brief(self):
-        """Compile and send morning brief via Telegram."""
+        """Compile and email the 8:00 AM morning brief. Family: owner only, no CC."""
         try:
-            from app.services.max.telegram_bot import telegram_bot
-            if not telegram_bot.is_configured:
-                return
+            family = _family_mode()
+            if not family:
+                from app.services.max.telegram_bot import telegram_bot
+                if not telegram_bot.is_configured:
+                    return
 
-            # Gather stats
-            import psutil
-            from pathlib import Path
-            import json
-
-            now = datetime.now()
-            cpu = psutil.cpu_percent(interval=1)
-            ram = psutil.virtual_memory()
-            disk = psutil.disk_usage("/")
-
-            # Count open tasks
-            open_tasks = 0
-            overdue_tasks = 0
-            try:
-                from app.db.database import get_db
-                db = get_db()
-                cursor = db.execute("SELECT COUNT(*) FROM tasks WHERE status IN ('todo','in_progress')")
-                open_tasks = cursor.fetchone()[0]
-                cursor = db.execute(
-                    "SELECT COUNT(*) FROM tasks WHERE status IN ('todo','in_progress') "
-                    "AND due_date IS NOT NULL AND due_date < ?",
-                    (now.strftime("%Y-%m-%d"),)
-                )
-                overdue_tasks = cursor.fetchone()[0]
-            except Exception:
-                pass
-
-            # Count inbox items
-            inbox_count = 0
-            inbox_dir = Path.home() / "empire-repo" / "backend" / "data" / "inbox"
-            if inbox_dir.exists():
-                inbox_count = len(list(inbox_dir.glob("*.json")))
-
-            brief = (
-                f"<b>☀️ {biz.business_name} Morning Brief</b>\n"
-                f"<i>{now.strftime('%A, %B %d, %Y')}</i>\n\n"
-                f"📋 <b>Tasks:</b> {open_tasks} open"
-            )
-            if overdue_tasks:
-                brief += f" ({overdue_tasks} overdue ⚠️)"
-            brief += (
-                f"\n📥 <b>Inbox:</b> {inbox_count} items\n"
-                f"💻 <b>System:</b> CPU {cpu}% | RAM {ram.percent}% | Disk {disk.percent}%\n"
-            )
-
-            if overdue_tasks:
-                brief += f"\n⚠️ {overdue_tasks} task(s) overdue — check /tasks"
-            if ram.percent > 85:
-                brief += f"\n⚠️ RAM usage high ({ram.percent}%)"
-            if disk.percent > 90:
-                brief += f"\n⚠️ Disk usage high ({disk.percent}%)"
-
-            try:
-                from app.edition import is_maxine
-
-                if is_maxine():
-                    from app.services.voice_doc.deals import overdue_brief_text
-
-                    overdue = overdue_brief_text()
-                    if overdue:
-                        import html as _html
-                        brief += "\n\n" + _html.escape(overdue)
-            except Exception:
-                logger.debug("Maxine overdue payments were not added to the brief", exc_info=True)
-
-            # Log to notifications
+            brief = compile_daily_brief()
+            self._last_brief = brief
             from app.routers.notifications import notify_founder
             notify_founder("MAX", "system_alert", "Morning Brief", brief, "low")
-            self._last_brief = brief
-
-            # Send morning brief email FROM max@empirebox.store TO founder
             try:
-                from app.services.max.email_service import EmailService
-                svc = EmailService()
-                if svc.is_configured:
-                    founder_email = os.environ.get("FOUNDER_EMAIL", "empirebox2026@gmail.com")
-                    # Convert Telegram HTML to email-friendly HTML
-                    email_body = brief.replace("\n", "<br>")
-                    svc.send(
-                        to=founder_email,
-                        subject=f"☀️ Empire Morning Brief — {now.strftime('%A, %B %d')}",
-                        body_html=email_body,
-                    )
-                    logger.info(f"Morning brief emailed to {founder_email}")
+                email_daily_brief(brief)
             except Exception as e:
                 logger.warning(f"Morning brief email failed: {e}")
-
             logger.info("Daily brief generated and dispatched")
         except Exception as e:
             logger.error(f"Daily brief failed: {e}")
@@ -200,14 +284,14 @@ class MaxScheduler:
         try:
             from app.db.database import get_db
             now = datetime.now().strftime("%Y-%m-%d")
-            db = get_db()
-            cursor = db.execute(
-                "SELECT id, title, due_date, desk FROM tasks "
-                "WHERE status IN ('todo','in_progress') AND due_date IS NOT NULL AND due_date < ? "
-                "ORDER BY due_date LIMIT 10",
-                (now,)
-            )
-            overdue = cursor.fetchall()
+            with get_db() as db:
+                cursor = db.execute(
+                    "SELECT id, title, due_date, desk FROM tasks "
+                    "WHERE status IN ('todo','in_progress') AND due_date IS NOT NULL AND due_date < ? "
+                    "ORDER BY due_date LIMIT 10",
+                    (now,)
+                )
+                overdue = cursor.fetchall()
             if not overdue:
                 return
 
