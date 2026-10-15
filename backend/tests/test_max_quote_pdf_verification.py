@@ -1,8 +1,10 @@
 """MAX quote PDF — skip verification for canonical line_items; propagate verifier errors."""
 from __future__ import annotations
 
+import io
 import json
 import uuid
+from pathlib import Path
 
 import pytest
 
@@ -50,11 +52,10 @@ async def test_generate_pdf_for_quote_canonical_manual_lines(draft_manual_line_q
     assert __import__("os").path.getsize(pdf_path) > 0
 
 
-def test_send_quote_email_surfaces_verifier_reasons_for_legacy_quote(tmp_path, monkeypatch):
-    """Legacy tier quotes that fail verification return specific reasons, not a generic error."""
-    import os
-
+def test_send_quote_email_json_quote_uses_mclean_not_weasy_verification(tmp_path, monkeypatch):
+    """Email attachments render through McLean; WeasyPrint verification is not the gate."""
     from app.services.data_paths import quotes_data_dir
+    from app.services.max import tool_executor as te
     from app.services.max.tool_executor import _send_quote_email
 
     legacy_id = f"leg{uuid.uuid4().hex[:6]}"
@@ -62,29 +63,62 @@ def test_send_quote_email_surfaces_verifier_reasons_for_legacy_quote(tmp_path, m
     legacy = {
         "id": legacy_id,
         "quote_number": quote_number,
-        "customer_name": "Legacy Tier Fail",
+        "customer_name": "Legacy Json Quote",
         "total": 100,
         "status": "draft",
-        "rooms": [{
-            "name": "LR",
-            "windows": [{"name": "W1", "treatmentType": "ripplefold"}],
+        "line_items": [{
+            "description": "Seat",
+            "quantity": 1,
+            "unit": "ea",
+            "rate": 100,
+            "amount": 100,
+            "room": "Dining",
         }],
+        "deposit_required": 50,
+        "balance_due": 50,
+        "deposit_percent": 50,
     }
-    legacy_path = quotes_data_dir() / f"{legacy_id}.json"
+    pdf_dir = tmp_path / "pdf"
+    pdf_dir.mkdir()
+    monkeypatch.setattr(te.dp, "quote_pdf_dir", lambda: pdf_dir)
+    monkeypatch.setattr("app.services.data_paths.quote_pdf_dir", lambda: pdf_dir)
+    monkeypatch.setattr("app.services.quote_pdf_service.quote_pdf_dir", lambda: pdf_dir)
+
+    sent = []
+
+    class FakeSvc:
+        is_configured = True
+        last_message_id = "json-mclean"
+
+        def send(self, **kwargs):
+            sent.append(kwargs)
+            return True
+
+    monkeypatch.setattr("app.services.max.email_service.EmailService", FakeSvc)
+
+    quotes_dir = quotes_data_dir()
+    quotes_dir.mkdir(parents=True, exist_ok=True)
+    legacy_path = quotes_dir / f"{legacy_id}.json"
     try:
         with open(legacy_path, "w") as f:
             json.dump(legacy, f)
 
-        monkeypatch.setenv("FOUNDER_EMAIL", "empirebox2026@gmail.com")
         result = _send_quote_email({
             "quote_id": legacy_id,
             "to": "empirebox2026@gmail.com",
         })
-        assert not result.success
-        err = result.error or ""
-        assert "PDF generation failed" in err
-        assert "No pricing tiers found in quote" in err
-        assert err != "PDF generation failed"
+        assert result.success, result.error
+        assert sent and sent[0]["to"] == "empirebox2026@gmail.com"
+        assert sent[0].get("cc") in (None, "", [])
+        pdf_bytes = Path(sent[0]["attachments"][0]).read_bytes()
+        assert pdf_bytes[:4] == b"%PDF"
+        from pypdf import PdfReader
+        text = "\n".join(
+            (p.extract_text() or "") for p in PdfReader(io.BytesIO(pdf_bytes)).pages
+        )
+        assert "MANUAL_LINE" not in text.upper()
+        assert "Deposit" in text
+        assert "Balance" in text
     finally:
         if legacy_path.exists():
             legacy_path.unlink()

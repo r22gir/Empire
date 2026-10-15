@@ -62,6 +62,14 @@ FOUNDER_SELF_EMAILS = frozenset({
     "max@empirebox.store",
 })
 
+# Max estimate emails (send_quote_email) go only to this inbox. The Oct 8
+# send that CC'd rafa22giraldo@gmail.com is retired; clients never receive
+# an estimate from MAX.
+ESTIMATE_EMAIL_ONLY = "empirebox2026@gmail.com"
+ESTIMATE_EMAIL_BLOCKED = frozenset({
+    "rafa22giraldo@gmail.com",
+})
+
 
 def normalize_address(addr: str | None) -> str:
     """Extract + lowercase + strip the mailbox from a raw address."""
@@ -74,6 +82,30 @@ def normalize_address(addr: str | None) -> str:
 def is_founder_self_email(addr: str | None) -> bool:
     """True when the mailbox is one of Rafael's own addresses."""
     return normalize_address(addr) in FOUNDER_SELF_EMAILS
+
+
+def authorize_estimate_email_recipient(recipient: str | None) -> dict:
+    """Authorize an estimate-email recipient.
+
+    send_quote_email may only deliver to empirebox2026@gmail.com. Aliases
+    such as 'me' are remapped by the executor before this check. rafa22giraldo
+    and every client/customer address are refused — no CC path either.
+    """
+    address = normalize_address(recipient)
+    if address == ESTIMATE_EMAIL_ONLY:
+        return {
+            "recipient_address": address,
+            "recipient_authorized": True,
+            "blocked_reason": None,
+            "whitelist_configured": True,
+        }
+    reason = "recipient_missing" if not address else "estimate_emails_founder_inbox_only"
+    return {
+        "recipient_address": address,
+        "recipient_authorized": False,
+        "blocked_reason": reason,
+        "whitelist_configured": True,
+    }
 
 
 def _default_internal_addresses() -> set[str]:

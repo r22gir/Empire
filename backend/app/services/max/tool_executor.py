@@ -13,7 +13,7 @@ import shlex
 import psutil
 import httpx
 from dataclasses import dataclass, asdict
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional
 from contextvars import ContextVar
@@ -3268,55 +3268,64 @@ def _pdf_error_from_verification_payload(content: dict) -> str:
     return f"PDF generation failed: {base}"
 
 
+def _quote_pdf_path(quote: dict) -> str:
+    qn = quote.get("quote_number") or quote.get("id") or "estimate"
+    return os.path.join(str(dp.quote_pdf_dir()), f"{qn}.pdf")
+
+
+def _pdf_is_stale(pdf_path: str, quote: dict) -> bool:
+    """True when the on-disk PDF is missing or older than the quote's latest edit."""
+    if not os.path.exists(pdf_path) or os.path.getsize(pdf_path) < 8:
+        return True
+    try:
+        with open(pdf_path, "rb") as handle:
+            if handle.read(4) != b"%PDF":
+                return True
+    except OSError:
+        return True
+    from app.services.quote_service import _as_utc
+    edited = _as_utc(quote.get("updated_at") or quote.get("created_at"))
+    if not edited:
+        return True
+    mtime = datetime.fromtimestamp(os.path.getmtime(pdf_path), tz=timezone.utc)
+    return mtime < edited
+
+
+def _estimate_email_stamp(quote: dict) -> str:
+    """Revision, current total, and generation time in ET — so an old email
+    is not mistaken for a new one."""
+    from zoneinfo import ZoneInfo
+    from app.services.estimates.mclean_estimate_pdf import _quote_rev
+
+    rev = _quote_rev(quote)
+    try:
+        total = float(quote.get("total") or 0)
+    except (TypeError, ValueError):
+        total = 0.0
+    now_et = datetime.now(ZoneInfo("America/New_York"))
+    clock = now_et.strftime("%I:%M %p").lstrip("0")
+    date = now_et.strftime("%b %d, %Y").replace(" 0", " ")
+    return f"Rev {rev} · ${total:,.2f} · generated {date} {clock} ET"
+
+
 async def _generate_pdf_for_quote(quote_id: str) -> str:
-    """Generate PDF for a quote by ID (reuses quotes router logic).
+    """Generate the McLean estimate PDF (same renderer as GET /quotes/{id}/pdf).
 
-    AI-generated quotes (source=max_quick_quote) skip verification
-    since they use a different data structure than QIS quotes.
-
-    PHASE 2 · F5.2: uses the shared resolver `quote_service.resolve_quote`
-    so the router-side and tool-side load paths share ONE canonical-first
-    resolver instead of duplicating the logic.
-
-    Returns the on-disk PDF path. Raises QuotePdfGenerationError when the
-    router returns a verification JSONResponse (4xx) instead of raising.
+    Writes quotes/pdf/<number>.pdf. v2 quotes never go through the WeasyPrint
+    portrait template. PHASE 2 · F5.2: uses the shared resolver.
     """
     from fastapi import HTTPException
-    from starlette.responses import JSONResponse
 
     from app.services.quote_service import resolve_quote
-    from app.routers.quotes import generate_pdf as _gen_pdf_endpoint
+    from app.services.estimates.mclean_estimate_pdf import render_and_save_mclean_pdf
+
     quote = resolve_quote(quote_id)
     if not quote:
         raise HTTPException(status_code=404, detail=f"Quote {quote_id} not found")
-    # PHASE 2 · F5.3 — skip verification when:
-    #   - source starts with "max_" (AI-generated / legacy), OR
-    #   - status is past draft/proposal (sent/accepted/in_production/completed)
-    #     — founder has already verified + approved the canonical quote, so a
-    #     re-verification is redundant and may fail on tier/dimension checks
-    #     that don't apply to canonical-shape quotes.
-    #   - canonical quotes_v2 with explicit line_items (manual_line /
-    #     founder-priced lines) — tiers/measurements do not apply.
-    status = (quote.get("status") or "").lower()
-    verified_statuses = {"sent", "accepted", "in_production", "completed", "cancelled"}
-    has_line_items = bool(quote.get("line_items"))
-    skip = (
-        (quote.get("source") or "").startswith("max_")
-        or status in verified_statuses
-        or has_line_items
-    )
-    response = await _gen_pdf_endpoint(quote_id, skip_verification=skip)
-    if isinstance(response, JSONResponse):
-        try:
-            content = json.loads(response.body.decode())
-        except Exception:
-            content = {}
-        raise QuotePdfGenerationError(_pdf_error_from_verification_payload(content))
-
-    quote_number = quote.get("quote_number", quote_id)
     pdf_dir = str(dp.quote_pdf_dir())
-    pdf_path = os.path.join(pdf_dir, f"{quote_number}.pdf")
-    if not os.path.exists(pdf_path):
+    os.makedirs(pdf_dir, exist_ok=True)
+    _pdf_bytes, pdf_path = render_and_save_mclean_pdf(quote, pdf_dir=pdf_dir)
+    if not os.path.exists(pdf_path) or os.path.getsize(pdf_path) == 0:
         raise QuotePdfGenerationError("PDF generation failed: file was not written")
     return pdf_path
 
@@ -3573,29 +3582,31 @@ def _resolve_extra_attachments(params: dict) -> tuple[list[str], Optional[str]]:
 def _send_quote_email(params: dict, desk: Optional[str] = None) -> ToolResult:
     """Generate PDF(s) for quote(s) and send in one email to a recipient."""
     from app.services.max.email_recipient_whitelist import (
-        authorize_email_recipient, recipient_whitelist_status,
+        ESTIMATE_EMAIL_ONLY,
+        authorize_estimate_email_recipient,
     )
     quote_ids = _normalize_quote_id_list(params)
     to = str(params.get("to", "") or "").strip()
     if to.lower() in ("me", "myself", "rafael", "founder", "owner", "my email"):
-        to = MAX_DOC_EMAIL_TO
+        to = ESTIMATE_EMAIL_ONLY
     if not quote_ids:
         return ToolResult(tool="send_quote_email", success=False, error="No quote_id provided")
     if not to:
         return ToolResult(tool="send_quote_email", success=False, error="No recipient email (to) provided")
 
-    verdict_to = authorize_email_recipient(to)
+    # Estimates go only to empirebox2026@gmail.com — never rafa22giraldo, never clients.
+    verdict_to = authorize_estimate_email_recipient(to)
     if not verdict_to["recipient_authorized"]:
         logger.warning(
-            f"send_quote_email BLOCKED: recipient_authorized=False "
+            f"send_quote_email BLOCKED: estimate_emails_founder_inbox_only "
             f"reason={verdict_to['blocked_reason']} quote_ids={quote_ids}"
         )
         return ToolResult(
             tool="send_quote_email", success=False,
             error=(
-                f"recipient_not_in_whitelist: {verdict_to['blocked_reason']} "
-                f"(customer emails go through the portal accept flow — never "
-                f"via MAX email tools)"
+                "estimate_emails_founder_inbox_only: Max estimate emails go only "
+                "to empirebox2026@gmail.com (never clients, never "
+                "rafa22giraldo@gmail.com)"
             ),
             result=verdict_to,
         )
@@ -3621,15 +3632,17 @@ def _send_quote_email(params: dict, desk: Optional[str] = None) -> ToolResult:
                 tool="send_quote_email", success=False,
                 error=f"Quote {qid} not found",
             )
-        try:
-            pdf_path = _run_async(_generate_pdf_for_quote(quote["id"]))
-        except QuotePdfGenerationError as e:
-            return ToolResult(tool="send_quote_email", success=False, error=str(e))
-        except Exception as e:
-            return ToolResult(
-                tool="send_quote_email", success=False,
-                error=f"PDF generation failed for {qid}: {e}",
-            )
+        pdf_path = _quote_pdf_path(quote)
+        if _pdf_is_stale(pdf_path, quote):
+            try:
+                pdf_path = _run_async(_generate_pdf_for_quote(quote["id"]))
+            except QuotePdfGenerationError as e:
+                return ToolResult(tool="send_quote_email", success=False, error=str(e))
+            except Exception as e:
+                return ToolResult(
+                    tool="send_quote_email", success=False,
+                    error=f"PDF generation failed for {qid}: {e}",
+                )
         quotes.append(quote)
         pdf_paths.append(pdf_path)
 
@@ -3648,14 +3661,15 @@ def _send_quote_email(params: dict, desk: Optional[str] = None) -> ToolResult:
                 error="Email not configured — set SMTP_USER and SMTP_PASSWORD in .env",
             )
 
+        stamp = _estimate_email_stamp(primary)
         if len(quotes) == 1:
-            subject = f"Estimate {quote_number} — {customer}"
+            subject = f"Estimate {quote_number} — {customer} — {stamp}"
             attach_lines = [f"- Estimate {quote_number}"]
         else:
-            subject = f"Estimates {', '.join(str(n) for n in all_numbers)} — {customer}"
+            subject = f"Estimates {', '.join(str(n) for n in all_numbers)} — {customer} — {stamp}"
             attach_lines = [f"- Estimate {n}" for n in all_numbers]
         if params.get("subject"):
-            subject = str(params.get("subject"))[:200]
+            subject = f"{str(params.get('subject'))[:120]} — {stamp}"
         attach_lines += [f"- {os.path.basename(p)}" for p in extra_paths]
         all_files = pdf_paths + extra_paths
         total_size = sum(os.path.getsize(p) for p in all_files if os.path.exists(p))
@@ -3670,26 +3684,23 @@ def _send_quote_email(params: dict, desk: Optional[str] = None) -> ToolResult:
             body_text += "\n".join(attach_lines)
             body_text += (
                 f"\n\nCustomer: {customer}\n"
-                f"Quote number(s): {', '.join(str(n) for n in all_numbers)}\n\n"
+                f"Quote number(s): {', '.join(str(n) for n in all_numbers)}\n"
+                f"Current total: ${float(total or 0):,.2f}\n"
+                f"{stamp}\n\n"
                 "If you have any questions, please don't hesitate to reach out."
             )
+        elif stamp not in str(body_text):
+            body_text = f"{body_text.rstrip()}\n\n{stamp}\nCurrent total: ${float(total or 0):,.2f}"
 
-        # Standing CC (same policy as send_email)
-        cc_list = _merge_standing_email_cc(to, params.get("cc"))
-        if cc_list:
-            bad = [a for a in cc_list if not authorize_email_recipient(a)["recipient_authorized"]]
-            if bad:
-                return ToolResult(
-                    tool="send_quote_email", success=False,
-                    error=f"recipient_not_in_whitelist: cc contains non-allowlisted address(es)",
-                )
+        # Estimate emails never CC rafa22giraldo@gmail.com (or anyone).
+        cc_list: list[str] = []
         sent = svc.send(
             to=to,
             subject=subject,
             body_text=body_text,
             recipient_name=customer,
             attachments=all_files,
-            cc=", ".join(cc_list) if cc_list else None,
+            cc=None,
             reply_to=DEFAULT_REPLY_TO,
         )
         if not sent:
@@ -6506,10 +6517,10 @@ State machine: `draft → founder_review → sent → accepted → in_production
 - **send_email** — Send an email with optional file attachments
   `{"tool": "send_email", "to": "client@example.com", "subject": "Your Estimate", "body": "<h2>Hello</h2><p>HTML body here</p>", "attachments": ["/path/to/file.pdf"], "cc": "optional@cc.com"}`
   IMPORTANT: When sending a PDF, you MUST include the file path in the "attachments" array. Without it, the email arrives with no attachment.
-- **send_quote_email** — Generate quote PDF(s) and email them in ONE email. Several quotes → `quote_ids: [...]`; mockups, drawings or other files from find_files ride along in the same email with `attachments: [file_id or path, ...]`. Never split one send into several emails.
-  `{"tool": "send_quote_email", "quote_id": "abc123", "to": "client@example.com"}`
+- **send_quote_email** — Generate McLean estimate PDF(s) and email them in ONE email, only to empirebox2026@gmail.com (use to="me"). Never CC rafa22giraldo@gmail.com, never email clients. Several quotes → `quote_ids: [...]`; mockups, drawings or other files from find_files ride along in the same email with `attachments: [file_id or path, ...]`. Never split one send into several emails.
+  `{"tool": "send_quote_email", "quote_id": "abc123", "to": "me"}`
   `{"tool": "send_quote_email", "quote_ids": ["EST-2026-299", "EST-2026-300"], "attachments": ["/home/rg/jobs/marleys-hyattsville/x/MOCKUP.pdf"], "to": "me"}`
-  Use this after creating/saving a quote to email the PDF directly to a client or the founder.
+  Use this after creating/saving a quote to email the PDF to the founder inbox.
 - **svg_to_pdf** — Convert SVG content or file to a PDF. Use this instead of writing Python scripts. Returns the PDF file path.
   `{"tool": "svg_to_pdf", "svg_content": "<svg>...</svg>", "output_path": "/home/rg/empire-repo/uploads/drawing.pdf"}`
   Or from file: `{"tool": "svg_to_pdf", "svg_path": "/path/to/drawing.svg"}`

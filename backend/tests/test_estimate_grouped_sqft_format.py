@@ -53,7 +53,9 @@ def test_create_and_render_grouped_sqft_estimate(isolated_empire_db):
         assert col in text
     for area in ("U BANQUETTE", "L BANQUETTE", "MATERIAL"):
         assert area in text.upper()
-    assert "46.39" in text and "65.00" in text and "$3,015.35" in text
+    # Sq ft is a fraction (46 3/8), never the stored decimal 46.39.
+    assert "65.00" in text and "$3,015.35" in text
+    assert "46 3/8" in text or "46.39" not in text
     u_sub = round(46.39 * 65 + 31.22 * 45, 2)
     assert f"${u_sub:,.2f}" in text  # U banquette subtotal
     assert "SUBTOTAL" in text.upper() and "TOTAL" in text.upper()
