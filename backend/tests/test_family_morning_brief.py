@@ -13,18 +13,26 @@ from pathlib import Path
 import pytest
 
 from app.services.max import scheduler as sched
+from app.services.max import send_me_link as sml
 
 
 FAKE_OWNER_EMAIL = "camilo.owner@example.com"
 FAKE_OWNER_EMAIL_2 = "camilo.work@example.com"
 FAKE_SIBLING_EMAIL = "juan.owner@example.com"
+FAKE_DENIED_EMAIL = "studio.denied@example.com"
+FAKE_DENIED_EMAIL_2 = "founder.denied@example.com"
 
-_ENC_STUDIO_EMAIL_A = "726166613232676972616c646f40676d61696c2e636f6d"
-_ENC_STUDIO_EMAIL_B = "656d70697265626f783230323640676d61696c2e636f6d"
+
+def _sha(value: str) -> str:
+    return hashlib.sha256(value.encode("utf-8")).hexdigest()
 
 
-def _from_hex(encoded: str) -> str:
-    return bytes.fromhex(encoded).decode("utf-8")
+def _patch_studio_hashes(monkeypatch):
+    monkeypatch.setattr(
+        sml,
+        "STUDIO_CONTACT_HASHES",
+        frozenset({_sha(FAKE_DENIED_EMAIL), _sha(FAKE_DENIED_EMAIL_2)}),
+    )
 
 
 def _maxine_env(monkeypatch, tmp_path):
@@ -123,9 +131,8 @@ def test_skips_denied_and_hashed_studio_contacts(tmp_path, monkeypatch):
     assert denied["skipped"] is True
     assert not sent
 
-    studio_a = _from_hex(_ENC_STUDIO_EMAIL_A)
-    studio_b = _from_hex(_ENC_STUDIO_EMAIL_B)
-    for owner in (studio_a, studio_b):
+    _patch_studio_hashes(monkeypatch)
+    for owner in (FAKE_DENIED_EMAIL, FAKE_DENIED_EMAIL_2):
         sent.clear()
         monkeypatch.setenv("EDITION_OWNER_EMAIL", owner)
         monkeypatch.delenv("EDITION_DENY_EMAIL", raising=False)
@@ -150,11 +157,7 @@ def test_send_never_targets_studio_contact_hashes(maxine, monkeypatch):
     monkeypatch.setattr("app.services.max.email_service.EmailService", _Svc)
     sched.email_daily_brief("hola manito")
     to_hash = hashlib.sha256(captured["to"].encode("utf-8")).hexdigest()
-    studio_hashes = {
-        hashlib.sha256(bytes.fromhex(item)).hexdigest()
-        for item in (_ENC_STUDIO_EMAIL_A, _ENC_STUDIO_EMAIL_B)
-    }
-    assert to_hash not in studio_hashes
+    assert to_hash not in sml.STUDIO_CONTACT_HASHES
     assert captured["to"] == FAKE_OWNER_EMAIL
     assert captured.get("cc") in (None, "", [])
 
