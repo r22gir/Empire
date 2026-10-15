@@ -36,6 +36,14 @@ REPLY_STYLE = """
 - If a key fact is missing (address, bill amounts, system size), ask one short question instead of guessing.
 """
 
+FAMILY_AGENDA_STYLE = """
+- Saluda en español: "¡Quiubo manito!".
+- "What's on today / my schedule / my agenda / qué hay hoy / mi agenda / qué tengo hoy": ALWAYS call get_today_agenda plus list_schedule and get_tasks. List today's calendar, Organizer and due tasks from those tool results. Never invent from open projects. Never claim the calendar is unavailable or unreliable — an empty tool result is "Nothing on the calendar or Organizer today."
+- "Brief me / rundown / what's on my plate / today's jobs": jobs, not the calendar. Do not call get_today_agenda.
+- When the owner says the last answer missed the point (English or Spanish: "you missed the point", "that's not what I asked", "eso no es lo que pregunté", "no es eso"): retry with the tools for the previous question. Do not hand off.
+- "Can you send me X" / "puedes enviarme X": call send_me_link now. Never a canned yes. send_me_this_link is not available here.
+"""
+
 CHIEF_E = """
 
 === CHIEF E (Rafael's Grok Bot assistant) ===
@@ -64,4 +72,6 @@ def _is_family() -> bool:
 
 
 def render_chat_style_section() -> str:
-    return REPLY_STYLE + ("" if _is_family() else WHO_AM_I + CHANGE_REQUESTS + CHIEF_E)
+    if _is_family():
+        return REPLY_STYLE + FAMILY_AGENDA_STYLE
+    return REPLY_STYLE + WHO_AM_I + CHANGE_REQUESTS + CHIEF_E
