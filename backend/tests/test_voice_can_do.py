@@ -62,6 +62,13 @@ def test_spanish_send_phrases_are_actions_with_via():
         "envíame el dibujo",
         "mándame el enlace",
         "pásame el link",
+        "mándamelo",
+        "envíamelo",
+        "pásamelo",
+        "me lo envías",
+        "me lo pasas",
+        "me lo mandas",
+        "mándamelo al correo",
     ):
         assert matching_action_tool(phrase) == "send_me_link", phrase
         assert answer_can_you_do(phrase) is None, phrase
@@ -70,9 +77,13 @@ def test_spanish_send_phrases_are_actions_with_via():
         assert res["result"]["answer"] is None, phrase
     mail = can_you_do({"question": "puedes enviarme el enlace por correo"})
     assert mail["result"]["via"] == "email"
+    clitic_mail = can_you_do({"question": "mándamelo al correo"})
+    assert clitic_mail["result"]["action_tool"] == "send_me_link"
+    assert clitic_mail["result"]["via"] == "email"
     wa = can_you_do({"question": "¿me puedes mandar el link?"})
     assert wa["result"]["via"] == "whatsapp"
     assert infer_via("pásalo a mi email") == "email"
+    assert infer_via("me lo envías al correo") == "email"
 
 
 def test_capability_list_covers_today_and_send():
