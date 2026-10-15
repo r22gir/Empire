@@ -10,7 +10,6 @@ import pytest
 
 from app.services.max import file_finder as ff
 from app.services.max import send_me_link as sml
-from app.services.max.tool_executor import TOOL_REGISTRY, execute_tool
 
 
 def _touch(p: Path, data: bytes = b"%PDF-1.4 drawing", age_days: float = 0.0) -> Path:
@@ -40,10 +39,6 @@ def home(tmp_path, monkeypatch):
     ff.INDEX.clear()
     yield h
     ff.INDEX.clear()
-
-
-def test_tool_is_registered():
-    assert "send_me_this_link" in TOOL_REGISTRY
 
 
 def test_allowlist_is_hardcoded_empirebox_only():
@@ -117,21 +112,19 @@ def test_email_send_is_mocked_and_only_empirebox(home, monkeypatch):
 
     monkeypatch.setattr(sml, "_deliver_email", fake_email)
     monkeypatch.setattr(sml, "_deliver_whatsapp", boom_wa)
-    out = execute_tool({
-        "tool": "send_me_this_link",
+    out = sml.send_me_this_link({
         "query": "the 3D drawing",
         "via": "email",
         "to": "me",
     })
-    assert out.success, out.error
+    assert out["success"], out.get("error")
     assert sent[0]["to"] == "empirebox2026@gmail.com"
-    assert out.result["sent_to"] == "empirebox2026@gmail.com"
-    assert "3d-drawing-latest" in out.result["name"]
+    assert out["result"]["sent_to"] == "empirebox2026@gmail.com"
+    assert "3d-drawing-latest" in out["result"]["name"]
 
 
 def test_whatsapp_send_is_mocked_and_founder_only(home, monkeypatch):
     sent = []
-    monkeypatch.setattr(sml, "founder_whatsapp_numbers", lambda: frozenset({"15555550100"}))
     monkeypatch.setattr(sml, "authorize_recipient", lambda via, to: {
         "authorized": True, "via": "whatsapp", "to": "15555550100", "error": None,
     })
@@ -145,33 +138,50 @@ def test_whatsapp_send_is_mocked_and_founder_only(home, monkeypatch):
 
     monkeypatch.setattr(sml, "_deliver_whatsapp", fake_wa)
     monkeypatch.setattr(sml, "_deliver_email", boom_email)
-    out = execute_tool({
-        "tool": "send_me_this_link",
+    out = sml.send_me_this_link({
         "query": "that drawing",
         "via": "whatsapp",
     })
-    assert out.success, out.error
+    assert out["success"], out.get("error")
     assert sent[0]["to"] == "15555550100"
-    assert out.result["via"] == "whatsapp"
-    assert out.result["sent_to"] == "rafael_whatsapp"
+    assert out["result"]["via"] == "whatsapp"
+    assert out["result"]["sent_to"] == "rafael_whatsapp"
 
 
 def test_blocked_email_never_reaches_deliver(home, monkeypatch):
     monkeypatch.setattr(sml, "_deliver_email", lambda *a, **k: (_ for _ in ()).throw(AssertionError("no send")))
     monkeypatch.setattr(sml, "_deliver_whatsapp", lambda *a, **k: (_ for _ in ()).throw(AssertionError("no send")))
-    out = execute_tool({
-        "tool": "send_me_this_link",
+    out = sml.send_me_this_link({
         "query": "the 3D drawing",
         "via": "email",
         "to": "rafa22giraldo@gmail.com",
     })
-    assert not out.success
-    assert "allowlist" in (out.error or "")
+    assert not out["success"]
+    assert "allowlist" in (out.get("error") or "")
 
 
 def test_voice_allowlist_includes_send_me_and_blocks_other_to():
     from app.services.max import voice_live as vl
     assert "send_me_this_link" in vl.VOICE_TOOL_ALLOWLIST
+    assert "get_today_agenda" in vl.VOICE_TOOL_ALLOWLIST
+    assert "can_you_do" in vl.VOICE_TOOL_ALLOWLIST
     refused = vl.run_voice_tool("send_me_this_link", {"query": "the 3D drawing", "to": "client@x.com"})
     assert refused["success"] is False
     assert "empirebox2026@gmail.com" in refused["error"]
+    also = vl.run_voice_tool("send_me_this_link", {"query": "the 3D drawing", "to": "rafa22giraldo@gmail.com"})
+    assert also["success"] is False
+
+
+def test_voice_authorized_send_is_mocked(home, monkeypatch):
+    from app.services.max import voice_live as vl
+    sent = []
+
+    def fake_email(path, *, to, subject, body):
+        sent.append({"path": path, "to": to})
+        return {"message_id": "<voice-mock>"}
+
+    monkeypatch.setattr(sml, "_deliver_email", fake_email)
+    monkeypatch.setattr(sml, "_deliver_whatsapp", lambda *a, **k: (_ for _ in ()).throw(AssertionError("no wa")))
+    out = vl.run_voice_tool("send_me_this_link", {"query": "the 3D drawing", "via": "email", "to": "me"})
+    assert out["success"], out.get("error")
+    assert sent[0]["to"] == "empirebox2026@gmail.com"

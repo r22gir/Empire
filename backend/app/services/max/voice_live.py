@@ -628,6 +628,34 @@ def run_voice_tool(name: str, arguments: dict[str, Any], *, call_id: str = "",
                                            f"self-email and queue_for_founder_approval only). Offer to queue it for "
                                            f"Rafael's approval instead."}
     call = {k: v for k, v in (arguments or {}).items() if not str(k).startswith("_")}
+    if name == SEND_ME_TOOL:
+        via = str(call.get("via") or "whatsapp").strip().lower()
+        if via not in ("whatsapp", "email"):
+            via = "whatsapp"
+        call["via"] = via
+        to = str(call.get("to") or "").strip()
+        if to and to.lower() not in ("", "me", "myself", "rafael", "founder", "owner",
+                                     "my email", "my whatsapp", "empirebox2026@gmail.com"):
+            return {"success": False, "tool": SEND_ME_TOOL, "error": (
+                "send_me_this_link only reaches Rafael's WhatsApp and empirebox2026@gmail.com. "
+                "Never clients, the brothers, or rafa22giraldo@gmail.com.")}
+        from app.services.max.send_me_link import send_me_this_link
+        data = send_me_this_link(call)
+        return {
+            "success": bool(data.get("success")),
+            "tool": SEND_ME_TOOL,
+            "result": data.get("result"),
+            "error": data.get("error"),
+        }
+    if name == "can_you_do":
+        from app.services.max.voice_can_do import can_you_do
+        data = can_you_do(call)
+        return {"success": True, "tool": "can_you_do", "result": data.get("result")}
+    if name == "get_today_agenda":
+        from app.services.max.today_agenda import collect_today_agenda
+        day = str(call.get("date") or call.get("day") or "").strip()
+        return {"success": True, "tool": "get_today_agenda",
+                "result": collect_today_agenda(day or None)}
     if name == SELF_EMAIL_TOOL:
         return voice_self_email(call, call_id=call_id)
     if name == QUEUE_TOOL:
@@ -686,17 +714,6 @@ def run_voice_tool(name: str, arguments: dict[str, Any], *, call_id: str = "",
         call["limit"] = min(int(call.get("limit") or 8), 20)
     elif name == SHARE_TOOL:
         call["via"] = str(call.get("via") or "email")
-    elif name == SEND_ME_TOOL:
-        via = str(call.get("via") or "whatsapp").strip().lower()
-        if via not in ("whatsapp", "email"):
-            via = "whatsapp"
-        call["via"] = via
-        to = str(call.get("to") or "").strip()
-        if to and to.lower() not in ("", "me", "myself", "rafael", "founder", "owner",
-                                     "my email", "my whatsapp", "empirebox2026@gmail.com"):
-            return {"success": False, "tool": SEND_ME_TOOL, "error": (
-                "send_me_this_link only reaches Rafael's WhatsApp and empirebox2026@gmail.com. "
-                "Never clients, the brothers, or rafa22giraldo@gmail.com.")}
     result = execute_tool(call, desk=None, access_context=None, founder=False, channel="voice_live")
     return _compact_for_voice(name, result.to_dict())
 

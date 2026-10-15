@@ -1,6 +1,9 @@
 """Fix C: avatar is part of the health check. No live writes."""
-from app.services.max.desks.live_services import LIVE_SERVICES, check_live_services
-from app.services.max.tool_executor import execute_tool
+from app.services.max.desks.live_services import (
+    LIVE_SERVICES,
+    avatar_service_status,
+    check_live_services,
+)
 
 
 def test_live_services_includes_avatar_module():
@@ -9,7 +12,7 @@ def test_live_services_includes_avatar_module():
     assert row["module"] == "app.routers.avatar"
 
 
-def test_check_live_services_reports_avatar(monkeypatch):
+def test_check_live_services_reports_avatar():
     rows = check_live_services(
         port_checker=lambda p: True,
         container_checker=lambda n: False,
@@ -23,13 +26,10 @@ def test_check_live_services_reports_avatar(monkeypatch):
     assert "module" in by_id["avatar"]["detail"]
 
 
-def test_get_services_health_includes_avatar():
-    res = execute_tool({"tool": "get_services_health"})
-    assert res.success
-    services = res.result["services"]
-    assert "avatar" in services
-    assert services["avatar"]["status"] == "online"
-    assert services["avatar"]["description"].lower().startswith("avatar")
+def test_avatar_service_status_is_online():
+    row = avatar_service_status()
+    assert row["status"] == "online"
+    assert row["description"].lower().startswith("avatar")
 
 
 def test_system_health_payload_has_avatar_key():

@@ -15,8 +15,6 @@ import os
 import re
 from typing import Any, Optional
 
-from app.services.max.tool_executor import ToolResult, tool
-
 logger = logging.getLogger("max.send_me_link")
 
 # Hardcoded. Not env. Not FOUNDER_SELF_EMAILS (that set includes rafa22giraldo).
@@ -182,8 +180,17 @@ def find_latest_document(query: str, history: Any = None) -> dict[str, Any]:
     }
 
 
+def _refuse_live_send(channel: str) -> None:
+    """Tests must mock _deliver_*. Never hit WhatsApp or SMTP from pytest."""
+    if os.environ.get("PYTEST_CURRENT_TEST"):
+        raise RuntimeError(
+            f"send_me_this_link {channel} send blocked under pytest — mock _deliver_{channel}"
+        )
+
+
 def _deliver_email(path: str, *, to: str, subject: str, body: str) -> dict[str, Any]:
     """Outbound email. Tests monkeypatch this. Never called with a live send in tests."""
+    _refuse_live_send("email")
     from app.services.max.tools_files import _temp_copy
     import shutil
     from app.services.max.tool_executor import execute_tool
@@ -211,14 +218,14 @@ def _deliver_email(path: str, *, to: str, subject: str, body: str) -> dict[str, 
 
 def _deliver_whatsapp(path: str, *, to: str, caption: str) -> dict[str, Any]:
     """Outbound WhatsApp. Tests monkeypatch this."""
+    _refuse_live_send("whatsapp")
     from app.services.max.tools_files import _run_async, _send_whatsapp_file
 
     return _run_async(_send_whatsapp_file(to, path, caption))
 
 
-@tool("send_me_this_link")
-def _send_me_this_link(params: dict, desk: Optional[str] = None) -> ToolResult:
-    """Send one link or document to Rafael only (WhatsApp or empirebox2026@gmail.com)."""
+def send_me_this_link(params: dict) -> dict[str, Any]:
+    """Core send. Returns {success, result?, error?}. Tests mock _deliver_*."""
     via = str(params.get("via") or params.get("channel") or "whatsapp").strip().lower()
     if via in ("mail", "gmail"):
         via = "email"
@@ -226,13 +233,12 @@ def _send_me_this_link(params: dict, desk: Optional[str] = None) -> ToolResult:
         via = "whatsapp"
     gate = authorize_recipient(via, params.get("to"))
     if not gate["authorized"]:
-        return ToolResult(tool="send_me_this_link", success=False, error=gate["error"])
+        return {"success": False, "error": gate["error"]}
 
     ref = str(params.get("file_id") or params.get("path") or params.get("file") or "").strip()
     query = str(params.get("query") or params.get("what") or params.get("ref") or "").strip()
     history = params.get("history")
     path = None
-    match = None
     resolved_query = query
     if ref:
         from app.services.max import file_finder as ff
@@ -246,15 +252,14 @@ def _send_me_this_link(params: dict, desk: Optional[str] = None) -> ToolResult:
             path = ff.resolve_file(match.get("file_id") or match.get("path") or "")
         if not path:
             near = "; ".join(c.get("name") or c.get("path") or "" for c in looked.get("closest") or [])
-            return ToolResult(
-                tool="send_me_this_link",
-                success=False,
-                result=looked,
-                error=(
+            return {
+                "success": False,
+                "result": looked,
+                "error": (
                     f'No matching drawing or doc for "{resolved_query}". '
                     + (f"Closest: {near}." if near else "Nothing close either.")
                 ),
-            )
+            }
 
     from app.services.max import file_finder as ff
 
@@ -269,8 +274,8 @@ def _send_me_this_link(params: dict, desk: Optional[str] = None) -> ToolResult:
                 body=str(params.get("body") or f"Attached: {name}\nFrom: {shown}"),
             )
         except Exception as exc:
-            return ToolResult(tool="send_me_this_link", success=False, error=f"Email not sent: {exc}")
-        return ToolResult(tool="send_me_this_link", success=True, result={
+            return {"success": False, "error": f"Email not sent: {exc}"}
+        return {"success": True, "result": {
             "via": "email",
             "sent_to": SEND_ME_EMAIL,
             "name": name,
@@ -278,7 +283,7 @@ def _send_me_this_link(params: dict, desk: Optional[str] = None) -> ToolResult:
             "query": resolved_query,
             "message_id": sent.get("message_id"),
             "message": f"Emailed {name} to {SEND_ME_EMAIL}.",
-        })
+        }}
 
     try:
         sent = _deliver_whatsapp(
@@ -287,8 +292,8 @@ def _send_me_this_link(params: dict, desk: Optional[str] = None) -> ToolResult:
             caption=str(params.get("caption") or f"{name} — for you"),
         )
     except Exception as exc:
-        return ToolResult(tool="send_me_this_link", success=False, error=f"WhatsApp not sent: {exc}")
-    return ToolResult(tool="send_me_this_link", success=True, result={
+        return {"success": False, "error": f"WhatsApp not sent: {exc}"}
+    return {"success": True, "result": {
         "via": "whatsapp",
         "sent_to": "rafael_whatsapp",
         "name": name,
@@ -296,7 +301,19 @@ def _send_me_this_link(params: dict, desk: Optional[str] = None) -> ToolResult:
         "query": resolved_query,
         "media_id": (sent or {}).get("media_id"),
         "message": f"Sent {name} to Rafael on WhatsApp.",
-    })
+    }}
+
+
+def register_tools(tool, ToolResult) -> None:
+    @tool("send_me_this_link")
+    def _send_me_this_link(params: dict, desk: Optional[str] = None):
+        data = send_me_this_link(params)
+        return ToolResult(
+            tool="send_me_this_link",
+            success=bool(data.get("success")),
+            result=data.get("result"),
+            error=data.get("error"),
+        )
 
 
 def send_me_link_doc() -> str:

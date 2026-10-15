@@ -55,8 +55,12 @@ async def system_health():
     for port_str, name in ports.items():
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         sock.settimeout(0.5)
-        services[name] = sock.connect_ex(("127.0.0.1", int(port_str))) == 0
-        sock.close()
+        try:
+            services[name] = sock.connect_ex(("127.0.0.1", int(port_str))) == 0
+        except OSError:
+            services[name] = False
+        finally:
+            sock.close()
     avatar_ok = False
     try:
         from app.routers import avatar as _avatar_mod

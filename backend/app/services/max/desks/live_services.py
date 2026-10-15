@@ -94,6 +94,21 @@ def _disk_status(path: str = "/") -> dict[str, Any]:
     }
 
 
+def avatar_service_status() -> dict[str, Any]:
+    """Avatar / Presentation Mode — same backend, listed as its own service."""
+    try:
+        from app.routers.avatar import router as _avatar_router
+        online = _avatar_router is not None
+    except Exception:
+        online = False
+    return {
+        "status": "online" if online else "offline",
+        "port": 8000,
+        "description": "Avatar / Presentation Mode (served on backend port 8000)",
+        "type": "module",
+    }
+
+
 def _module_importable(name: str) -> bool:
     try:
         import importlib

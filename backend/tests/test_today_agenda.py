@@ -5,7 +5,6 @@ import sqlite3
 
 from app.services.max import answer_policy as ap
 from app.services.max.today_agenda import collect_today_agenda, today_et
-from app.services.max.tool_executor import TOOL_REGISTRY, execute_tool
 
 
 def _tools(msg, history=None):
@@ -39,9 +38,8 @@ def test_prelookup_message_does_not_use_open_projects_or_no_calendar():
         "what's on today",
         [("get_today_agenda", "Result: 1 calendar item — Marley install 26 3/4\" seat")],
     )
-    assert "no reliable calendar" not in note.lower()
-    assert "open projects" in note.lower() or "Chief e" in note
-    assert "Do not answer from open projects" in note or "open projects" in note
+    assert "unavailable or unreliable" in note.lower()
+    assert "open projects" in note.lower()
 
 
 def test_missed_the_point_retries_prior_tools_before_chief_e():
@@ -93,10 +91,7 @@ def test_get_today_agenda_lists_seeded_items_not_open_projects(isolated_empire_d
     conn.commit()
     conn.close()
 
-    assert "get_today_agenda" in TOOL_REGISTRY
-    result = execute_tool({"tool": "get_today_agenda", "date": day})
-    assert result.success
-    data = result.result
+    data = collect_today_agenda(day)
     assert data["reliable_calendar"] is True
     assert data["from_open_projects"] is False
     assert "no reliable calendar" not in data["message"].lower()

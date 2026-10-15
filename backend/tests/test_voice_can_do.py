@@ -2,9 +2,9 @@
 from app.services.max.voice_can_do import (
     VOICE_CAPABILITY_LIST,
     answer_can_you_do,
+    can_you_do,
     is_capability_question,
 )
-from app.services.max.tool_executor import execute_tool
 
 
 def test_detects_english_and_spanish_can_you():
@@ -32,11 +32,11 @@ def test_unknown_capability_returns_the_list_not_a_guess():
     assert "empirebox2026@gmail.com" in out
 
 
-def test_can_you_do_tool_uses_the_list():
-    res = execute_tool({"tool": "can_you_do", "question": "can you send me this link"})
-    assert res.success
-    assert "empirebox2026@gmail.com" in res.result["answer"]
-    assert res.result["capability"] == "send_me_link"
+def test_can_you_do_uses_the_list():
+    res = can_you_do({"question": "can you send me this link"})
+    assert res["success"]
+    assert "empirebox2026@gmail.com" in res["result"]["answer"]
+    assert res["result"]["capability"] == "send_me_link"
 
 
 def test_capability_list_covers_today_and_send():
@@ -44,3 +44,10 @@ def test_capability_list_covers_today_and_send():
     assert "today_agenda" in ids
     assert "send_me_link" in ids
     assert "client_email" in ids
+
+
+def test_voice_tool_answers_can_you_from_list():
+    from app.services.max import voice_live as vl
+    out = vl.run_voice_tool("can_you_do", {"question": "can you send me this link"})
+    assert out["success"]
+    assert "empirebox2026@gmail.com" in (out.get("result") or {}).get("answer", "")

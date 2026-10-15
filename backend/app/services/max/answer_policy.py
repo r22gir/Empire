@@ -75,7 +75,7 @@ STYLE_DIRECTIVE = """
 - Reply in the language he wrote in (Spanish or English).
 - Short never means dropping facts: keep the client name, quote numbers (EST-...), totals and file names you looked up. Lists are plain "- " bullets.
 - Voice-message or quick status asks: under 70 words (quote number, client, total, status, next step).
-- "What's on today / my schedule / my agenda / qué hay hoy / mi agenda / qué tengo hoy": ALWAYS call get_today_agenda plus list_schedule and get_tasks. List today's calendar, Organizer and due tasks from those tool results. Never invent from open projects or the Chief e brief. Never say you have no reliable calendar — an empty tool result is "Nothing on the calendar or Organizer today."
+- "What's on today / my schedule / my agenda / qué hay hoy / mi agenda / qué tengo hoy": ALWAYS call get_today_agenda plus list_schedule and get_tasks. List today's calendar, Organizer and due tasks from those tool results. Never invent from open projects or the Chief e brief. Never claim the calendar is unavailable or unreliable — an empty tool result is "Nothing on the calendar or Organizer today."
 - "Brief me / rundown / what's on my plate / today's jobs": one "- " line per active job from the Chief e brief (Marley's, Dahlia/Nehal, Philipp/Naomi, Willard, the Travelers claim, ...) with its next step, then what waits on his tap. Under 150 words. This is jobs, not the calendar.
 - When he says the last answer missed the point (English or Spanish: "you missed the point", "that's not what I asked", "eso no es lo que pregunté", "no es eso"): retry with the tools for his previous question BEFORE offering Chief e. Do not hand off to Chief e on the first miss.
 - Job visuals (mockup, drawing, diagram, picture, layout; typos like "mick up drwings"): run find_files, name the actual file and its folder, and share it with share_file (via="studio" link in Studio, this chat on WhatsApp; email only if he asked to email it). Never describe the design in words instead of the file.
@@ -556,7 +556,7 @@ def prelookup_message(message: Optional[str], results: list[tuple[str, str]], hi
         rules.append(
             "This is today's schedule/agenda. List the calendar, Organizer and task items from "
             "the tool results. Do not answer from open projects or the Chief e brief. "
-            "Do not say you have no reliable calendar."
+            "Never claim the calendar is unavailable or unreliable."
         )
     elif _BRIEF.search(message or ""):
         jobs = active_jobs_section()

@@ -12,8 +12,6 @@ import sqlite3
 from datetime import datetime, timedelta
 from typing import Any, Optional
 
-from app.services.max.tool_executor import ToolResult, tool
-
 logger = logging.getLogger("max.today_agenda")
 
 
@@ -177,17 +175,20 @@ def collect_today_agenda(day: Optional[str] = None) -> dict[str, Any]:
         "notes": notes,
         "instruction": (
             "List today's items from these tool results. Do not invent from open "
-            "projects or the Chief e brief. Do not say there is no reliable calendar."
+            "projects or the Chief e brief. Never claim the calendar is unavailable or unreliable."
         ),
     }
 
 
-@tool("get_today_agenda")
-def _get_today_agenda(params: dict, desk: Optional[str] = None) -> ToolResult:
-    """Today's calendar events, Organizer items, and due/in-progress tasks."""
-    day = str(params.get("date") or params.get("day") or "").strip()
-    result = collect_today_agenda(day or None)
-    return ToolResult(tool="get_today_agenda", success=True, result=result)
+def register_tools(tool, ToolResult) -> None:
+    """Bound from tool_executor so this module stays import-safe in tests."""
+
+    @tool("get_today_agenda")
+    def _get_today_agenda(params: dict, desk: Optional[str] = None):
+        """Today's calendar events, Organizer items, and due/in-progress tasks."""
+        day = str(params.get("date") or params.get("day") or "").strip()
+        result = collect_today_agenda(day or None)
+        return ToolResult(tool="get_today_agenda", success=True, result=result)
 
 
 def today_agenda_doc() -> str:
@@ -198,8 +199,8 @@ def today_agenda_doc() -> str:
   "qué hay hoy", "mi agenda", "qué tengo hoy". Reads the calendar (schedule_events),
   Organizer items, and tasks due today. Always call this (and list_schedule / get_tasks)
   before answering. Empty day = say nothing is on the calendar/Organizer today.
-  NEVER answer from open projects or the Chief e brief. NEVER say you have no reliable
-  calendar.
+  NEVER answer from open projects or the Chief e brief. NEVER claim the calendar is
+  unavailable or unreliable.
   `{{"tool": "get_today_agenda"}}`
   Optional date: `{{"tool": "get_today_agenda", "date": "{tomorrow}"}}`
 """

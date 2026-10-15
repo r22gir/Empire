@@ -6,9 +6,7 @@ and it does not invent tools. Chat can use the same matcher.
 from __future__ import annotations
 
 import re
-from typing import Optional
-
-from app.services.max.tool_executor import ToolResult, tool
+from typing import Any, Optional
 
 # Spoken / typed "can you do X" (English + Spanish).
 _CAN_YOU_RE = re.compile(
@@ -182,16 +180,26 @@ def capability_list_for_prompt() -> str:
     return "\n".join(lines)
 
 
-@tool("can_you_do")
-def _can_you_do(params: dict, desk: Optional[str] = None) -> ToolResult:
+def can_you_do(params: dict) -> dict[str, Any]:
     """Answer a 'can you do X' question from the voice capability list."""
     q = str(params.get("question") or params.get("query") or params.get("x") or "").strip()
-    text = answer_can_you_do(q) if is_capability_question(q) else answer_can_you_do(f"can you {q}")
-    row = match_capability(q if is_capability_question(q) else f"can you {q}")
-    return ToolResult(tool="can_you_do", success=True, result={
-        "question": q,
-        "answer": text or (_SUMMARY_EN),
-        "capability": (row or {}).get("id"),
-        "can": bool((row or {}).get("can")) if row else None,
-        "instruction": "Speak the answer. Do not guess beyond this list.",
-    })
+    asked = q if is_capability_question(q) else f"can you {q}"
+    text = answer_can_you_do(asked)
+    row = match_capability(asked)
+    return {
+        "success": True,
+        "result": {
+            "question": q,
+            "answer": text or _SUMMARY_EN,
+            "capability": (row or {}).get("id"),
+            "can": bool((row or {}).get("can")) if row else None,
+            "instruction": "Speak the answer. Do not guess beyond this list.",
+        },
+    }
+
+
+def register_tools(tool, ToolResult) -> None:
+    @tool("can_you_do")
+    def _can_you_do(params: dict, desk: Optional[str] = None):
+        data = can_you_do(params)
+        return ToolResult(tool="can_you_do", success=True, result=data["result"])

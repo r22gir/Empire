@@ -36,7 +36,7 @@ def test_whats_on_today_uses_calendar_not_open_projects():
     tools = _tools("what's on today")
     assert tools[:3] == ["get_today_agenda", "list_schedule", "get_tasks"]
     note = ap.prelookup_message("what's on today", [("get_today_agenda", "empty")])
-    assert "no reliable calendar" not in note.lower()
+    assert "unavailable or unreliable" in note.lower()
     assert "open projects" in note.lower()
 
 
