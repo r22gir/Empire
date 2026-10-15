@@ -22,8 +22,9 @@ under ``<data_root>/max-sessions-archive/attachments``).
 
 Writes are best-effort: a journal failure never breaks a chat turn.
 Family editions run their own checkouts with their own EMPIRE_DATA_DIR;
-rows are also stamped with ``edition`` and the exporter only reads
-``edition='main'``.
+rows are also stamped with ``edition``. The exporter reads founder
+studio editions (``''``, ``main``, ``workroom``, ``studio``) and
+excludes family editions (Max-e / Maxine).
 
 Under pytest the journal is OFF unless ``EMPIRE_MAX_JOURNAL_DB`` points
 at a test database, so test traffic never lands in Rafael's log.
@@ -74,7 +75,8 @@ def archive_root() -> Path:
 
 
 def edition() -> str:
-    return (os.getenv("EMPIRE_EDITION") or "main").strip().lower() or "main"
+    from app.services.max.founder_edition import current_edition
+    return current_edition()
 
 
 def is_enabled() -> bool:
@@ -608,15 +610,23 @@ def _row(r: sqlite3.Row) -> dict:
 
 
 def turns_for_date(local_date: str, *, db_path: Optional[Path] = None, edition_name: str = "main") -> list[dict]:
+    from app.services.max.founder_edition import founder_edition_sql, is_family_edition, normalize_edition
+
     path = Path(db_path) if db_path else journal_db_path()
     if not path.exists():
         return []
     conn = _connect(path)
     try:
-        rows = conn.execute(
-            "SELECT * FROM max_session_turns WHERE local_date = ? AND edition = ? ORDER BY created_at, id",
-            (local_date, edition_name),
-        ).fetchall()
+        if edition_name and is_family_edition(edition_name):
+            rows = conn.execute(
+                "SELECT * FROM max_session_turns WHERE local_date = ? AND LOWER(TRIM(COALESCE(edition,''))) = ? ORDER BY created_at, id",
+                (local_date, normalize_edition(edition_name)),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                f"SELECT * FROM max_session_turns WHERE local_date = ? AND {founder_edition_sql()} ORDER BY created_at, id",
+                (local_date,),
+            ).fetchall()
     finally:
         conn.close()
     return [_row(r) for r in rows]
@@ -656,11 +666,12 @@ def list_sessions(days: int = 7, limit: int = 100, *, db_path: Optional[Path] = 
     path = Path(db_path) if db_path else journal_db_path()
     conn = _connect(path)
     try:
+        from app.services.max.founder_edition import founder_edition_sql
         out = []
         for r in rows:
             users = [dict(u) for u in conn.execute(
                 "SELECT content, metadata_json FROM max_session_turns WHERE conversation_id = ? AND role = 'user' "
-                "AND edition = 'main' ORDER BY id LIMIT 200", (r["conversation_id"],)).fetchall()]
+                f"AND {founder_edition_sql()} ORDER BY id LIMIT 200", (r["conversation_id"],)).fetchall()]
             tag = session_traffic(users)
             if tag["traffic"] != "real" and not include_automated:
                 continue
@@ -673,6 +684,8 @@ def list_sessions(days: int = 7, limit: int = 100, *, db_path: Optional[Path] = 
 
 
 def _list_sessions_raw(days: int = 7, limit: int = 100, *, db_path: Optional[Path] = None) -> list[dict]:
+    from app.services.max.founder_edition import founder_edition_sql
+
     path = Path(db_path) if db_path else journal_db_path()
     if not path.exists():
         return []
@@ -685,7 +698,7 @@ def _list_sessions_raw(days: int = 7, limit: int = 100, *, db_path: Optional[Pat
                       (SELECT content FROM max_session_turns t2 WHERE t2.conversation_id = t.conversation_id
                          AND t2.role = 'user' ORDER BY id LIMIT 1) AS first_user_text
                  FROM max_session_turns t
-                WHERE edition = 'main' AND local_date >= date('now', ?)
+                WHERE """ + founder_edition_sql() + """ AND local_date >= date('now', ?)
                 GROUP BY conversation_id
                 ORDER BY updated_at DESC
                 LIMIT ?""",
@@ -697,13 +710,15 @@ def _list_sessions_raw(days: int = 7, limit: int = 100, *, db_path: Optional[Pat
 
 
 def get_session(conversation_id: str, *, db_path: Optional[Path] = None, limit: int = 2000) -> list[dict]:
+    from app.services.max.founder_edition import founder_edition_sql
+
     path = Path(db_path) if db_path else journal_db_path()
     if not path.exists():
         return []
     conn = _connect(path)
     try:
         rows = conn.execute(
-            "SELECT * FROM max_session_turns WHERE conversation_id = ? AND edition = 'main' ORDER BY created_at, id LIMIT ?",
+            f"SELECT * FROM max_session_turns WHERE conversation_id = ? AND {founder_edition_sql()} ORDER BY created_at, id LIMIT ?",
             (conversation_id, limit),
         ).fetchall()
     finally:

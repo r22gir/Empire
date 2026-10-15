@@ -118,14 +118,136 @@ def test_export_day(env, tmp_path):
     assert first["type"] == "session"
 
 
+def test_founder_editions_are_main_workroom_studio_and_empty():
+    from app.services.max.founder_edition import is_family_edition, is_founder_edition
+
+    for ed in ("", "main", "workroom", "studio", "MAIN", " Workroom ", "Studio"):
+        assert is_founder_edition(ed), ed
+        assert not is_family_edition(ed), ed
+
+
+def test_family_and_unknown_editions_are_not_founder():
+    from app.services.max.founder_edition import is_family_edition, is_founder_edition
+
+    for ed in ("amp", "amp-kid", "maxine", "maxine-home", "max-e", "maxe", "max_e", "max-e-2"):
+        assert is_family_edition(ed), ed
+        assert not is_founder_edition(ed), ed
+    assert not is_founder_edition("unknown")
+    assert not is_family_edition("unknown")
+
+
 def test_family_edition_refused(env, monkeypatch, tmp_path):
     from app.services.max import session_export as se
-    monkeypatch.setenv("EMPIRE_EDITION", "maxine")
-    with pytest.raises(se.FamilyEditionError):
-        se.export_day("2026-10-04", out_root=tmp_path / "o", data_dir=env)
+
+    out = tmp_path / "o"
+    for ed in ("maxine", "amp", "max-e", "maxe", "max_e", "amp-kid", "maxine-home", "unknown"):
+        monkeypatch.setenv("EMPIRE_EDITION", ed)
+        with pytest.raises(se.FamilyEditionError):
+            se.export_day("2026-10-04", out_root=out, data_dir=env)
+        assert not out.exists()
     monkeypatch.delenv("EMPIRE_EDITION")
     with pytest.raises(se.FamilyEditionError):
-        se.export_day("2026-10-04", out_root=tmp_path / "o", data_dir=Path("/data/maxine"))
+        se.export_day("2026-10-04", out_root=out, data_dir=Path("/data/maxine"))
+    with pytest.raises(se.FamilyEditionError):
+        se.export_day("2026-10-04", out_root=out, data_dir=Path("/data/amp"))
+    assert not out.exists()
+
+
+def test_export_endpoint_family_and_unknown_editions_are_403(env, monkeypatch, tmp_path):
+    """POST /sessions/export maps FamilyEditionError to HTTP 403 without writing."""
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    from app.routers.max.sessions import router
+
+    app = FastAPI()
+    app.include_router(router)
+    client = TestClient(app)
+    for ed in ("amp", "maxine", "max-e", "maxe", "unknown"):
+        monkeypatch.setenv("EMPIRE_EDITION", ed)
+        r = client.post("/sessions/export?date=2026-10-04")
+        assert r.status_code == 403, (ed, r.status_code, r.text)
+    assert not (tmp_path / "o").exists()
+
+
+@pytest.mark.parametrize("edition", ["main", "workroom", "studio"])
+def test_founder_journal_row_is_exported(env, monkeypatch, tmp_path, edition):
+    """Dell main studio stamps edition=workroom; founder export must still include it."""
+    from app.services.max import session_export as se, session_journal as sj
+
+    monkeypatch.setenv("EMPIRE_EDITION", edition)
+    cid = f"FND-{edition}"
+    text = f"{edition} founder journal row 2026-10-14"
+    uid = sj.record_exchange(
+        conversation_id=cid, channel="dashboard",
+        user_text=text,
+        assistant_text="Drawn from the attached photo.",
+        started_at=datetime(2026, 10, 14, 22, 11, tzinfo=timezone.utc),
+        finished_at=datetime(2026, 10, 14, 22, 11, 4, tzinfo=timezone.utc),
+    )
+    assert uid
+    turns = sj.turns_for_date("2026-10-14")
+    assert turns, f"{edition}-stamped founder row must be readable"
+    assert all(t["edition"] == edition for t in turns)
+
+    out = tmp_path / "out"
+    s = se.export_day("2026-10-14", out_root=out, data_dir=env)
+    assert s["sessions"] >= 1
+    assert s["turns"] >= 2
+    day = out / "2026-10-14"
+    bodies = "\n".join(p.read_text() for p in day.glob("*.jsonl"))
+    assert cid in bodies
+    assert text in bodies
+
+
+def test_empty_edition_historical_row_is_exported(env, monkeypatch, tmp_path):
+    from app.services.max import session_export as se, session_journal as sj
+
+    monkeypatch.setenv("EMPIRE_EDITION", "main")
+    uid = sj.record_exchange(
+        conversation_id="EMPTY-1", channel="dashboard",
+        user_text="empty edition historical journal row 2026-10-14",
+        assistant_text="ok",
+        started_at=datetime(2026, 10, 14, 21, 0, tzinfo=timezone.utc),
+        finished_at=datetime(2026, 10, 14, 21, 0, 1, tzinfo=timezone.utc),
+    )
+    assert uid
+    conn = sqlite3.connect(sj.journal_db_path())
+    conn.execute("UPDATE max_session_turns SET edition = ''")
+    conn.commit()
+    conn.close()
+    turns = sj.turns_for_date("2026-10-14")
+    assert turns and all(t["edition"] == "" for t in turns)
+    out = tmp_path / "out"
+    s = se.export_day("2026-10-14", out_root=out, data_dir=env)
+    bodies = "\n".join(p.read_text() for p in (out / "2026-10-14").glob("*.jsonl"))
+    assert "EMPTY-1" in bodies
+    assert s["sessions"] >= 1
+
+
+def test_family_edition_journal_row_stays_excluded(env, monkeypatch, tmp_path):
+    from app.services.max import session_export as se, session_journal as sj
+
+    for ed, cid, text in (
+        ("maxine", "FAM-1", "hola maxine"),
+        ("amp", "FAM-AMP", "hola amp"),
+        ("max-e", "FAM-ME", "hola max-e"),
+    ):
+        monkeypatch.setenv("EMPIRE_EDITION", ed)
+        sj.record_exchange(
+            conversation_id=cid, channel="dashboard", user_text=text,
+            assistant_text="hola",
+            started_at=datetime(2026, 10, 14, 18, 0, tzinfo=timezone.utc),
+            finished_at=datetime(2026, 10, 14, 18, 0, 2, tzinfo=timezone.utc),
+        )
+    monkeypatch.setenv("EMPIRE_EDITION", "workroom")
+    s = se.export_day("2026-10-14", out_root=tmp_path / "out", data_dir=env)
+    day = tmp_path / "out" / "2026-10-14"
+    bodies = "\n".join(p.read_text() for p in day.glob("*.jsonl")) if day.exists() else ""
+    assert "FAM-1" not in bodies
+    assert "FAM-AMP" not in bodies
+    assert "FAM-ME" not in bodies
+    assert "hola maxine" not in bodies
+    assert s["sessions"] == 0
 
 
 # ── traffic tagging (automated / test chats are kept but not counted as Rafael's) ──

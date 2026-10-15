@@ -7,7 +7,7 @@
     venv/bin/python scripts/export_max_sessions.py --yesterday   # used by the nightly timer
 
 Writes ~/empire-data/max-sessions/YYYY-MM-DD/ (per-session .jsonl + .md,
-images/, summary.json). Main studio only — refuses inside a family edition.
+images/, summary.json). Founder studio only (main/workroom/studio); family editions 403.
 
 Automated/test traffic is not counted as Rafael's: sessions whose every user
 turn is tagged automated/test (Continuity panel audit prompt, scripts or

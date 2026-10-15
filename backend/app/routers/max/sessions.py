@@ -9,7 +9,8 @@ Mounted inside the /max router, so it answers at both
   POST /max/sessions/export?date=YYYY-MM-DD  write the daily export
                                            (default: today, ET)
 
-Main studio only: the export refuses to run in a family edition.
+Founder/main studio only (edition '' / main / workroom / studio). Family
+editions (Max-e / Maxine) get HTTP 403.
 """
 from __future__ import annotations
 
