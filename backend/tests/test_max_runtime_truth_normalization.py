@@ -204,6 +204,10 @@ def test_auto_email_pdf_failure_does_not_report_emailed(monkeypatch, tmp_path):
 
     pdf_path = tmp_path / "drawing.pdf"
     pdf_path.write_bytes(b"%PDF-1.4\n%proof\n")
+    owner = "owner.runtime@example.com"
+    monkeypatch.delenv("FOUNDER_EMAIL", raising=False)
+    monkeypatch.delenv("AMP_OWNER_EMAIL", raising=False)
+    monkeypatch.setenv("EDITION_OWNER_EMAIL", owner)
 
     class FakeEmailService:
         is_configured = True
@@ -213,7 +217,7 @@ def test_auto_email_pdf_failure_does_not_report_emailed(monkeypatch, tmp_path):
 
     monkeypatch.setattr(email_service_module, "EmailService", FakeEmailService)
 
-    result = _auto_email_pdf(str(pdf_path), "founder@example.com", "Runtime Truth")
+    result = _auto_email_pdf(str(pdf_path), owner, "Runtime Truth")
 
     assert result["emailed"] is False
     assert "did not verify send acceptance" in result["error"]

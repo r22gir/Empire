@@ -36,11 +36,12 @@ _ACTION_TOOLS: tuple[tuple[re.Pattern[str], str], ...] = (
         r"\b(?:3\s*-?\s*d|drawing|dibujo).+\b(?:whatsapp|email|send)\b|"
         r"\b(?:send|m[aá]nda|env[ií]a)\s+me\b|"
         r"\benviar(?:me|lo|la)?\b|"
-        r"\benv[ií]ame\b|"
+        r"\benv[ií]ame\b|\benv[ií]amelo\b|"
         r"\bmandar(?:me|lo|la)?\b|"
-        r"\bm[aá]ndame\b|\bmandame\b|\bm[aá]ndalo\b|"
-        r"\bp[aá]same\b|\bpasame\b|\bp[aá]salo\b|\bpasalo\b|"
-        r"\bme\s+puedes\s+(?:mandar|enviar|pasar)\b"
+        r"\bm[aá]ndame\b|\bmandame\b|\bm[aá]ndalo\b|\bm[aá]ndamelo\b|"
+        r"\bp[aá]same\b|\bpasame\b|\bp[aá]salo\b|\bpasalo\b|\bp[aá]samelo\b|"
+        r"\bme\s+puedes\s+(?:mandar|enviar|pasar)\b|"
+        r"\bme\s+lo\s+(?:env[ií]as|pasas|mandas)\b"
         r")"
     ),
      "send_me_link"),
@@ -68,6 +69,8 @@ VOICE_CAPABILITY_LIST: tuple[dict[str, object], ...] = (
             "send me this link", "send me the link", "send this link", "send me a link",
             "email me", "whatsapp me", "send me the drawing", "send me the 3d",
             "mándame el enlace", "mandame el enlace", "envíame el link", "enviame el link",
+            "mándamelo", "envíamelo", "pásamelo",
+            "me lo envías", "me lo pasas", "me lo mandas",
         ),
         "can": True,
         "en": "Yes. I can send a link or document only to your WhatsApp and email on this instance.",
