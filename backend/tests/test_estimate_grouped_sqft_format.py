@@ -57,8 +57,9 @@ def test_create_and_render_grouped_sqft_estimate(isolated_empire_db):
     assert "65.00" in text and "$3,015.35" in text
     assert "46 3/8" in text
     assert "46.39" not in text
-    # Material lot is not priced per sq ft — that cell is blank (rate is Total only).
-    assert text.count("1,785.88") == 1
+    # Material lot is not priced per sq ft — that cell is blank.
+    # $1,785.88 remains on the line Total and the Material subtotal (2), not a third Price/sq ft cell.
+    assert text.count("1,785.88") == 2
     u_sub = round(46.39 * 65 + 31.22 * 45, 2)
     assert f"${u_sub:,.2f}" in text  # U banquette subtotal
     assert "SUBTOTAL" in text.upper() and "TOTAL" in text.upper()

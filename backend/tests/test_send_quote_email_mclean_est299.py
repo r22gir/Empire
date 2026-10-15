@@ -135,7 +135,8 @@ def test_est299_email_uses_mclean_areas_columns_deposit_and_founder_inbox(
         assert area in upper, f"missing area {area}"
     for col in ("Description", "Qty", "Unit", "Sq ft", "Price/sq ft", "Total"):
         assert col in text, f"missing column {col}"
-    assert text.count("1,785.88") == 1  # Total only; Price/sq ft blank on the lot row
+    # Lot rate is not in Price/sq ft (blank). $1,785.88 remains on line Total and the Material subtotal.
+    assert text.count("1,785.88") == 2
     assert "MANUAL_LINE" not in upper
     assert "manual_line" not in text
     assert "Deposit" in text
@@ -240,29 +241,12 @@ def test_send_quote_email_accepts_quote_number(isolated_empire_db, pdf_tmpdir, m
 
 
 def test_send_quote_email_refuses_duplicate_quote_number(isolated_empire_db, pdf_tmpdir, monkeypatch):
+    import json
     from app.db.database import get_db
-    from app.services.quote_service import create_quote
+    from app.services.data_paths import quotes_data_dir
 
-    potthast = create_quote({
-        "customer_name": "Potthast",
-        "business_unit": "workroom",
-        "status": "draft",
-        "pricing_mode": "flat",
-        "line_items": [{
-            "category": "manual_line",
-            "description": "Seat",
-            "quantity": 1,
-            "unit": "ea",
-            "unit_price": 637,
-        }],
-    })
     live = _make_est299(isolated_empire_db)
     with get_db() as conn:
-        conn.execute(
-            "UPDATE quotes_v2 SET quote_number = ?, total = 637, "
-            "created_at = ? WHERE id = ?",
-            ("EST-2026-299", "2026-10-03 12:00:00", potthast["id"]),
-        )
         conn.execute(
             "UPDATE quotes_v2 SET quote_number = ?, total = 11328.65, "
             "created_at = ? WHERE id = ?",
@@ -270,20 +254,36 @@ def test_send_quote_email_refuses_duplicate_quote_number(isolated_empire_db, pdf
         )
         conn.commit()
 
-    mail = _FakeMail()
-    monkeypatch.setattr("app.services.max.email_service.EmailService", lambda: mail)
-    result = te._send_quote_email({"quote_id": "EST-2026-299", "to": "me"})
-    assert not result.success
-    err = result.error or ""
-    assert "duplicated" in err.lower()
-    assert "Potthast" in err
-    assert "637" in err
-    assert "which one" in err.lower()
-    assert mail.sent == []
+    quotes_dir = quotes_data_dir()
+    quotes_dir.mkdir(parents=True, exist_ok=True)
+    leftover_id = "est299-potthast-leftover"
+    leftover_path = quotes_dir / f"{leftover_id}.json"
+    leftover_path.write_text(json.dumps({
+        "id": leftover_id,
+        "quote_number": "EST-2026-299",
+        "customer_name": "Potthast",
+        "total": 637,
+        "created_at": "2026-10-03T12:00:00Z",
+        "status": "draft",
+    }))
+    try:
+        mail = _FakeMail()
+        monkeypatch.setattr("app.services.max.email_service.EmailService", lambda: mail)
+        result = te._send_quote_email({"quote_id": "EST-2026-299", "to": "me"})
+        assert not result.success
+        err = result.error or ""
+        assert "duplicated" in err.lower()
+        assert "Potthast" in err
+        assert "637" in err
+        assert "which one" in err.lower()
+        assert mail.sent == []
 
-    by_id = te._send_quote_email({"quote_id": live["id"], "to": "me"})
-    assert by_id.success, by_id.error
-    assert mail.sent[-1]["to"] == "empirebox2026@gmail.com"
+        by_id = te._send_quote_email({"quote_id": live["id"], "to": "me"})
+        assert by_id.success, by_id.error
+        assert mail.sent[-1]["to"] == "empirebox2026@gmail.com"
+    finally:
+        if leftover_path.exists():
+            leftover_path.unlink()
 
 
 def test_send_email_quote_pdf_reroutes_to_send_quote_email(
