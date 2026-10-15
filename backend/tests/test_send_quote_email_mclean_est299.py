@@ -98,7 +98,16 @@ def pdf_tmpdir(tmp_path, monkeypatch):
 def test_est299_email_uses_mclean_areas_columns_deposit_and_founder_inbox(
     isolated_empire_db, pdf_tmpdir, monkeypatch, tmp_path,
 ):
+    from app.db.database import get_db
+
     quote = _make_est299(isolated_empire_db)
+    with get_db() as conn:
+        conn.execute(
+            "UPDATE quotes_v2 SET quote_number = ? WHERE id = ?",
+            ("EST-2026-299", quote["id"]),
+        )
+        conn.commit()
+    quote = get_quote(quote["id"])
     mail = _FakeMail()
     monkeypatch.setattr("app.services.max.email_service.EmailService", lambda: mail)
 
