@@ -55,10 +55,9 @@ def _pdf_text(pdf: bytes) -> str:
 
 
 def _make_est299(isolated_empire_db):
-    from app.services.max.tool_executor import execute_tool
+    from app.services.max.tool_executor import _create_engine_quote
 
-    res = execute_tool({
-        "tool": "create_engine_quote",
+    res = _create_engine_quote({
         "customer_name": "Marley's Bar & Grill",
         "project_name": "Banquettes",
         "line_items": _est299_lines(),
