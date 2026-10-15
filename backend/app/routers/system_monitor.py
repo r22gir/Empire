@@ -63,8 +63,8 @@ async def system_health():
             sock.close()
     avatar_ok = False
     try:
-        from app.routers import avatar as _avatar_mod
-        avatar_ok = bool(getattr(_avatar_mod, "router", None)) and services.get("API", False)
+        from app.services.max.desks.live_services import avatar_service_status
+        avatar_ok = avatar_service_status().get("status") == "online"
     except Exception:
         avatar_ok = False
     services["Avatar"] = avatar_ok

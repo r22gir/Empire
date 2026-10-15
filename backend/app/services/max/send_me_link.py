@@ -23,7 +23,18 @@ SEND_ME_EMAILS = frozenset({SEND_ME_EMAIL})
 BLOCKED_EMAILS = frozenset({
     "rafa22giraldo@gmail.com",
 })
+# The brothers — never a send_me recipient, by name or number.
+BROTHER_NAMES = frozenset({
+    "juan", "camilo", "juan diego", "juan diego giraldo", "camilo giraldo",
+    "the brothers", "hermanos",
+})
+FAMILY_REFUSED = (
+    "send_me_this_link is not available in family editions (amp / maxine). "
+    "It only delivers to Rafael on Studio."
+)
 SEND_VIAS = ("whatsapp", "email")
+_EMAIL_IN_BRACKETS = re.compile(r"<([^<>]+@[^<>]+)>")
+_BARE_EMAIL = re.compile(r"([A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,})")
 
 _DRAWING_REF = re.compile(
     r"(?i)\b(?:the|that|this|el|la|ese|esa|este|esta)\s+"
@@ -36,80 +47,139 @@ _THAT_DOC = re.compile(
 )
 
 
+def family_edition_blocked() -> bool:
+    """True for amp / maxine, including EMPIRE_DATA_DIR=/data/amp with no EMPIRE_EDITION."""
+    try:
+        from app.edition import is_family_edition
+        return bool(is_family_edition())
+    except Exception:
+        return False
+
+
 def normalize_email(addr: str | None) -> str:
     return (addr or "").strip().lower()
 
 
+def extract_email(addr: str | None) -> str:
+    """Accept 'Rafael <empirebox2026@gmail.com>' as well as a bare address."""
+    raw = (addr or "").strip()
+    m = _EMAIL_IN_BRACKETS.search(raw)
+    if m:
+        return normalize_email(m.group(1))
+    m = _BARE_EMAIL.search(raw)
+    if m:
+        return normalize_email(m.group(1))
+    return normalize_email(raw)
+
+
 def is_send_me_email(addr: str | None) -> bool:
-    return normalize_email(addr) in SEND_ME_EMAILS
+    return extract_email(addr) in SEND_ME_EMAILS
+
+
+def is_brother_recipient(to: str | None) -> bool:
+    raw = (to or "").strip().lower()
+    if not raw:
+        return False
+    if raw in BROTHER_NAMES:
+        return True
+    if re.search(r"\b(?:juan(?:\s+diego)?|camilo)\b", raw):
+        return True
+    return False
+
+
+def founder_phones_ordered() -> list[str]:
+    """business_phone, then founder_phones / owner_phones, then env. Not sorted. No phonebook."""
+    try:
+        from app.services.max.whatsapp_channel import normalize_msisdn
+    except Exception:
+        return []
+    raw: list[str] = []
+    try:
+        from pathlib import Path
+        import json
+        path = Path(__file__).resolve().parents[2] / "config" / "business.json"
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        data = {}
+    phone = str((data or {}).get("business_phone") or "").strip()
+    if phone:
+        raw.append(phone)
+    for key in ("founder_phones", "owner_phones"):
+        extra = (data or {}).get(key) or []
+        if isinstance(extra, str):
+            extra = [extra]
+        if isinstance(extra, dict):
+            extra = list(extra.values())
+        if isinstance(extra, list):
+            for item in extra:
+                if isinstance(item, dict):
+                    raw.append(str(item.get("phone") or item.get("number") or item.get("wa_id") or ""))
+                else:
+                    raw.append(str(item))
+    env_phones = os.getenv("WHATSAPP_FOUNDER_PHONES") or ""
+    if env_phones.strip():
+        raw.extend(part.strip() for part in env_phones.split(",") if part.strip())
+    out: list[str] = []
+    seen: set[str] = set()
+    for item in raw:
+        n = normalize_msisdn(item)
+        if n and n not in seen:
+            seen.add(n)
+            out.append(n)
+    return out
 
 
 def founder_whatsapp_numbers() -> frozenset[str]:
     """Rafael's WhatsApp only. Never clients or the brothers."""
-    try:
-        from app.services.max.whatsapp_channel import founder_allowlist
-        return frozenset(founder_allowlist())
-    except Exception:
-        return frozenset()
+    return frozenset(founder_phones_ordered())
+
+
+def primary_founder_whatsapp() -> Optional[str]:
+    """First listed founder number (business_phone), not sorted()[0]."""
+    nums = founder_phones_ordered()
+    return nums[0] if nums else None
 
 
 def authorize_recipient(via: str, to: str | None) -> dict[str, Any]:
     """Hard allowlist. Reject anything that is not Rafael's WA or empirebox2026."""
     via = (via or "").strip().lower()
     raw = (to or "").strip()
-    email = normalize_email(raw)
+    email = extract_email(raw)
+    refused = (
+        "recipient_not_allowlisted: send_me_this_link only reaches Rafael's "
+        "WhatsApp and empirebox2026@gmail.com. Never clients, the brothers, "
+        "or rafa22giraldo@gmail.com."
+    )
+    if is_brother_recipient(raw):
+        return {"authorized": False, "via": via, "to": raw, "error": refused}
     if email in BLOCKED_EMAILS:
-        return {
-            "authorized": False,
-            "via": via,
-            "to": email,
-            "error": (
-                f"recipient_not_allowlisted: {email} is not on the send_me_this_link "
-                "allowlist. Only Rafael's WhatsApp and empirebox2026@gmail.com."
-            ),
-        }
+        return {"authorized": False, "via": via, "to": email, "error": refused}
     if via == "email":
         if raw.lower() in ("", "me", "myself", "rafael", "founder", "owner", "my email"):
             return {"authorized": True, "via": "email", "to": SEND_ME_EMAIL, "error": None}
         if is_send_me_email(raw):
             return {"authorized": True, "via": "email", "to": SEND_ME_EMAIL, "error": None}
-        return {
-            "authorized": False,
-            "via": "email",
-            "to": email or raw,
-            "error": (
-                f"recipient_not_allowlisted: {email or raw}. "
-                "send_me_this_link emails only empirebox2026@gmail.com — never clients, "
-                "the brothers, or rafa22giraldo@gmail.com."
-            ),
-        }
+        return {"authorized": False, "via": "email", "to": email or raw, "error": refused}
     if via == "whatsapp":
         allowed = founder_whatsapp_numbers()
         if not raw or raw.lower() in ("me", "myself", "rafael", "founder", "my whatsapp"):
-            if not allowed:
+            primary = primary_founder_whatsapp()
+            if not primary:
                 return {
                     "authorized": False,
                     "via": "whatsapp",
                     "to": "",
                     "error": "Rafael's WhatsApp number is not on file.",
                 }
-            return {"authorized": True, "via": "whatsapp", "to": sorted(allowed)[0], "error": None}
+            return {"authorized": True, "via": "whatsapp", "to": primary, "error": None}
         try:
-            from app.services.max.whatsapp_channel import is_allowlisted, normalize_msisdn
+            from app.services.max.whatsapp_channel import normalize_msisdn
             number = normalize_msisdn(raw)
-            if number and is_allowlisted(number) and number in allowed:
+            if number and number in allowed:
                 return {"authorized": True, "via": "whatsapp", "to": number, "error": None}
         except Exception:
             pass
-        return {
-            "authorized": False,
-            "via": "whatsapp",
-            "to": raw,
-            "error": (
-                "recipient_not_allowlisted: WhatsApp send_me_this_link only reaches "
-                "Rafael's own number. Never clients or the brothers."
-            ),
-        }
+        return {"authorized": False, "via": "whatsapp", "to": raw, "error": refused}
     return {
         "authorized": False,
         "via": via,
@@ -226,6 +296,8 @@ def _deliver_whatsapp(path: str, *, to: str, caption: str) -> dict[str, Any]:
 
 def send_me_this_link(params: dict) -> dict[str, Any]:
     """Core send. Returns {success, result?, error?}. Tests mock _deliver_*."""
+    if family_edition_blocked():
+        return {"success": False, "error": FAMILY_REFUSED}
     via = str(params.get("via") or params.get("channel") or "whatsapp").strip().lower()
     if via in ("mail", "gmail"):
         via = "email"
@@ -305,6 +377,9 @@ def send_me_this_link(params: dict) -> dict[str, Any]:
 
 
 def register_tools(tool, ToolResult) -> None:
+    if family_edition_blocked():
+        return
+
     @tool("send_me_this_link")
     def _send_me_this_link(params: dict, desk: Optional[str] = None):
         data = send_me_this_link(params)
@@ -317,6 +392,8 @@ def register_tools(tool, ToolResult) -> None:
 
 
 def send_me_link_doc() -> str:
+    if family_edition_blocked():
+        return ""
     return f"""
 ### Send this link (Rafael only)
 - **send_me_this_link** — Send a link or document ONLY to Rafael's WhatsApp or

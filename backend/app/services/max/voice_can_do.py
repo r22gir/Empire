@@ -20,6 +20,27 @@ _CAN_YOU_RE = re.compile(
     r"(.+?)\s*\??\s*$"
 )
 
+# Pure capability — not "can you do the action now".
+_PURE_CAPABILITY = re.compile(
+    r"(?i)^\s*(?:"
+    r"(?:are|is)\s+you\s+able\s+to\s+"
+    r"|(?:do\s+you\s+(?:know\s+how\s+to|support|handle|have))\s+"
+    r"|(?:sos\s+capaz\s+de|sabes\s+c[oó]mo)\s+"
+    r")"
+)
+
+# "can you send / check / look up …" is an action, not a capability yes.
+_ACTION_TOOLS: tuple[tuple[re.Pattern[str], str], ...] = (
+    (re.compile(r"(?i)\b(?:send|email|whatsapp|m[aá]nda|env[ií]a)\b.+\b(?:drawing|dibujo|link|enlace|doc|file|3\s*-?\s*d)\b"
+                r"|\b(?:3\s*-?\s*d|drawing|dibujo).+\b(?:whatsapp|email|send)\b"),
+     "send_me_this_link"),
+    (re.compile(r"(?i)\b(?:check|see|show|list|look\s*up)\b.+\b(?:calendar|schedule|agenda|horario|calendario)\b"
+                r"|\b(?:calendar|schedule|agenda)\b"),
+     "get_today_agenda"),
+    (re.compile(r"(?i)\b(?:check|get|what(?:'s| is))?\s*(?:the\s+)?weather\b|\bclima\b"),
+     "get_weather"),
+)
+
 # Each row: keywords that mean this capability, plus the spoken answer.
 VOICE_CAPABILITY_LIST: tuple[dict[str, object], ...] = (
     {
@@ -135,6 +156,26 @@ def is_capability_question(text: str | None) -> bool:
     return bool(_CAN_YOU_RE.match(raw))
 
 
+def matching_action_tool(text: str | None) -> Optional[str]:
+    """If this 'can you' is actually a request to run a tool, return that tool name."""
+    raw = (text or "").strip()
+    if not raw:
+        return None
+    for pat, tool in _ACTION_TOOLS:
+        if pat.search(raw):
+            return tool
+    return None
+
+
+def is_pure_capability_question(text: str | None) -> bool:
+    raw = (text or "").strip()
+    if not raw or matching_action_tool(raw):
+        return False
+    return bool(_PURE_CAPABILITY.search(raw)) or (
+        is_capability_question(raw) and matching_action_tool(raw) is None
+    )
+
+
 def _lang(text: str) -> str:
     if re.search(r"[áéíóúñ¿¡]|\b(?:puedes|podrías|podes|hacer|agenda|correo|clima)\b", text, re.I):
         return "es"
@@ -162,7 +203,9 @@ def match_capability(text: str | None) -> Optional[dict[str, object]]:
 
 
 def answer_can_you_do(text: str | None) -> Optional[str]:
-    """Spoken answer from the capability list, or None if this is not a can-you-do ask."""
+    """Spoken answer from the capability list, or None when an action tool should run."""
+    if matching_action_tool(text):
+        return None
     if not is_capability_question(text):
         return None
     lang = _lang(text or "")
@@ -173,8 +216,15 @@ def answer_can_you_do(text: str | None) -> Optional[str]:
 
 
 def capability_list_for_prompt() -> str:
+    try:
+        from app.edition import is_family_edition
+        family = is_family_edition()
+    except Exception:
+        family = False
     lines = ["# Voice capability list (answer 'can you do X' from this, do not guess)"]
     for row in VOICE_CAPABILITY_LIST:
+        if family and row["id"] == "send_me_link":
+            continue
         flag = "YES" if row["can"] else "NO"
         lines.append(f"- {flag}: {row['en']}")
     return "\n".join(lines)
@@ -184,6 +234,19 @@ def can_you_do(params: dict) -> dict[str, Any]:
     """Answer a 'can you do X' question from the voice capability list."""
     q = str(params.get("question") or params.get("query") or params.get("x") or "").strip()
     asked = q if is_capability_question(q) else f"can you {q}"
+    action = matching_action_tool(asked)
+    if action:
+        return {
+            "success": True,
+            "result": {
+                "question": q,
+                "answer": None,
+                "action_tool": action,
+                "capability": None,
+                "can": True,
+                "instruction": f"This is an action request. Call {action} now. Do not answer with a capability yes.",
+            },
+        }
     text = answer_can_you_do(asked)
     row = match_capability(asked)
     return {

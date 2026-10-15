@@ -30,6 +30,8 @@ def test_weather_and_brief():
     assert calls == [{"tool": "get_weather", "city": "Hyattsville"}]
     assert "get_tasks" in _tools("Morning Max, brief me on today's jobs")
     assert "get_today_agenda" not in _tools("Morning Max, brief me on today's jobs")
+    assert "get_today_agenda" not in _tools("What's on today's jobs")
+    assert "get_tasks" in _tools("What's on today's jobs")
 
 
 def test_whats_on_today_uses_calendar_not_open_projects():

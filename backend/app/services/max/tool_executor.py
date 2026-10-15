@@ -8740,8 +8740,9 @@ try:
     _send_me_name = "app.services.max.send_me_link"
     _send_me_link = (_importlib.reload(_sys.modules[_send_me_name]) if _send_me_name in _sys.modules
                      else _importlib.import_module(_send_me_name))
-    _send_me_link.register_tools(tool, ToolResult)
-    TOOLS_DOC = TOOLS_DOC + _send_me_link.SEND_ME_LINK_DOC
+    if not _send_me_link.family_edition_blocked():
+        _send_me_link.register_tools(tool, ToolResult)
+        TOOLS_DOC = TOOLS_DOC + _send_me_link.SEND_ME_LINK_DOC
 except Exception as _send_me_err:
     logger.error(f"send_me_link not loaded: {_send_me_err}")
 

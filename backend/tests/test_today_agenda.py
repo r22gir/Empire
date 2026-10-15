@@ -33,6 +33,12 @@ def test_brief_me_on_todays_jobs_is_not_the_calendar():
     assert "get_today_agenda" not in tools
 
 
+def test_whats_on_todays_jobs_goes_to_the_job_brief():
+    tools = _tools("What's on today's jobs")
+    assert "get_today_agenda" not in tools
+    assert "get_tasks" in tools
+
+
 def test_prelookup_message_does_not_use_open_projects_or_no_calendar():
     note = ap.prelookup_message(
         "what's on today",
@@ -63,6 +69,18 @@ def test_missed_the_point_retries_prior_tools_before_chief_e():
     )
     assert "Chief e" in note
     assert "retry" in note.lower() or "Retry" in note
+
+
+def test_missed_the_point_skips_prior_missed_the_point_turns():
+    hist = [
+        {"role": "user", "content": "what's on today"},
+        {"role": "assistant", "content": "You have a few open projects."},
+        {"role": "user", "content": "you missed the point"},
+        {"role": "assistant", "content": "Sorry — here is the calendar."},
+    ]
+    assert ap.last_user_question(hist, skip="you missed the point") == "what's on today"
+    tools = _tools("you missed the point", hist)
+    assert "get_today_agenda" in tools
 
 
 def test_get_today_agenda_lists_seeded_items_not_open_projects(isolated_empire_db):
@@ -103,6 +121,18 @@ def test_get_today_agenda_lists_seeded_items_not_open_projects(isolated_empire_d
     assert "welt cord" in titles
     assert "12\" foam" in titles
     assert data["count"] >= 3
+
+
+def test_organizer_lookup_does_not_migrate(isolated_empire_db, monkeypatch):
+    called = []
+
+    def boom(*a, **k):
+        called.append(True)
+        raise AssertionError("migrate_organizer_tables must not run")
+
+    monkeypatch.setattr("app.services.organizer.schema.migrate_organizer_tables", boom)
+    collect_today_agenda(today_et())
+    assert called == []
 
 
 def test_empty_today_is_empty_not_open_projects(isolated_empire_db):

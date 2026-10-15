@@ -432,8 +432,11 @@ def wants_document_search(message: Optional[str]) -> bool:
 
 
 def is_today_agenda_ask(message: Optional[str]) -> bool:
-    """True for schedule/agenda/what's-on-today (EN + ES). Not 'brief me on today's jobs'."""
-    return bool(_TODAY_AGENDA.search(message or ""))
+    """True for schedule/agenda/what's-on-today (EN + ES). Not 'what's on today's jobs'."""
+    t = message or ""
+    if _BRIEF.search(t):
+        return False
+    return bool(_TODAY_AGENDA.search(t))
 
 
 def missed_the_point(message: Optional[str]) -> bool:
@@ -450,13 +453,22 @@ def missed_the_point(message: Optional[str]) -> bool:
         return False
 
 
-def last_user_question(history: Any) -> str:
-    """Most recent prior user turn — the question that missed."""
+def last_user_question(history: Any, *, skip: Optional[str] = None) -> str:
+    """Most recent prior user turn that is not itself a 'missed the point' line."""
+    skip_norm = (skip or "").strip()
     for h in reversed(list(history or [])):
         role = h.get("role") if isinstance(h, dict) else getattr(h, "role", "")
-        if role == "user":
-            c = h.get("content") if isinstance(h, dict) else getattr(h, "content", "")
-            return str(c or "").strip()
+        if role != "user":
+            continue
+        c = h.get("content") if isinstance(h, dict) else getattr(h, "content", "")
+        text = str(c or "").strip()
+        if not text:
+            continue
+        if skip_norm and text == skip_norm:
+            continue
+        if missed_the_point(text):
+            continue
+        return text
     return ""
 
 
@@ -483,7 +495,7 @@ def prelookup_calls(message: Optional[str], history: Any = None, channel: Option
     if not t or wants_research(t):
         return []
     if _retry_depth == 0 and missed_the_point(t):
-        prior = last_user_question(history)
+        prior = last_user_question(history, skip=t)
         retried = prelookup_calls(prior, history, channel, _retry_depth=1) if prior else []
         if not retried:
             retried = _today_agenda_calls()

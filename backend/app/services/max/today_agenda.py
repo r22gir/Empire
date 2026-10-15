@@ -36,7 +36,10 @@ def _db_path() -> str:
 
 
 def _connect() -> sqlite3.Connection:
-    conn = sqlite3.connect(_db_path())
+    """Read-only. Never migrate or write the Organizer / task schema."""
+    import os
+    path = os.path.abspath(_db_path())
+    conn = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
     conn.row_factory = sqlite3.Row
     return conn
 
@@ -83,11 +86,6 @@ def calendar_events(conn: sqlite3.Connection, day: str) -> list[dict[str, Any]]:
 def organizer_items(conn: sqlite3.Connection, day: str) -> list[dict[str, Any]]:
     if not _table_exists(conn, "organizer_items"):
         return []
-    try:
-        from app.services.organizer.schema import migrate_organizer_tables
-        migrate_organizer_tables(conn)
-    except Exception:
-        pass
     rows = conn.execute(
         """
         SELECT id, kind, title, status, due_at, start_time, end_time,
