@@ -56,7 +56,46 @@ MAX_PER_BLOCK_ERRORS = 16
 # allowlist check passes. Reply-To is set to max@empirebox.store (the
 # address the future inbound poller — SendGrid Inbound Parse webhook at
 # /webhooks/email/inbound AND Gmail check_inbox — will watch).
-DEFAULT_EMAIL_CC = ("rafa22giraldo@gmail.com",)
+def default_email_cc() -> tuple[str, ...]:
+    """Standing CC for Studio send_email. Empty on family editions — never CC Rafael."""
+    try:
+        from app.edition import is_family_edition
+        if is_family_edition():
+            return ()
+    except Exception:
+        pass
+    return ("rafa22giraldo@gmail.com",)
+
+
+class _DefaultEmailCC:
+    """Studio standing CC; empty on family so Rafael is never cc'd."""
+
+    def _values(self) -> tuple[str, ...]:
+        return default_email_cc()
+
+    def __iter__(self):
+        return iter(self._values())
+
+    def __contains__(self, item):
+        return item in self._values()
+
+    def __len__(self):
+        return len(self._values())
+
+    def __bool__(self):
+        return bool(self._values())
+
+    def __getitem__(self, idx):
+        return self._values()[idx]
+
+    def __repr__(self):
+        return repr(self._values())
+
+    def __eq__(self, other):
+        return self._values() == tuple(other)
+
+
+DEFAULT_EMAIL_CC = _DefaultEmailCC()
 DEFAULT_REPLY_TO = "max@empirebox.store"
 
 # ── Dangerous Tool PIN Gate ───────────────────────────────────────
@@ -517,6 +556,9 @@ Puedes generar una imagen con MiniMax image-01 (minimax_text_to_image) a partir 
 Nunca pongas fotos de clientes, correos, teléfonos, rutas del Workroom ni datos de otra edición en el aviso.
 La voz speech-2.8 solo si está encendida. El video H3 solo crea un borrador; Rafael genera desde Max personal
 con X-Minimax-Video-Confirm: aprobar. Esta herramienta no genera clips ni acepta approval_id.
+Agenda de hoy: get_today_agenda + list_schedule + get_tasks para "qué hay hoy" / "mi agenda" / "what's on today".
+Mandar un enlace: send_me_link solo al WhatsApp y correo del dueño de ESTA instancia. Nunca send_me_this_link.
+"Can you send me X" / "puedes enviarme X": llama send_me_link, nunca un sí de catálogo.
 """
 
 
@@ -2894,6 +2936,16 @@ def _get_services_health(params: dict, desk: Optional[str] = None) -> ToolResult
         except Exception:
             results[name] = {"status": "offline", "port": svc["port"], "description": svc["description"]}
 
+    try:
+        from app.services.max.desks.live_services import avatar_service_status
+        results["avatar"] = avatar_service_status()
+    except Exception:
+        results["avatar"] = {
+            "status": "offline",
+            "description": "Avatar / Presentation Mode",
+            "type": "avatar",
+        }
+
     online = sum(1 for s in results.values() if s["status"] == "online")
     return ToolResult(tool="get_services_health", success=True, result={
         "services": results, "online": online, "total": len(results),
@@ -3148,9 +3200,22 @@ def _send_email(params: dict, desk: Optional[str] = None) -> ToolResult:
     subject = params.get("subject", "").strip()
     body = params.get("body", "").strip()
 
-    # Resolve founder aliases to FOUNDER_EMAIL from .env
-    if not to or to.lower() in ("me", "owner", "founder", "my email", "myself"):
-        to = os.getenv("FOUNDER_EMAIL", "empirebox2026@gmail.com")
+    family = False
+    try:
+        from app.edition import is_family_edition
+        family = bool(is_family_edition())
+    except Exception:
+        family = False
+
+    # Resolve "me" / owner aliases. Family uses EDITION_OWNER_EMAIL, never FOUNDER_EMAIL.
+    if not to or to.lower() in ("me", "owner", "founder", "my email", "myself", "mi correo", "mi email"):
+        if family:
+            from app.services.max.send_me_link import MISSING_EMAIL_ES, owner_email
+            to = owner_email()
+            if not to:
+                return ToolResult(tool="send_email", success=False, error=MISSING_EMAIL_ES)
+        else:
+            to = os.getenv("FOUNDER_EMAIL", "empirebox2026@gmail.com")
 
     if not subject or not body:
         return ToolResult(tool="send_email", success=False, error="subject and body are required")
@@ -3164,8 +3229,17 @@ def _send_email(params: dict, desk: Optional[str] = None) -> ToolResult:
     # list is checked too — passing `to=okaddress, cc=client@x.com`
     # is also rejected.
     attachments = params.get("attachments", [])
-    cc = params.get("cc")
-    verdict_to = authorize_email_recipient(to)
+    cc = None if family else params.get("cc")
+    if family:
+        from app.services.max.send_me_link import (
+            NOT_OWNER_ES, extract_email, is_denied_email, owner_emails,
+        )
+        asked = extract_email(to)
+        if not asked or asked not in owner_emails() or is_denied_email(asked):
+            return ToolResult(tool="send_email", success=False, error=NOT_OWNER_ES)
+        verdict_to = {"recipient_authorized": True}
+    else:
+        verdict_to = authorize_email_recipient(to)
     if not verdict_to["recipient_authorized"]:
         logger.warning(
             f"send_email BLOCKED: recipient_authorized=False "
@@ -7734,6 +7808,42 @@ try:
     TOOLS_DOC = TOOLS_DOC + _tools_acquisition.ACQUISITION_TOOLS_DOC
 except Exception as _acq_err:  # never take Max down over an optional tool pack
     logger.error(f"tools_acquisition not loaded: {_acq_err}")
+
+# Today's calendar + Organizer + tasks.
+try:
+    import importlib as _importlib, sys as _sys
+    _today_name = "app.services.max.today_agenda"
+    _today_agenda = (_importlib.reload(_sys.modules[_today_name]) if _today_name in _sys.modules
+                     else _importlib.import_module(_today_name))
+    _today_agenda.register_tools(tool, ToolResult)
+    FAMILY_TOOLS_DOC = FAMILY_TOOLS_DOC + _today_agenda.TODAY_AGENDA_DOC
+    if "TOOLS_DOC" in globals():
+        TOOLS_DOC = TOOLS_DOC + _today_agenda.TODAY_AGENDA_DOC
+except Exception as _today_err:
+    logger.error(f"today_agenda not loaded: {_today_err}")
+
+# Family owner-only send_me_link. Never register Studio send_me_this_link.
+try:
+    import importlib as _importlib, sys as _sys
+    _send_me_name = "app.services.max.send_me_link"
+    _send_me_link = (_importlib.reload(_sys.modules[_send_me_name]) if _send_me_name in _sys.modules
+                     else _importlib.import_module(_send_me_name))
+    _send_me_link.register_tools(tool, ToolResult)
+    FAMILY_TOOLS_DOC = FAMILY_TOOLS_DOC + _send_me_link.SEND_ME_LINK_DOC
+    if "TOOLS_DOC" in globals():
+        TOOLS_DOC = TOOLS_DOC + _send_me_link.SEND_ME_LINK_DOC
+except Exception as _send_me_err:
+    logger.error(f"send_me_link not loaded: {_send_me_err}")
+
+# Voice "can you do X" from the capability list.
+try:
+    import importlib as _importlib, sys as _sys
+    _can_do_name = "app.services.max.voice_can_do"
+    _can_do = (_importlib.reload(_sys.modules[_can_do_name]) if _can_do_name in _sys.modules
+               else _importlib.import_module(_can_do_name))
+    _can_do.register_tools(tool, ToolResult)
+except Exception as _can_do_err:
+    logger.error(f"voice_can_do not loaded: {_can_do_err}")
 
 TOOL_COUNT = len(TOOL_REGISTRY)
 TOOLS_DOC = TOOLS_DOC.replace("__TOOL_COUNT__", str(TOOL_COUNT))

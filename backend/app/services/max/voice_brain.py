@@ -213,9 +213,19 @@ VOICE_STYLE = (
     "'un segundo' in Spanish or 'one sec' in English."
 )
 
+VOICE_FAMILY_EXTRAS = (
+    "Greet in Spanish: ¡Quiubo manito!\n"
+    "Today / schedule / agenda / qué hay hoy: call get_today_agenda (and list_schedule / get_tasks). "
+    "List those items. Never answer from open projects. Never say you have no reliable calendar.\n"
+    "If the owner says you missed the point / no era eso, call the tools for his last question again. Do not hand off.\n"
+    "'Can you do X' / 'puedes hacer X': call can_you_do. "
+    "'Can you send me X' is an action: call send_me_link now. Do not answer with a canned yes. "
+    "send_me_this_link is not available. send_me_link only reaches this instance owner's WhatsApp and email.\n"
+)
+
 VOICE_CAPABILITIES = (
     "# What you can do in voice (server-enforced)\n"
-    "Read-only tools: {read_tools}. Use them instead of guessing whenever Rafael asks about quotes, "
+    "Read-only tools: {read_tools}. Use them instead of guessing whenever the owner asks about quotes, "
     "customers, tasks, desks, services, the machine, email, job photos, past conversations or weather. "
     "For news, local events or any current public fact (e.g. 'últimas noticias en Cartago, Valle'), call "
     "web_search and summarize the top headlines in a few sentences; never say you have no news access.\n"
@@ -278,6 +288,7 @@ def assemble(*, model: str, read_tools: list[str], core: str, snapshot: str,
         VOICE_ROLE.format(model=model),
         VOICE_STYLE,
         VOICE_CAPABILITIES.format(read_tools=", ".join(read_tools)),
+        VOICE_FAMILY_EXTRAS,
         VOICE_TRUTH,
     ]
     if snapshot:

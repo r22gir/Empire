@@ -255,7 +255,7 @@ def test_spanish_default_and_english_greeting(monkeypatch, tmp_path):
     client = _client(monkeypatch, tmp_path)
     body = client.get("/api/v1/edition").json()
     assert body["default_locale"] == "es"
-    assert body["greeting"].startswith("Hola, soy Max-e")
+    assert body["greeting"].startswith("¡Quiubo manito!")
     assert "Juan Diego Giraldo" not in body["greeting"]
     assert "Juan Diego Giraldo" not in body["assistant"]["greeting_es"]
     assert "Juan Diego Giraldo" not in body["assistant"]["greeting_en"]

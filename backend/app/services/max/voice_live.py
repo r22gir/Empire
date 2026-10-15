@@ -73,16 +73,34 @@ VOICE_READ_ONLY_TOOLS = (
     "check_email", "list_job_images", "search_conversations", "get_weather",
     "list_quotes_awaiting_review", "show_quote_for_review",
     "get_revenue_chart", "web_search",
+    "get_today_agenda", "list_schedule", "can_you_do",
 )
 QUEUE_TOOL = "queue_for_founder_approval"
 IMPROVE_TOOL = "request_improvement"  # writes a change request only; builds need Rafael's tap in the studio
-VOICE_TOOL_ALLOWLIST = frozenset(VOICE_READ_ONLY_TOOLS + (QUEUE_TOOL, IMPROVE_TOOL))
+SEND_ME_TOOL = "send_me_link"  # this instance owner's WhatsApp + email only
+STUDIO_SEND_ME_TOOL = "send_me_this_link"  # never enabled on family editions
+
+
+def voice_tool_allowlist() -> frozenset[str]:
+    """Family editions get send_me_link. Studio send_me_this_link stays off."""
+    base = VOICE_READ_ONLY_TOOLS + (QUEUE_TOOL, IMPROVE_TOOL)
+    try:
+        from app.edition import is_family_edition
+        if is_family_edition():
+            return frozenset(base + (SEND_ME_TOOL,))
+    except Exception:
+        pass
+    return frozenset(base)
+
+
+VOICE_TOOL_ALLOWLIST = voice_tool_allowlist()
 READ_ONLY_TOOLS = VOICE_READ_ONLY_TOOLS  # backwards-compatible name
 # Explicitly named so logs/tests are clear; the allowlist above is what enforces.
 VOICE_DENIED_EXAMPLES = frozenset({
     "send_email", "send_telegram", "shell_execute", "env_set", "file_write", "file_edit",
     "file_append", "file_delete", "approve_quote", "reject_quote", "deposit_pay_link",
     "create_task", "service_manager", "git_ops", "delete_quote", "delete_contact",
+    STUDIO_SEND_ME_TOOL,
 })
 
 _active_calls: set[str] = set()
@@ -126,7 +144,7 @@ def voice_status() -> dict[str, Any]:
         "sample_rate": SAMPLE_RATE,
         "active_calls": len(_active_calls),
         "text_routing_xai_disabled": _flag("MAX_DISABLE_XAI", False),
-        "tools": sorted(VOICE_TOOL_ALLOWLIST),
+        "tools": sorted(voice_tool_allowlist()),
         "transcripts_saved": True,
     }
 
@@ -140,11 +158,14 @@ def build_instructions() -> str:
     cannot be built. Deliberately does NOT read max/memory.md: that file is a
     stale "v5.1 / 2026-03-18" summary that /max/chat does not load.
     """
-    from app.services.max.voice_brain import VOICE_CAPABILITIES, VOICE_ROLE, VOICE_STYLE, VOICE_TRUTH
+    from app.services.max.voice_brain import (
+        VOICE_CAPABILITIES, VOICE_FAMILY_EXTRAS, VOICE_ROLE, VOICE_STYLE, VOICE_TRUTH,
+    )
     return "\n\n".join([
         VOICE_ROLE.format(model=voice_model()),
         VOICE_STYLE,
         VOICE_CAPABILITIES.format(read_tools=", ".join(VOICE_READ_ONLY_TOOLS)),
+        VOICE_FAMILY_EXTRAS,
         VOICE_TRUTH,
         "# Live snapshot\nThe live snapshot could not be loaded for this call. Use the tools "
         "(get_tasks, get_desk_status, get_services_health, list_quotes_awaiting_review) before "
@@ -299,6 +320,33 @@ _FALLBACK_TOOL_SCHEMAS = {
         "description": "Current weather (Open-Meteo). Default city Washington DC. Read-only.",
         "parameters": _obj({"city": {"type": "string", "description": "City (default Washington DC)"}}),
     },
+    "get_today_agenda": {
+        "description": "Today's calendar, Organizer items and due tasks. Use for 'what's on today', "
+                       "schedule, agenda, qué hay hoy. Never guess from open projects.",
+        "parameters": _obj({"date": {"type": "string", "description": "YYYY-MM-DD (default today ET)"}}),
+    },
+    "list_schedule": {
+        "description": "Calendar events in a date range. For today, prefer get_today_agenda.",
+        "parameters": _obj({
+            "start_date": {"type": "string"},
+            "end_date": {"type": "string"},
+        }),
+    },
+    "can_you_do": {
+        "description": "Answer 'can you do X' from the voice capability list. Do not guess. "
+                       "If it is an action like 'can you send me X', it returns action_tool — call that tool.",
+        "parameters": _obj({"question": {"type": "string", "description": "The 'can you…' question"}},
+                           ["question"]),
+    },
+    SEND_ME_TOOL: {
+        "description": "Send a link or document ONLY to this instance owner's WhatsApp or email. "
+                       "Never clients, Studio addresses, or the other brother.",
+        "parameters": _obj({
+            "query": {"type": "string", "description": "URL or what to send"},
+            "url": {"type": "string"},
+            "via": {"type": "string", "enum": ["whatsapp", "email"]},
+        }),
+    },
     "web_search": {
         "description": "Read-only web search (DuckDuckGo, Brave fallback) for current news, local events, prices or any public fact. For news, put the topic and place in the query (e.g. 'noticias Cartago Valle del Cauca hoy'). Speak a short summary of the top headlines; never read URLs aloud. Sends nothing.",
         "parameters": _obj({"query": {"type": "string", "description": "Search query, in the language of the place"}}, ["query"]),
@@ -422,13 +470,16 @@ def realtime_tool_definitions() -> list[dict[str, Any]]:
     except Exception as exc:  # pragma: no cover - defensive
         logger.warning("voice_live: canonical tool schemas unavailable: %s", exc)
     out = []
-    for name in VOICE_READ_ONLY_TOOLS + (QUEUE_TOOL, IMPROVE_TOOL):
-        fn = canonical.get(name) or _FALLBACK_TOOL_SCHEMAS[name]
+    allowed = tuple(n for n in (VOICE_READ_ONLY_TOOLS + (QUEUE_TOOL, IMPROVE_TOOL, SEND_ME_TOOL))
+                    if n in voice_tool_allowlist())
+    for name in allowed:
+        fn = canonical.get(name) or _FALLBACK_TOOL_SCHEMAS.get(name) or {}
+        fallback = _FALLBACK_TOOL_SCHEMAS.get(name) or {}
         out.append({
             "type": "function",
             "name": name,
-            "description": (fn.get("description") or _FALLBACK_TOOL_SCHEMAS[name]["description"])[:1000],
-            "parameters": fn.get("parameters") or _FALLBACK_TOOL_SCHEMAS[name]["parameters"],
+            "description": (fn.get("description") or fallback.get("description") or name)[:1000],
+            "parameters": fn.get("parameters") or fallback.get("parameters") or _obj({}),
         })
     return out
 
@@ -489,14 +540,41 @@ def queue_for_founder_approval(action: str, details: str = "", *, call_id: str =
 
 
 def run_voice_tool(name: str, arguments: dict[str, Any], *, call_id: str = "",
-                   conversation_id: str = "") -> dict[str, Any]:
+                   conversation_id: str = "", user_text: str = "") -> dict[str, Any]:
     """Execute one allowlisted voice tool (sync). Server-side allowlist enforced here."""
-    if name not in VOICE_TOOL_ALLOWLIST:
+    allowed = voice_tool_allowlist()
+    if name not in allowed:
         logger.warning("voice_live[%s]: refused non-allowlisted tool %r", call_id or "-", name)
         return {"success": False, "error": f"Tool '{name}' is not available in voice mode (read-only tools "
                                            f"plus queue_for_founder_approval only). Offer to queue it for "
-                                           f"Rafael's approval instead."}
+                                           f"approval instead."}
     call = {k: v for k, v in (arguments or {}).items() if not str(k).startswith("_")}
+    if name == STUDIO_SEND_ME_TOOL:
+        return {"success": False, "error": "send_me_this_link is not available in this instance."}
+    if name == SEND_ME_TOOL:
+        from app.services.max.send_me_link import asked_to_send, infer_via, send_me_link
+        if not asked_to_send(user_text):
+            return {"success": False, "tool": SEND_ME_TOOL, "error": (
+                "Not sent: the owner did not ask to send this. Name the link here "
+                "and offer to send it if he wants.")}
+        call["via"] = infer_via(user_text, call.get("via"))
+        call["user_text"] = user_text
+        data = send_me_link(call)
+        return {
+            "success": bool(data.get("success")),
+            "tool": SEND_ME_TOOL,
+            "result": data.get("result"),
+            "error": data.get("error"),
+        }
+    if name == "can_you_do":
+        from app.services.max.voice_can_do import can_you_do
+        data = can_you_do(call)
+        return {"success": True, "tool": "can_you_do", "result": data.get("result")}
+    if name == "get_today_agenda":
+        from app.services.max.today_agenda import collect_today_agenda
+        day = str(call.get("date") or call.get("day") or "").strip()
+        return {"success": True, "tool": "get_today_agenda",
+                "result": collect_today_agenda(day or None)}
     if name == QUEUE_TOOL:
         return queue_for_founder_approval(call.get("action", ""), call.get("details", ""),
                                           call_id=call_id, conversation_id=conversation_id)
@@ -733,8 +811,10 @@ class LiveCall:
             if etype == "ping":
                 await self.send_client_json({"type": "pong", "remaining": self.remaining()})
             elif etype == "text" and str(event.get("text") or "").strip():
+                typed = str(event["text"])[:2000]
+                self.last_user_text = typed
                 self._turn_started = time.monotonic()
-                self._record("add_user", str(event["text"])[:2000], "typed")
+                self._record("add_user", typed, "typed")
                 await self.send_upstream({
                     "type": "conversation.item.create",
                     "item": {"type": "message", "role": "user",
@@ -900,7 +980,8 @@ class LiveCall:
         started = time.monotonic()
         try:
             data = await asyncio.to_thread(run_voice_tool, name, args, call_id=self.call_id,
-                                           conversation_id=self.conversation_id)
+                                           conversation_id=self.conversation_id,
+                                           user_text=self.last_user_text)
         except Exception as exc:
             data = {"success": False, "error": f"{type(exc).__name__}: {exc}"}
         ok = bool(data.get("success"))

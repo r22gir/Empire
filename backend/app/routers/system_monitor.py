@@ -55,8 +55,19 @@ async def system_health():
     for port_str, name in ports.items():
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         sock.settimeout(0.5)
-        services[name] = sock.connect_ex(("127.0.0.1", int(port_str))) == 0
-        sock.close()
+        try:
+            services[name] = sock.connect_ex(("127.0.0.1", int(port_str))) == 0
+        except OSError:
+            services[name] = False
+        finally:
+            sock.close()
+    avatar_ok = False
+    try:
+        from app.services.max.desks.live_services import avatar_service_status
+        avatar_ok = avatar_service_status().get("status") == "online"
+    except Exception:
+        avatar_ok = False
+    services["Avatar"] = avatar_ok
     mem = psutil.virtual_memory()
     return {
         "status": "ok",
