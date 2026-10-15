@@ -15,8 +15,9 @@ Sources, in order of preference per session:
      and archived on the way through.
 
 Main studio only. The exporter refuses to run inside a family edition
-(EMPIRE_EDITION set, or a data dir under /data/amp or /data/maxine) and
-reads only rows stamped edition='main'.
+(EMPIRE_EDITION in {amp, maxine, max-e, ...}, or a data dir under
+/data/amp or /data/maxine) and reads founder studio rows stamped
+edition '' / main / workroom / studio.
 
 CLI:
     cd ~/empire-repo-main/backend
@@ -41,10 +42,15 @@ from pathlib import Path
 from typing import Any, Optional
 
 from app.services.max import session_journal as sj
+from app.services.max.founder_edition import (
+    FAMILY_PATH_MARKERS,
+    is_family_edition,
+    is_founder_edition,
+)
 
 STUDIO_CHANNELS = ["web_chat", "web", "web_cc", "dashboard", "command_center", "mobile_browser", "studio_browser"]
 EXPORT_CHANNELS = STUDIO_CHANNELS + ["telegram", "voice", "whatsapp"]
-FAMILY_MARKERS = ("/data/amp", "/data/maxine", "empire-amp", "empire-maxine")
+FAMILY_MARKERS = FAMILY_PATH_MARKERS
 
 REFUSAL_RE = re.compile(
     r"(I can['’]t help with that request|I (?:can['’]t|cannot|won['’]t) (?:help|assist) with|"
@@ -72,7 +78,7 @@ def main_data_dir() -> Path:
 
 def assert_main_studio(data_dir: Path) -> None:
     ed = (os.getenv("EMPIRE_EDITION") or "main").strip().lower()
-    if ed not in ("", "main"):
+    if is_family_edition(ed) or (ed and not is_founder_edition(ed)):
         raise FamilyEditionError(f"refusing to export: EMPIRE_EDITION={ed} (family edition)")
     resolved = str(Path(data_dir).expanduser().resolve())
     if any(m in resolved for m in FAMILY_MARKERS):
@@ -178,7 +184,7 @@ def load_unified(day: date, data_dir: Path) -> list[dict]:
         meta = _jsonish(d.get("metadata"), {}) or {}
         if not isinstance(meta, dict):
             meta = {}
-        if str(meta.get("edition") or "main").lower() not in ("main", ""):
+        if not is_founder_edition(meta.get("edition") or "main"):
             continue
         atts_raw = _jsonish(d.get("attachment_refs"), []) or []
         if isinstance(atts_raw, dict):
