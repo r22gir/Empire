@@ -410,6 +410,10 @@ class DrawingHandoff:
     # D3: 6-way intent classification (per D1 + D1-Addendum).
     intent_mode: str = "unknown"
 
+    # Stored MiniMax description for this photo. Resume paths reuse it
+    # instead of calling vision a second time.
+    vision_text: str = ""
+
     @property
     def ready(self) -> bool:
         """True when B1 template dims are satisfied, or U/L banquette UL-renderer dims are."""
@@ -642,6 +646,8 @@ def is_drawing_intent(text: str, history: Any = None, pending_drawing: bool = Fa
     ):
         return False
     if pending_drawing and looks_like_dimension_reply(text) and not is_named_non_drawing_followup(text):
+        return True
+    if pending_drawing and parse_heading_reply(text) and not is_named_non_drawing_followup(text):
         return True
 
     # Strip negation patterns (pre-existing). User explicitly rejects.
@@ -1136,7 +1142,10 @@ def _extract_dimensions(
         re.IGNORECASE,
     )
     # Label-first pattern: same fraction / feet-inches support.
+    # Optional "top panel" / "panel" prefix so vision tables and
+    # "Top panel width: 160"" both parse.
     label_first = re.compile(
+        r"(?:(?:top\s+panel|face\s+panel|panel|overall)\s+)?"
         r"(?P<label>overall height|seat height|seat h|back height|back h|width|length|drop|depth|height)"
         r"\s*[:=]?\s*"
         r"(?P<value>"
@@ -1391,7 +1400,108 @@ def _extract_compact_dimensions(text: str) -> dict[str, str]:
     if fold:
         out["slat_height"] = f'{fold.group("f")}"'
         out["fold_height"] = out["slat_height"]
+    quoted = _extract_quote_x_dimensions(text)
+    for key, value in quoted.items():
+        out.setdefault(key, value)
     return out
+
+
+_INCH_TOKEN = r"(?:\d+(?:\.\d+)?(?:[-\s]\d+/\d+)?|\d+/\d+)"
+
+
+def _extract_quote_x_dimensions(text: str) -> dict[str, str]:
+    """Parse ``160" x 120"`` and ``160" W x 120" L`` (fractions allowed).
+
+    Prefer a face / top-panel pair over a lining pair when both appear.
+    """
+    if not text:
+        return {}
+    pattern = re.compile(
+        rf'(?P<w>{_INCH_TOKEN})\s*"\s*(?:w(?:ide|idth)?)?\s*[x×]\s*'
+        rf'(?P<h>{_INCH_TOKEN})\s*"\s*(?:l(?:ong|ength)?|h(?:igh|eight)?)?',
+        re.IGNORECASE,
+    )
+    preferred: dict[str, str] = {}
+    lining: dict[str, str] = {}
+    for match in pattern.finditer(text):
+        width_in = _parse_dimension_value(match.group("w"))
+        height_in = _parse_dimension_value(match.group("h"))
+        if width_in is None or height_in is None:
+            continue
+        if not (_DIMENSION_BOUNDS[0] <= width_in <= _DIMENSION_BOUNDS[1]):
+            continue
+        if not (_DIMENSION_BOUNDS[0] <= height_in <= _DIMENSION_BOUNDS[1]):
+            continue
+        pair = {"width": f'{width_in:g}"', "height": f'{height_in:g}"'}
+        context = text[max(0, match.start() - 24):match.end() + 8].lower()
+        bucket = lining if "lining" in context else preferred
+        if "width" not in bucket:
+            bucket.update(pair)
+    if preferred:
+        return preferred
+    return lining
+
+
+def _extract_markdown_table_dimensions(text: str) -> dict[str, str]:
+    """Parse vision markdown tables. Prefer a top/face panel over lining."""
+    if not text or "|" not in text:
+        return {}
+    preferred: dict[str, str] = {}
+    lining: dict[str, str] = {}
+    for raw_line in text.splitlines():
+        line = raw_line.strip()
+        if "|" not in line:
+            continue
+        cells = [c.strip() for c in line.strip("|").split("|")]
+        cells = [c for c in cells if c and not re.fullmatch(r":?-{3,}:?", c)]
+        if len(cells) < 2:
+            continue
+        label = cells[0].lower().strip()
+        if not label or label in {"item", "measurement", "piece", "part", "size", "value"}:
+            continue
+        bucket = lining if "lining" in label else preferred
+        rest = " ".join(cells[1:])
+        pair = _extract_quote_x_dimensions(rest)
+        if pair:
+            for key, value in pair.items():
+                bucket.setdefault(key, value)
+            continue
+        width_hit = any(token in label for token in ("width", "wide"))
+        height_hit = any(token in label for token in ("height", "high", "length", "long", "drop"))
+        token = re.search(rf"({_INCH_TOKEN})", rest)
+        if token and (width_hit or height_hit):
+            inches = _parse_dimension_value(token.group(1))
+            if inches is not None and _DIMENSION_BOUNDS[0] <= inches <= _DIMENSION_BOUNDS[1]:
+                dest = "width" if width_hit else "height"
+                bucket.setdefault(dest, f'{inches:g}"')
+            continue
+        nums: list[float] = []
+        for cell in cells[1:]:
+            token = re.search(rf"({_INCH_TOKEN})", cell)
+            if not token:
+                continue
+            inches = _parse_dimension_value(token.group(1))
+            if inches is not None and _DIMENSION_BOUNDS[0] <= inches <= _DIMENSION_BOUNDS[1]:
+                nums.append(inches)
+        if len(nums) >= 2:
+            bucket.setdefault("width", f'{nums[0]:g}"')
+            bucket.setdefault("height", f'{nums[1]:g}"')
+    out = dict(lining)
+    out.update(preferred)
+    return out
+
+
+def extract_all_dimensions(text: str | None, item_type: str | None = None) -> dict[str, str]:
+    """Table + labeled + compact + ``160" x 120"`` forms. Top panel wins over lining."""
+    if not text:
+        return {}
+    dims = _extract_markdown_table_dimensions(text)
+    labeled = _extract_dimensions(text, item_type=item_type)
+    compact = _extract_compact_dimensions(text)
+    for source in (labeled, compact):
+        for key, value in source.items():
+            dims.setdefault(key, value)
+    return dims
 
 
 def _enrich_ul_banquette_dims(text: str, dims: dict[str, str]) -> dict[str, str]:
@@ -1503,12 +1613,41 @@ def enrich_b1_message_dims(message: str, b1_product_type: str | None, dims: dict
     return dict(dims or {})
 
 
+HEADING_ASK = "Which heading: pinch, euro, pencil or ripplefold?"
+
+_HEADING_REPLY_PATTERNS = (
+    (re.compile(r"(?i)\bpinch(?:[-\s]?pleat)?\b"), "pinch_pleat"),
+    (re.compile(r"(?i)\beuro(?:[-\s]?pleat)?\b"), "euro_pleat"),
+    (re.compile(r"(?i)\bpencil(?:[-\s]?pleat)?\b"), "pencil_pleat"),
+    (re.compile(r"(?i)\bripple(?:[-\s]?fold)?\b"), "ripplefold"),
+)
+
+
+def parse_heading_reply(text: str | None) -> str | None:
+    """Map a short heading answer (pinch / euro / pencil / ripplefold) to a B1 type."""
+    lowered = (text or "").strip()
+    if not lowered:
+        return None
+    for pat, name in _HEADING_REPLY_PATTERNS:
+        if pat.search(lowered):
+            return name
+    return None
+
+
 def pending_should_resume(message: str, pending: dict | None, history: Any = None) -> bool:
-    """True when a pending drawing job should merge this turn (dims or new draw)."""
+    """True when a pending drawing job should merge this turn (dims, heading, or photo)."""
     if not pending:
         return False
     if is_named_non_drawing_followup(message) and not is_explicit_drawing_request(message):
         return False
+    if parse_heading_reply(message):
+        return True
+    try:
+        from app.services.max.image_turn import refers_to_last_image
+        if refers_to_last_image(message):
+            return True
+    except Exception:
+        pass
     if looks_like_dimension_reply(message):
         return True
     try:
@@ -1527,6 +1666,7 @@ def build_drawing_handoff(
     history: Any = None,
     pending_drawing: bool = False,
     vision_text: str | None = None,
+    force: bool = False,
 ) -> DrawingHandoff:
     photo_drawing = False
     if image_filename:
@@ -1535,9 +1675,12 @@ def build_drawing_handoff(
             photo_drawing = is_photo_drawing_request(message, image_filename)
         except Exception:
             photo_drawing = False
+    heading_reply = parse_heading_reply(message)
     if not (
         is_drawing_intent(message, history=history, pending_drawing=pending_drawing)
         or photo_drawing
+        or force
+        or (pending_drawing and heading_reply)
     ):
         # Even when the message is not a drawing intent, classify it for
         # log visibility. D3: routes that the MAX router logs "intent_mode
@@ -1553,11 +1696,9 @@ def build_drawing_handoff(
     intent_mode = classify_intent_mode(message)
 
     subject, item_type = _extract_item_type(message)
-    dimensions = _extract_dimensions(message, item_type=item_type)
-    dimensions.update(_extract_compact_dimensions(message))
+    dimensions = extract_all_dimensions(message, item_type=item_type)
     if vision_text:
-        vision_dims = _extract_dimensions(vision_text, item_type=item_type)
-        vision_dims.update(_extract_compact_dimensions(vision_text))
+        vision_dims = extract_all_dimensions(vision_text, item_type=item_type)
         for key, value in vision_dims.items():
             dimensions.setdefault(key, value)
     views = _extract_views(message)
@@ -1569,14 +1710,15 @@ def build_drawing_handoff(
     # resulted in a dead-end response. Post-fix the ready gate is the
     # template's REQUIRED set covered by translated dims AND a known
     # B1 product_type.
-    b1_product_type = _try_resolve_b1_type(message, item_type)
+    #
+    # Never guess a heading from a photo. Style names are not in the
+    # vision prompt; Style: unknown (or a missing style) asks the
+    # founder instead of defaulting to pinch_pleat (a bench photo
+    # must not become drapery).
+    b1_product_type = heading_reply or _try_resolve_b1_type(message, item_type)
     if not b1_product_type and vision_text:
-        b1_product_type = _try_resolve_b1_type(vision_text, item_type)
-    if not b1_product_type and image_filename and (dimensions or vision_text):
-        # Window photo + "give a drawing" — workroom default heading.
-        b1_product_type = "pinch_pleat"
-        if not subject or item_type == "generic":
-            subject, item_type = "drapery", "window"
+        if not re.search(r"(?i)style\s*:\s*unknown\b", vision_text):
+            b1_product_type = _try_resolve_b1_type(vision_text, item_type)
     translated_dims = _translate_dims_for_b1_product(
         dimensions, b1_product_type
     )
@@ -1611,6 +1753,7 @@ def build_drawing_handoff(
         source_image=image_filename,
         intent_mode=intent_mode,
         raw_message=message,
+        vision_text=vision_text or "",
     )
 
     # Migration: while the router is being updated for HOTFIX 4.0b,
@@ -1630,6 +1773,12 @@ def build_drawing_handoff(
     if b1_product_type and missing_template_keys:
         handoff.missing_template_keys = missing_template_keys
         handoff.missing = missing_template_keys
+    elif not b1_product_type and dimensions.get("width") and dimensions.get("height"):
+        # Dims from the photo (or text) but no written heading — ask, never guess.
+        handoff.missing = ["heading"]
+        handoff.missing_template_keys = ["heading"]
+        handoff.response = HEADING_ASK
+        return handoff
     elif image_filename and not dimensions:
         handoff.missing = [
             "real extracted dimensions",
@@ -1707,4 +1856,62 @@ def build_drawing_handoff(
 
     handoff.tool_payload = payload
     handoff.response = "Starting the drawing workflow. I will return the generated drawing artifact here."
+    return handoff
+
+
+def resume_drawing_handoff(snapshot: dict, message: str) -> DrawingHandoff:
+    """Rebuild a DrawingHandoff from a stored draft + this turn.
+
+    Reuses the remembered photo and the stored vision description.
+    Does not call vision.
+    """
+    snapshot = dict(snapshot or {})
+    vision = snapshot.get("vision_text") or ""
+    image = snapshot.get("source_image") or snapshot.get("image_filename")
+    heading = parse_heading_reply(message) or snapshot.get("b1_product_type")
+    seed = message or ""
+    if heading:
+        pretty = str(heading).replace("_", " ")
+        if pretty.lower() not in seed.lower():
+            seed = f"{pretty}. {seed}".strip()
+    stored_dims = snapshot.get("dimensions") or {}
+    if stored_dims and not vision:
+        lines = []
+        if stored_dims.get("width"):
+            lines.append(f"Width: {stored_dims['width']}")
+        if stored_dims.get("height"):
+            lines.append(f"Height: {stored_dims['height']}")
+        vision = "\n".join(lines)
+    handoff = build_drawing_handoff(
+        seed,
+        image_filename=image,
+        vision_text=vision,
+        pending_drawing=True,
+        force=True,
+    )
+    for key, value in stored_dims.items():
+        handoff.dimensions.setdefault(key, value)
+    if heading and handoff.b1_product_type != heading:
+        handoff.b1_product_type = heading
+        handoff.translated_dims = _translate_dims_for_b1_product(
+            handoff.dimensions, heading
+        )
+        handoff.translated_dims = enrich_b1_message_dims(
+            seed, heading, handoff.translated_dims
+        )
+        handoff.missing_template_keys = _compute_missing_template_keys(
+            handoff.translated_dims, heading
+        )
+        handoff.missing = list(handoff.missing_template_keys)
+        if not handoff.missing:
+            # Re-run so tool_payload / ready path is built with the heading.
+            handoff = build_drawing_handoff(
+                seed,
+                image_filename=image,
+                vision_text=vision,
+                pending_drawing=True,
+                force=True,
+            )
+    handoff.vision_text = vision
+    handoff.source_image = image
     return handoff

@@ -150,6 +150,32 @@ def _default_drawings_dir() -> Path:
     return _empire_data_dir() / "drawings"
 
 
+def repo_legacy_drawings_dir() -> Path:
+    """Historical checkout folder holding the 533 existing shop PDFs."""
+    from app.services.data_paths import backend_root
+    return backend_root() / "data" / "drawings"
+
+
+def resolve_existing_drawing_file(filename: str) -> Path | None:
+    """Find a drawing in the canonical dir, then the legacy repo folder."""
+    safe = Path(filename).name
+    candidates = [
+        Path(canonical_drawings_dir()) / safe,
+        repo_legacy_drawings_dir() / safe,
+        Path.home() / "empire-repo" / "uploads" / "arch_drawings" / safe,
+        Path.home() / "empire-repo" / "backend" / "data" / "drawings" / safe,
+    ]
+    seen: set[str] = set()
+    for candidate in candidates:
+        key = str(candidate)
+        if key in seen:
+            continue
+        seen.add(key)
+        if candidate.is_file():
+            return candidate
+    return None
+
+
 # The canonical output dir lives under the live checkout's data tree.
 # Tests can override via MAX_DRAWINGS_OUTPUT_DIR (e.g. to a tmp_path).
 _DEFAULT_CANON_DIR = _default_drawings_dir()

@@ -59,6 +59,8 @@ from app.services.drawing.templates.b2_renderers import (
 # Other headings → conservative 2.0" default.
 DRAPE_PROJECTION_IN: dict[str, tuple[float, float]] = {
     "pinch_pleat":  (2.0, 3.0),
+    "euro_pleat":   (2.0, 3.0),
+    "pencil_pleat": (2.0, 3.0),
     "ripplefold":   (3.5, 4.5),
     "grommet":      (3.0, 4.0),    # ASSUMED — FOUNDER VERIFY
     "rod_pocket":   (2.5, 3.5),    # ASSUMED — FOUNDER VERIFY

@@ -671,7 +671,9 @@ class AIRouter:
         return self._find_file(filename)
 
     def _is_image(self, path: Path) -> bool:
-        return path.suffix.lower() in {'.png', '.jpg', '.jpeg', '.gif', '.webp'}
+        return path.suffix.lower() in {
+            '.png', '.jpg', '.jpeg', '.gif', '.webp', '.heic', '.heif', '.bmp',
+        }
 
     def _is_audio(self, path: Path) -> bool:
         return path.suffix.lower() in self.AUDIO_EXTS

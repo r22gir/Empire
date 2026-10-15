@@ -70,17 +70,11 @@ def _default_style_for(item_type: str) -> Optional[str]:
 @router.get("/drawings/files/{filename}")
 async def serve_drawing_file(filename: str):
     """Serve generated drawing files (SVG, PDF, HTML, PNG, GLB)."""
-    from app.services.drawing.canonical_path import canonical_drawings_dir
-    base_dir = canonical_drawings_dir()
-    file_path = os.path.join(base_dir, filename)
-    if not os.path.exists(file_path):
-        # Fallback to legacy path if present
-        legacy_dir = os.path.expanduser("~/empire-repo/uploads/arch_drawings")
-        legacy_path = os.path.join(legacy_dir, filename)
-        if os.path.exists(legacy_path):
-            file_path = legacy_path
-        else:
-            raise HTTPException(status_code=404, detail="Drawing file not found")
+    from app.services.drawing.canonical_path import resolve_existing_drawing_file
+    found = resolve_existing_drawing_file(filename)
+    if found is None:
+        raise HTTPException(status_code=404, detail="Drawing file not found")
+    file_path = str(found)
     # Determine media type
     if filename.endswith(".svg"):
         media_type = "image/svg+xml"

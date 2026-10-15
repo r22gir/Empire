@@ -5,23 +5,28 @@ first-chunk wait cancelled MiniMax vision, then the empty-reply
 fallback regenerated from text only. This module:
 
   1. Remembers the last image in a conversation so "you have it" /
-     "that one" / "esa foto" can refer back to it.
+     "that one" / "esa foto" can refer back to it. Memory is persisted
+     per conversation in the data-dir SQLite DB so it survives restarts.
   2. Detects drawing intent on a photo turn (English + Spanish).
   3. Extracts width/height from a (mocked or live) vision description
      so Drawing Studio can use the photo's measurements.
 
 No live I/O lives here except the optional MiniMax describe call,
-which tests replace with a mock. Last-image memory is in-process only.
+which tests replace with a mock, and the last-image DB under the
+redirected data dir.
 """
 from __future__ import annotations
 
 import asyncio
+import os
 import re
+import sqlite3
 from pathlib import Path
 from typing import Any
 
-# In-process last-image memory. Tests must not write ~/empire-data.
-_LAST_IMAGE: dict[str, str] = {}
+# In-process last-image memory. Tests redirect EMPIRE_TASK_DB / EMPIRE_DATA_DIR.
+# Each value is {"image": filename, "vision": stored description or ""}.
+_LAST_IMAGE: dict[str, dict[str, str]] = {}
 
 # Stream first-chunk wait. wait_for() cancels the producer — MiniMax
 # vision is ~12s+ so a 15s cap used to drop the image-bearing reply.
@@ -64,7 +69,7 @@ _IMAGE_REFERRAL_RE = re.compile(
     r"the photo|the image|the picture|"
     r"same (?:photo|image|picture|one)|"
     r"ya la tienes|ya lo tienes|ya la tiene|ya lo tiene|"
-    r"esa foto|esa imagen|esa|ese|"
+    r"esa foto|esa imagen|"
     r"la foto|la imagen|la misma"
     r")\b"
 )
@@ -111,13 +116,18 @@ _PHOTO_DRAW_NEGATION = (
 )
 
 # Vision prompt for a photo that is becoming a shop drawing.
-# Measurements are requested as fractions (workroom convention).
+# Fixed lines so the parser does not have to guess a markdown table.
+# Do not name heading styles — that made MiniMax invent pinch/euro/pencil.
 DRAWING_VISION_PROMPT = (
     "Describe this photo for a workroom shop drawing. "
-    "List every readable measurement as fractions of an inch "
-    "(width, height, drop, returns). "
-    "Name the treatment if visible (pinch pleat, euro pleat, "
-    "pencil pleat, ripplefold). "
+    "Write every readable measurement as fractions of an inch "
+    "on these exact lines:\n"
+    "Width: …\n"
+    "Height: …\n"
+    "Style: … or unknown\n"
+    "If a heading style is written on the photo, copy it after Style. "
+    "If no heading is written, write Style: unknown. "
+    "Do not guess a heading. "
     "Do not generate a new image."
 )
 
@@ -128,24 +138,141 @@ DESCRIBE_VISION_PROMPT = (
 )
 
 
+def _memory_db_path() -> Path:
+    """SQLite file under the data dir (EMPIRE_TASK_DB / EMPIRE_DATA_DIR)."""
+    env = os.getenv("EMPIRE_TASK_DB")
+    if env:
+        return Path(env)
+    data = os.getenv("EMPIRE_DATA_DIR")
+    if data:
+        return Path(data) / "empire.db"
+    try:
+        from app.services.data_paths import data_root
+        return data_root() / "empire.db"
+    except Exception:
+        return Path.home() / "empire-data" / "empire.db"
+
+
+def _connect_memory() -> sqlite3.Connection:
+    path = _memory_db_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(str(path))
+    conn.row_factory = sqlite3.Row
+    return conn
+
+
+def _ensure_memory_table() -> None:
+    with _connect_memory() as conn:
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS conversation_last_images (
+                conversation_id TEXT PRIMARY KEY,
+                image_filename TEXT NOT NULL,
+                vision_text TEXT,
+                updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+            )
+            """
+        )
+        conn.commit()
+
+
+def _load_memory_row(conversation_id: str) -> dict[str, str] | None:
+    try:
+        _ensure_memory_table()
+        with _connect_memory() as conn:
+            row = conn.execute(
+                "SELECT image_filename, vision_text FROM conversation_last_images "
+                "WHERE conversation_id = ?",
+                (conversation_id,),
+            ).fetchone()
+        if not row:
+            return None
+        rec = {
+            "image": str(row["image_filename"] or ""),
+            "vision": str(row["vision_text"] or ""),
+        }
+        if rec["image"]:
+            _LAST_IMAGE[conversation_id] = rec
+            return rec
+    except Exception:
+        return None
+    return None
+
+
+def _persist_memory_row(conversation_id: str, image: str, vision: str) -> None:
+    try:
+        _ensure_memory_table()
+        with _connect_memory() as conn:
+            conn.execute(
+                """
+                INSERT INTO conversation_last_images
+                    (conversation_id, image_filename, vision_text, updated_at)
+                VALUES (?, ?, ?, datetime('now'))
+                ON CONFLICT(conversation_id) DO UPDATE SET
+                    image_filename = excluded.image_filename,
+                    vision_text = excluded.vision_text,
+                    updated_at = datetime('now')
+                """,
+                (conversation_id, image, vision),
+            )
+            conn.commit()
+    except Exception:
+        pass
+
+
 def clear_conversation_images() -> None:
-    """Test helper — drop in-process last-image memory."""
+    """Test helper — drop in-process and isolated-DB last-image memory."""
     _LAST_IMAGE.clear()
+    try:
+        _ensure_memory_table()
+        with _connect_memory() as conn:
+            conn.execute("DELETE FROM conversation_last_images")
+            conn.commit()
+    except Exception:
+        pass
 
 
 def remember_conversation_image(
     conversation_id: str | None,
     image_filename: str | None,
+    vision_text: str | None = None,
 ) -> None:
     if not conversation_id or not image_filename:
         return
-    _LAST_IMAGE[str(conversation_id)] = Path(str(image_filename)).name
+    cid = str(conversation_id)
+    name = Path(str(image_filename)).name
+    existing = _LAST_IMAGE.get(cid) or {}
+    vision = vision_text if vision_text is not None else existing.get("vision", "")
+    if existing.get("image") != name and vision_text is None:
+        vision = ""
+    rec = {"image": name, "vision": vision or ""}
+    _LAST_IMAGE[cid] = rec
+    _persist_memory_row(cid, rec["image"], rec["vision"])
+
+
+def last_conversation_record(conversation_id: str | None) -> dict[str, str] | None:
+    if not conversation_id:
+        return None
+    cid = str(conversation_id)
+    rec = _LAST_IMAGE.get(cid)
+    if rec and rec.get("image"):
+        return rec
+    return _load_memory_row(cid)
 
 
 def last_conversation_image(conversation_id: str | None) -> str | None:
-    if not conversation_id:
+    rec = last_conversation_record(conversation_id)
+    if not rec:
         return None
-    return _LAST_IMAGE.get(str(conversation_id))
+    return rec.get("image") or None
+
+
+def last_conversation_vision(conversation_id: str | None) -> str | None:
+    rec = last_conversation_record(conversation_id)
+    if not rec:
+        return None
+    text = (rec.get("vision") or "").strip()
+    return text or None
 
 
 def refers_to_last_image(message: str | None) -> bool:
@@ -218,13 +345,8 @@ def extract_dims_from_vision_text(text: str | None) -> dict[str, str]:
     """Parse width/height (and friends) from a vision description."""
     if not text:
         return {}
-    from app.services.max.drawing_intent import (
-        _extract_compact_dimensions,
-        _extract_dimensions,
-    )
-    dims = _extract_dimensions(text)
-    dims.update(_extract_compact_dimensions(text))
-    return dims
+    from app.services.max.drawing_intent import extract_all_dimensions
+    return extract_all_dimensions(text)
 
 
 def inject_vision_context(

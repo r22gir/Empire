@@ -46,8 +46,21 @@ def test_remembers_last_image_for_you_have_it_and_that_one():
     assert refers_to_last_image("that one")
     assert refers_to_last_image("esa foto")
     assert refers_to_last_image("ya la tienes")
+    assert refers_to_last_image("esa") is False
+    assert refers_to_last_image("ese") is False
     assert resolve_turn_image("c1", "you have it", None) == "window.jpg"
     assert resolve_turn_image("c-other", "that one", None) is None
+
+
+def test_last_image_and_vision_persist_in_data_dir_db():
+    from app.services.max import image_turn
+
+    image_turn.remember_conversation_image(
+        "persist-1", "IMG_2265.jpeg", vision_text="Width: 160\"\nHeight: 120\"\nStyle: unknown",
+    )
+    image_turn._LAST_IMAGE.clear()
+    assert image_turn.last_conversation_image("persist-1") == "IMG_2265.jpeg"
+    assert "160" in (image_turn.last_conversation_vision("persist-1") or "")
 
 
 # ── drawing intent on a photo turn ────────────────────────────────
@@ -206,6 +219,12 @@ def test_describe_attached_image_is_mocked_no_send(monkeypatch, tmp_path):
     assert err is None
     assert "80 inches wide" in desc
     assert calls["n"] == 1
+    assert "Width:" in image_turn.DRAWING_VISION_PROMPT
+    assert "Height:" in image_turn.DRAWING_VISION_PROMPT
+    assert "Style:" in image_turn.DRAWING_VISION_PROMPT
+    assert "pinch pleat" not in image_turn.DRAWING_VISION_PROMPT.lower()
+    assert "euro" not in image_turn.DRAWING_VISION_PROMPT.lower()
+    assert "ripplefold" not in image_turn.DRAWING_VISION_PROMPT.lower()
 
 
 def test_vision_for_request_mocked(monkeypatch):
@@ -287,3 +306,201 @@ def test_pleat_render_spec_passes_builtin_qc(product_type):
     })
     assert isinstance(pdf, (bytes, bytearray))
     assert len(pdf) > 1024
+
+
+# ── size parsing: markdown table + 160" x 120" ────────────────────
+
+
+HAND_SKETCH_TABLE = """
+Hand sketch on graph paper. Top panel and lining noted in a table.
+
+| Item | Size |
+| --- | --- |
+| Top panel width | 160" |
+| Top panel length | 120" |
+| Lining width | 143 3/4" |
+| Lining length | 119 3/4" |
+"""
+
+
+def test_vision_table_and_quote_x_form_parse_top_panel_not_lining():
+    from app.services.max.drawing_intent import HEADING_ASK, build_drawing_handoff
+    from app.services.max.image_turn import extract_dims_from_vision_text
+
+    dims = extract_dims_from_vision_text(HAND_SKETCH_TABLE)
+    assert float(str(dims["width"]).rstrip('"')) == 160
+    assert float(str(dims["height"]).rstrip('"')) == 120
+
+    quoted = extract_dims_from_vision_text('Face panel 160" x 120" over a lining 143 3/4" W x 119 3/4" L')
+    assert float(str(quoted["width"]).rstrip('"')) == 160
+    assert float(str(quoted["height"]).rstrip('"')) == 120
+
+    handoff = build_drawing_handoff(
+        "Give a drawing",
+        image_filename="IMG_2265.jpeg",
+        vision_text=HAND_SKETCH_TABLE + "\nStyle: unknown\n",
+    )
+    assert handoff.is_drawing_intent is True
+    assert handoff.ready is False
+    assert handoff.b1_product_type is None
+    assert "heading" in handoff.missing
+    assert HEADING_ASK in handoff.response
+    assert float(str(handoff.dimensions["width"]).rstrip('"')) == 160
+    assert float(str(handoff.dimensions["height"]).rstrip('"')) == 120
+
+
+def test_photo_drawing_does_not_guess_pinch_pleat():
+    from app.services.max.drawing_intent import HEADING_ASK, build_drawing_handoff
+
+    handoff = build_drawing_handoff(
+        "Give a drawing",
+        image_filename="bench.jpg",
+        vision_text='Width: 160"\nHeight: 120"\nStyle: unknown\n',
+    )
+    assert handoff.b1_product_type is None
+    assert handoff.ready is False
+    assert HEADING_ASK == handoff.response
+
+
+def test_heading_answer_and_you_have_it_resume_pending_without_second_vision(monkeypatch):
+    from app.services.max.drawing_intent import (
+        HEADING_ASK,
+        build_drawing_handoff,
+        pending_should_resume,
+        resume_drawing_handoff,
+    )
+    from app.services.max.drawing_pending import (
+        get_pending,
+        merge_founder_reply,
+        set_pending,
+        snapshot_from_handoff,
+    )
+    from app.services.max import image_turn
+
+    vision_calls = {"n": 0}
+
+    async def fail_describe(*args, **kwargs):
+        vision_calls["n"] += 1
+        raise AssertionError("resume must reuse stored vision, not call MiniMax")
+
+    monkeypatch.setattr(image_turn, "describe_attached_image", fail_describe)
+
+    vision = HAND_SKETCH_TABLE + "\nStyle: unknown\n"
+    first = build_drawing_handoff(
+        "Give a drawing",
+        image_filename="IMG_2265.jpeg",
+        vision_text=vision,
+    )
+    assert first.ready is False
+    assert HEADING_ASK in first.response
+    set_pending("conv-resume", "dashboard", snapshot_from_handoff(first, vision_text=vision))
+    image_turn.remember_conversation_image(
+        "conv-resume", "IMG_2265.jpeg", vision_text=vision,
+    )
+
+    pending = get_pending("conv-resume", "dashboard")
+    assert pending is not None
+    assert pending_should_resume("pinch", pending) is True
+    assert pending_should_resume("you have it", pending) is True
+
+    merged = merge_founder_reply(pending, "pinch")
+    resumed = resume_drawing_handoff(merged, "pinch")
+    assert resumed.ready is True
+    assert resumed.b1_product_type == "pinch_pleat"
+    assert resumed.source_image == "IMG_2265.jpeg"
+    assert float(str(resumed.translated_dims["width"]).rstrip('"')) == 160
+    assert float(str(resumed.translated_dims["height"]).rstrip('"')) == 120
+    assert vision_calls["n"] == 0
+
+    you_have_it = resume_drawing_handoff(pending, "you have it")
+    assert you_have_it.source_image == "IMG_2265.jpeg"
+    assert you_have_it.vision_text
+    assert you_have_it.b1_product_type is None
+    assert HEADING_ASK in you_have_it.response
+    assert vision_calls["n"] == 0
+
+
+# ── drapery plumb QC at 160x120 and 87x84 ─────────────────────────
+
+
+@pytest.mark.parametrize("product_type", ["pinch_pleat", "euro_pleat", "pencil_pleat"])
+@pytest.mark.parametrize("width,height", [(160, 120), (87, 84)])
+def test_pleat_drawings_pass_plumb_qc_at_both_sizes(product_type, width, height):
+    pytest.importorskip("pdfplumber")
+    from app.services.drawing.templates.drapery_render import render_drapery
+    from app.services.drawing.templates.b2_qc import _check_drapery_plumb
+
+    pdf = render_drapery({
+        "product_type": product_type,
+        "dims": {"width": width, "height": height, "returns": 4, "fullness": 2.5},
+        "client_name": "Test Client",
+    })
+    failures = _check_drapery_plumb(pdf, "Drapery")
+    assert failures == [], (
+        f"{product_type} {width}x{height} failed drapery-plumb QC: {failures}"
+    )
+
+
+# ── legacy drawings folder fallback ───────────────────────────────
+
+
+def test_drawings_file_route_falls_back_to_legacy_repo_folder(tmp_path, monkeypatch):
+    from app.services.drawing import canonical_path
+
+    canon = tmp_path / "empire-data" / "drawings"
+    legacy = tmp_path / "backend" / "data" / "drawings"
+    canon.mkdir(parents=True)
+    legacy.mkdir(parents=True)
+    (legacy / "existing-533.pdf").write_bytes(b"%PDF-1.4 legacy")
+
+    monkeypatch.setattr(canonical_path, "canonical_drawings_dir", lambda: str(canon))
+    monkeypatch.setattr(canonical_path, "repo_legacy_drawings_dir", lambda: legacy)
+
+    found = canonical_path.resolve_existing_drawing_file("existing-533.pdf")
+    assert found == legacy / "existing-533.pdf"
+    assert found.read_bytes().startswith(b"%PDF")
+
+
+# ── PR #164 photo guard / HEIC (no raw-image-to-text-model) ───────
+
+
+def test_sanitize_never_claims_missing_photo_when_turn_has_one():
+    from app.services.max.chat_attachments import (
+        claims_photo_missing,
+        sanitize_attached_photo_reply,
+        apply_photo_context,
+        looks_like_image,
+        PHOTO_MARKER,
+    )
+
+    raw = "I don't see the photo or reference attached in this thread"
+    assert claims_photo_missing(raw)
+    out = sanitize_attached_photo_reply(raw, "IMG_2265.jpeg")
+    assert "don't see the photo" not in out.lower()
+    assert "IMG_2265.jpeg" in out
+    assert sanitize_attached_photo_reply("The panels are ripplefold.", "IMG_2265.jpeg") == (
+        "The panels are ripplefold."
+    )
+
+    messages = [{"role": "user", "content": "Give a drawing"}]
+    stamped = apply_photo_context(messages, "IMG_2265.jpeg")
+    assert PHOTO_MARKER in stamped[-1]["content"]
+    assert "IMG_2265.jpeg" in stamped[-1]["content"]
+
+    assert looks_like_image("shot.heic")
+    assert looks_like_image("shot.heif")
+    assert looks_like_image("shot.bmp")
+    assert looks_like_image("shot.jpg")
+
+
+def test_router_wires_photo_guard_and_not_raw_image_to_text_model():
+    src = _ROUTER_PY.read_text(encoding="utf-8")
+    assert "sanitize_attached_photo_reply" in src
+    assert "apply_photo_context" in src
+    assert "skip_vision=bool(vision_text)" in src
+    ai_src = (
+        Path(__file__).resolve().parents[1] / "app" / "services" / "max" / "ai_router.py"
+    ).read_text(encoding="utf-8")
+    assert ".heic" in ai_src
+    assert ".heif" in ai_src
+    assert ".bmp" in ai_src
