@@ -67,6 +67,38 @@ def default_email_cc() -> tuple[str, ...]:
     return ("rafa22giraldo@gmail.com",)
 
 
+def _is_family_edition() -> bool:
+    try:
+        from app.edition import is_family_edition
+        return bool(is_family_edition())
+    except Exception:
+        return False
+
+
+_DRAWING_EMAIL_ALIASES = frozenset({
+    "me", "owner", "founder", "my email", "myself", "mi correo", "mi email",
+})
+
+
+def _resolve_drawing_email_to(email_to: str) -> tuple[str | None, dict | None]:
+    """Family: EDITION_OWNER_EMAIL only, same gate as send_me_link. Never empirebox2026.
+
+    Returns (resolved_address, error_dict). error_dict is set when family refuses.
+    """
+    raw = str(email_to or "").strip()
+    if not raw:
+        return None, None
+    if _is_family_edition():
+        from app.services.max.send_me_link import authorize_recipient
+        gate = authorize_recipient("email", raw)
+        if not gate["authorized"]:
+            return None, {"emailed": False, "error": gate["error"], "cc": None, "sent_to": None}
+        return str(gate["to"]), None
+    if raw.lower() in _DRAWING_EMAIL_ALIASES:
+        return os.getenv("FOUNDER_EMAIL", "empirebox2026@gmail.com"), None
+    return raw, None
+
+
 class _DefaultEmailCC:
     """Studio standing CC; empty on family so Rafael is never cc'd."""
 
@@ -3200,17 +3232,16 @@ def _send_email(params: dict, desk: Optional[str] = None) -> ToolResult:
     subject = params.get("subject", "").strip()
     body = params.get("body", "").strip()
 
-    family = False
-    try:
-        from app.edition import is_family_edition
-        family = bool(is_family_edition())
-    except Exception:
-        family = False
+    family = _is_family_edition()
 
     # Resolve "me" / owner aliases. Family uses EDITION_OWNER_EMAIL, never FOUNDER_EMAIL.
     if not to or to.lower() in ("me", "owner", "founder", "my email", "myself", "mi correo", "mi email"):
         if family:
-            from app.services.max.send_me_link import MISSING_EMAIL_ES, owner_email
+            from app.services.max.send_me_link import (
+                MISSING_EMAIL_ES, NOT_OWNER_ES, owner_email, owner_email_env_is_denied,
+            )
+            if owner_email_env_is_denied():
+                return ToolResult(tool="send_email", success=False, error=NOT_OWNER_ES)
             to = owner_email()
             if not to:
                 return ToolResult(tool="send_email", success=False, error=MISSING_EMAIL_ES)
@@ -3380,7 +3411,23 @@ def _send_quote_email(params: dict, desk: Optional[str] = None) -> ToolResult:
     if not to:
         return ToolResult(tool="send_quote_email", success=False, error="No recipient email (to) provided")
 
-    verdict_to = authorize_email_recipient(to)
+    family = _is_family_edition()
+    if family:
+        from app.services.max.send_me_link import authorize_recipient, NOT_OWNER_ES
+        gate = authorize_recipient("email", to)
+        if not gate["authorized"]:
+            logger.warning(
+                "send_quote_email BLOCKED: family owner-only recipient "
+                f"quote_ids={quote_ids}"
+            )
+            return ToolResult(
+                tool="send_quote_email", success=False,
+                error=gate.get("error") or NOT_OWNER_ES,
+            )
+        to = gate["to"]
+        verdict_to = {"recipient_authorized": True, "blocked_reason": None}
+    else:
+        verdict_to = authorize_email_recipient(to)
     if not verdict_to["recipient_authorized"]:
         logger.warning(
             f"send_quote_email BLOCKED: recipient_authorized=False "
@@ -3460,6 +3507,7 @@ def _send_quote_email(params: dict, desk: Optional[str] = None) -> ToolResult:
             body_text=body_text,
             recipient_name=customer,
             attachments=pdf_paths,
+            cc=None,
         )
         if not sent:
             return ToolResult(
@@ -3471,6 +3519,7 @@ def _send_quote_email(params: dict, desk: Optional[str] = None) -> ToolResult:
         ]
         return ToolResult(tool="send_quote_email", success=True, result={
             "sent_to": to,
+            "cc": None,
             "quote_id": primary.get("id", quote_ids[0]),
             "quote_ids": [q.get("id", qid) for q, qid in zip(quotes, quote_ids)],
             "quote_number": quote_number,
@@ -3541,25 +3590,42 @@ def _svg_to_pdf(params: dict, desk: Optional[str] = None) -> ToolResult:
 # ── SKETCH TO DRAWING TOOL ────────────────────────────────────────
 
 def _auto_email_pdf(pdf_path: str, email_to: str, drawing_name: str) -> dict | None:
-    """Auto-email a PDF drawing. Returns email info dict or None on failure."""
+    """Auto-email a PDF drawing. Family: owner-only, no cc. Returns email info dict."""
+    resolved, err = _resolve_drawing_email_to(email_to)
+    if err:
+        return err
+    if not resolved:
+        return {"emailed": False, "error": "No recipient email", "cc": None}
+    if _is_family_edition():
+        from app.services.max.send_me_link import authorize_recipient
+        gate = authorize_recipient("email", resolved)
+        if not gate["authorized"]:
+            return {"emailed": False, "error": gate["error"], "cc": None, "sent_to": None}
+        resolved = str(gate["to"])
     try:
         from app.services.max.email_service import EmailService
         svc = EmailService()
         if not svc.is_configured:
             logger.warning("Auto-email: email not configured")
-            return {"emailed": False, "error": "Email not configured"}
+            return {"emailed": False, "error": "Email not configured", "cc": None}
         subject = f"Drawing: {drawing_name}"
         body = f"""<h2>Professional Drawing</h2>
 <p>Please find attached the drawing for <strong>{drawing_name}</strong>.</p>
 <p style="color:#888;font-size:12px">Generated by MAX — Empire AI</p>"""
-        sent = svc.send(to=email_to, subject=subject, body_html=body, attachments=[pdf_path])
+        sent = svc.send(
+            to=resolved, subject=subject, body_html=body, attachments=[pdf_path], cc=None,
+        )
         if not sent:
-            return {"emailed": False, "error": "Email provider did not verify send acceptance"}
-        logger.info(f"Auto-emailed drawing PDF to {email_to}: {pdf_path}")
-        return {"emailed": True, "sent_to": email_to}
+            return {
+                "emailed": False,
+                "error": "Email provider did not verify send acceptance",
+                "cc": None,
+            }
+        logger.info(f"Auto-emailed drawing PDF to {resolved}: {pdf_path}")
+        return {"emailed": True, "sent_to": resolved, "cc": None}
     except Exception as e:
         logger.error(f"Auto-email failed: {e}")
-        return {"emailed": False, "error": str(e)}
+        return {"emailed": False, "error": str(e), "cc": None}
 
 
 def _render_bench_shop_drawing(params: dict, dims: dict) -> ToolResult | None:
@@ -3780,8 +3846,6 @@ def _render_shop_drawing(params: dict, desk: Optional[str] = None) -> ToolResult
         email_to = str(params.get("email_to", "")).strip()
         email_status = None
         if email_to:
-            if email_to.lower() in ("me", "owner", "founder", "my email", "myself"):
-                email_to = os.getenv("FOUNDER_EMAIL", "empirebox2026@gmail.com")
             email_status = _auto_email_pdf(
                 ul_result["pdf_path"], email_to, ul_result.get("product_type", pt),
             )
@@ -3906,8 +3970,6 @@ def _render_shop_drawing(params: dict, desk: Optional[str] = None) -> ToolResult
     email_to = str(params.get("email_to", "")).strip()
     email_status: dict | None = None
     if email_to:
-        if email_to.lower() in ("me", "owner", "founder", "my email", "myself"):
-            email_to = os.getenv("FOUNDER_EMAIL", "empirebox2026@gmail.com")
         email_status = _auto_email_pdf(str(out_path), email_to, product_type)
 
     return ToolResult(
@@ -4005,10 +4067,9 @@ def _sketch_to_drawing(params: dict, desk: Optional[str] = None) -> ToolResult:
         name = params.get("name", "Drawing")
         description = params.get("description", "")
 
-        # Auto-email: if email_to is provided, send the PDF after generating
-        email_to = params.get("email_to", "").strip()
-        if email_to and email_to.lower() in ("me", "owner", "founder", "my email", "myself"):
-            email_to = os.getenv("FOUNDER_EMAIL", "empirebox2026@gmail.com")
+        # Auto-email: if email_to is provided, send the PDF after generating.
+        # Family "me" resolves to EDITION_OWNER_EMAIL inside _auto_email_pdf.
+        email_to = str(params.get("email_to", "") or "").strip()
 
         # ── Smart classifier (10 item types) ──
         from app.services.vision.drawing_service import classify_item
