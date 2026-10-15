@@ -1,12 +1,10 @@
 """send_me_link — AMP owner-only link/document delivery.
 
 Delivers a link or document ONLY to Juan's WhatsApp and email, read from
-EDITION_OWNER_WHATSAPP / EDITION_OWNER_EMAIL (WHATSAPP_OWNER_NUMBERS is a
-phone fallback). Never Studio send_me_this_link. Never business.json,
-FOUNDER_EMAIL, or AMP_OWNER_EMAIL.
+EDITION_OWNER_WHATSAPP / EDITION_OWNER_EMAIL. Never Studio send_me_this_link.
+Never business.json, FOUNDER_EMAIL, AMP_OWNER_EMAIL, or WHATSAPP_OWNER_NUMBERS.
 
-Tests must mock every send — this module never writes live data; outbound
-I/O is isolated in _deliver_* helpers.
+Tests must mock every send — outbound I/O is isolated in _deliver_* helpers.
 """
 from __future__ import annotations
 
@@ -23,26 +21,10 @@ STUDIO_TOOL_NAME = "send_me_this_link"
 OWNER_FIRST_NAME = "Juan"
 OWNER_ALIASES = frozenset({
     "me", "myself", "owner", "juan", "juan diego", "juan diego giraldo",
-    "mi correo", "mi email", "my email", "mi whatsapp", "my whatsapp",
+    "founder", "mi correo", "mi email", "my email", "mi whatsapp", "my whatsapp",
 })
 SIBLING_NAMES = frozenset({
     "camilo", "camilo giraldo",
-})
-# Client / brand contacts that must never receive. Not owner numbers.
-CLIENT_DENY_EMAILS = frozenset({
-    "grupoargoscampestre@gmail.com",
-})
-DENYLIST_EMAILS = frozenset({
-    "empirebox2026@gmail.com",
-    "rafa22giraldo@gmail.com",
-    "workroom@empirebox.store",
-    "woodcraft@empirebox.store",
-    "max@empirebox.store",
-}) | CLIENT_DENY_EMAILS
-STUDIO_BUSINESS_PHONES = frozenset({
-    "17032136484",
-    "7032136484",
-    "12032136484",
 })
 MISSING_WHATSAPP_ES = (
     "Manito, todavía no tengo tu WhatsApp configurado. "
@@ -56,10 +38,31 @@ NOT_OWNER_ES = (
     "Manito, solo te puedo mandar a TU WhatsApp y TU correo de esta instancia. "
     "No mando a clientes, al Studio ni al otro hermano."
 )
+WHATSAPP_NOT_SETUP_ES = (
+    "Manito, WhatsApp no está configurado en esta instancia. "
+    "Puedo mandártelo por correo si quieres."
+)
 SEND_VIAS = ("whatsapp", "email")
 _EMAIL_IN_BRACKETS = re.compile(r"<([^<>]+@[^<>]+)>")
 _BARE_EMAIL = re.compile(r"([A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,})")
 _URL = re.compile(r"^https?://", re.I)
+_EMAIL_VIA = re.compile(r"(?i)\b(?:e-?mails?|correo|mail)\b")
+_ASKED_TO_SEND = re.compile(
+    r"(?i)(?:"
+    r"\b(?:send|sent|resend|forward|e-?mail|whats\s?app)\b|"
+    r"\bcorreo\b|"
+    r"\benviar(?:me|lo|la|te|nos)?\b|"
+    r"\benv[ií]a(?:me|lo|la|nos)?\b|"
+    r"\bmandar(?:me|lo|la|te|nos)?\b|"
+    r"\bm[aá]nda(?:me|lo|la|nos)?\b|"
+    r"\bp[aá]sa(?:me|lo|la|nos)?\b|"
+    r"\bme\s+puedes\s+(?:mandar|enviar|pasar)\b"
+    r")"
+)
+
+
+class WhatsAppNotConfigured(RuntimeError):
+    """WhatsApp Cloud keys are missing. Caller should offer email instead."""
 
 
 def is_family_send_me_enabled() -> bool:
@@ -124,20 +127,44 @@ def sibling_deny_phones() -> set[str]:
     return out
 
 
-def denylist_emails() -> set[str]:
-    return set(DENYLIST_EMAILS) | sibling_deny_emails()
+def studio_business_phone() -> str:
+    """Workroom business_phone at runtime, if this process can see it. Deny only."""
+    try:
+        from app.edition import workroom_business_config
+        return str((workroom_business_config() or {}).get("business_phone") or "")
+    except Exception:
+        return ""
 
 
-def denylist_phones() -> set[str]:
-    out: set[str] = set()
-    for item in STUDIO_BUSINESS_PHONES:
-        out |= _phone_variants(item)
-    out |= sibling_deny_phones()
+def runtime_denied_emails() -> set[str]:
+    """EDITION_DENY_EMAIL plus FOUNDER_EMAIL / AMP_OWNER_EMAIL from env."""
+    out = sibling_deny_emails()
+    for key in ("FOUNDER_EMAIL", "AMP_OWNER_EMAIL"):
+        for part in _split_csv(os.getenv(key) or ""):
+            email = extract_email(part)
+            if email:
+                out.add(email)
     return out
 
 
+def runtime_denied_phones() -> set[str]:
+    """EDITION_DENY_WHATSAPP plus business_phone from runtime config."""
+    out = sibling_deny_phones()
+    out |= _phone_variants(studio_business_phone())
+    return out
+
+
+def denylist_emails() -> set[str]:
+    return runtime_denied_emails()
+
+
+def denylist_phones() -> set[str]:
+    return runtime_denied_phones()
+
+
 def is_denied_email(addr: str | None) -> bool:
-    return extract_email(addr) in denylist_emails()
+    email = extract_email(addr)
+    return bool(email) and email in denylist_emails()
 
 
 def is_denied_phone(number: str | None) -> bool:
@@ -165,7 +192,7 @@ def is_sibling_recipient(to: str | None) -> bool:
 def owner_emails() -> list[str]:
     """Juan's emails for THIS AMP instance. Comma-separated EDITION_OWNER_EMAIL.
 
-    Never FOUNDER_EMAIL or AMP_OWNER_EMAIL. Denylisted values are skipped.
+    Never FOUNDER_EMAIL, AMP_OWNER_EMAIL, or denylisted values.
     """
     out: list[str] = []
     for part in _split_csv(os.getenv("EDITION_OWNER_EMAIL") or ""):
@@ -183,16 +210,11 @@ def owner_email() -> str:
 
 
 def owner_whatsapp() -> str:
-    """Juan's WhatsApp. EDITION_OWNER_WHATSAPP, else first non-denied WHATSAPP_OWNER_NUMBERS."""
-    candidates = []
-    primary = (os.getenv("EDITION_OWNER_WHATSAPP") or "").strip()
-    if primary:
-        candidates.append(primary)
-    candidates.extend(_split_csv(os.getenv("WHATSAPP_OWNER_NUMBERS") or ""))
-    for raw in candidates:
-        number = digits_only(raw)
-        if number and not is_denied_phone(number):
-            return number
+    """Juan's WhatsApp from EDITION_OWNER_WHATSAPP only. No WHATSAPP_OWNER_NUMBERS."""
+    raw = (os.getenv("EDITION_OWNER_WHATSAPP") or "").strip()
+    number = digits_only(raw)
+    if number and not is_denied_phone(number):
+        return number
     return ""
 
 
@@ -200,15 +222,24 @@ def _is_owner_alias(raw: str) -> bool:
     return (raw or "").strip().lower() in OWNER_ALIASES or not (raw or "").strip()
 
 
+def infer_via(user_text: str | None = None, explicit: str | None = None) -> str:
+    """correo/email/mail in the owner's text → email; otherwise WhatsApp."""
+    blob = user_text or ""
+    if _EMAIL_VIA.search(blob):
+        return "email"
+    via = (explicit or "").strip().lower()
+    if via in ("mail", "gmail", "email", "correo"):
+        return "email"
+    if via in ("wa", "whatsapp", "whats app", "chat"):
+        return "whatsapp"
+    return "whatsapp"
+
+
 def authorize_recipient(via: str, to: str | None) -> dict[str, Any]:
     """Allowlist: only this edition owner's WhatsApp / email."""
-    via = (via or "").strip().lower()
+    via = infer_via(None, via)
     raw = (to or "").strip()
     email = extract_email(raw)
-    if via in ("mail", "gmail"):
-        via = "email"
-    if via in ("wa", "whats app", "chat"):
-        via = "whatsapp"
 
     if is_sibling_recipient(raw) or is_denied_email(raw) or (digits_only(raw) and is_denied_phone(raw)):
         return {"authorized": False, "via": via, "to": raw, "error": NOT_OWNER_ES}
@@ -225,14 +256,14 @@ def authorize_recipient(via: str, to: str | None) -> dict[str, Any]:
         return {"authorized": False, "via": "email", "to": email or raw, "error": NOT_OWNER_ES}
 
     if via == "whatsapp":
-        configured = owner_whatsapp()
-        if not configured:
+        configured_wa = owner_whatsapp()
+        if not configured_wa:
             return {"authorized": False, "via": "whatsapp", "to": digits_only(raw) or raw, "error": MISSING_WHATSAPP_ES}
         if _is_owner_alias(raw):
-            return {"authorized": True, "via": "whatsapp", "to": configured, "error": None}
+            return {"authorized": True, "via": "whatsapp", "to": configured_wa, "error": None}
         asked = digits_only(raw)
-        if asked and (_phone_variants(asked) & _phone_variants(configured)):
-            return {"authorized": True, "via": "whatsapp", "to": configured, "error": None}
+        if asked and (_phone_variants(asked) & _phone_variants(configured_wa)):
+            return {"authorized": True, "via": "whatsapp", "to": configured_wa, "error": None}
         return {"authorized": False, "via": "whatsapp", "to": asked or raw, "error": NOT_OWNER_ES}
 
     return {
@@ -244,13 +275,19 @@ def authorize_recipient(via: str, to: str | None) -> dict[str, Any]:
 
 
 def asked_to_send(message: Optional[str]) -> bool:
-    t = message or ""
-    return bool(re.search(
-        r"\b(?:send|sent|resend|e-?mail|forward|whats\s?app|"
-        r"m[aá]nd[ae]|m[aá]ndame|env[ií]a|env[ií]ame|correo)\b",
-        t,
-        re.I,
-    ))
+    """True only from the owner's own words. Ignore model caption/subject."""
+    t = (message or "").strip()
+    if not t:
+        return False
+    return bool(_ASKED_TO_SEND.search(t))
+
+
+def whatsapp_cloud_ready() -> bool:
+    try:
+        from app.services.whatsapp_cloud import configured
+        return bool(configured())
+    except Exception:
+        return False
 
 
 def _refuse_live_send(channel: str) -> None:
@@ -286,16 +323,58 @@ def resolve_payload(params: dict) -> dict[str, Any]:
     return {"url": url, "path": safe_path, "query": query}
 
 
+def _assert_email_still_allowed(to: str) -> None:
+    email = extract_email(to)
+    if not email or email not in owner_emails() or is_denied_email(email):
+        raise PermissionError(NOT_OWNER_ES)
+
+
+def _assert_whatsapp_still_allowed(to: str) -> None:
+    configured_wa = owner_whatsapp()
+    asked = digits_only(to)
+    if not configured_wa or not asked or is_denied_phone(asked):
+        raise PermissionError(NOT_OWNER_ES)
+    if not (_phone_variants(asked) & _phone_variants(configured_wa)):
+        raise PermissionError(NOT_OWNER_ES)
+
+
 def _deliver_email(payload: str, *, to: str, subject: str, body: str) -> dict[str, Any]:
-    """Outbound email. Tests monkeypatch this. Never called live in tests."""
+    """Outbound email via EmailService.send with no cc. Never send_email (that CCs Rafael)."""
+    _assert_email_still_allowed(to)
     _refuse_live_send("email")
-    raise RuntimeError("email send is not wired without a mock")
+    from app.services.max.email_service import EmailService
+    svc = EmailService()
+    sent = svc.send(
+        to=to,
+        subject=subject,
+        body_text=body or payload,
+        cc=None,
+    )
+    if not sent:
+        raise RuntimeError("Email provider did not verify send acceptance")
+    return {"message_id": svc.last_message_id, "cc": None}
 
 
 def _deliver_whatsapp(payload: str, *, to: str, caption: str) -> dict[str, Any]:
-    """Outbound WhatsApp. Tests monkeypatch this."""
+    """Outbound WhatsApp via whatsapp_cloud Graph send."""
+    _assert_whatsapp_still_allowed(to)
+    from app.services import whatsapp_cloud as wa
+    if not wa.configured():
+        raise WhatsAppNotConfigured(WHATSAPP_NOT_SETUP_ES)
     _refuse_live_send("whatsapp")
-    raise RuntimeError("whatsapp send is not wired without a mock")
+    number = digits_only(to)
+    text = "\n".join(part for part in (caption, payload) if part).strip()[:4000]
+    body = {
+        "messaging_product": "whatsapp",
+        "recipient_type": "individual",
+        "to": number,
+        "type": "text",
+        "text": {"body": text},
+    }
+    url = f"{wa.GRAPH}/{wa._phone_id()}/messages"
+    result = wa._graph_json("POST", url, body, wa._token())
+    msg_id = ((result.get("messages") or [{}])[0] or {}).get("id")
+    return {"media_id": msg_id, "id": msg_id}
 
 
 def send_me_link(params: dict) -> dict[str, Any]:
@@ -305,11 +384,8 @@ def send_me_link(params: dict) -> dict[str, Any]:
             "success": False,
             "error": "send_me_link only runs on this family instance.",
         }
-    via = str(params.get("via") or params.get("channel") or "whatsapp").strip().lower()
-    if via in ("mail", "gmail"):
-        via = "email"
-    if via in ("wa", "whats app", "chat"):
-        via = "whatsapp"
+    user_text = str(params.get("user_text") or params.get("asked") or "").strip()
+    via = infer_via(user_text, params.get("via") or params.get("channel"))
     gate = authorize_recipient(via, params.get("to"))
     if not gate["authorized"]:
         return {"success": False, "error": gate["error"]}
@@ -325,12 +401,15 @@ def send_me_link(params: dict) -> dict[str, Any]:
     name = Path(looked["path"]).name if looked["path"] else (looked["url"] or payload)
     if via == "email":
         try:
+            _assert_email_still_allowed(gate["to"])
             sent = _deliver_email(
                 payload,
                 to=gate["to"],
                 subject=str(params.get("subject") or f"Para ti: {name}"),
                 body=str(params.get("body") or payload),
             )
+        except PermissionError:
+            return {"success": False, "error": NOT_OWNER_ES}
         except Exception as exc:
             return {"success": False, "error": f"Email not sent: {exc}"}
         return {"success": True, "result": {
@@ -338,16 +417,24 @@ def send_me_link(params: dict) -> dict[str, Any]:
             "sent_to": gate["to"],
             "name": name,
             "payload": payload,
+            "cc": None,
             "message_id": (sent or {}).get("message_id"),
             "message": f"Te mandé {name} a tu correo.",
         }}
 
+    if not whatsapp_cloud_ready():
+        return {"success": False, "error": WHATSAPP_NOT_SETUP_ES}
     try:
+        _assert_whatsapp_still_allowed(gate["to"])
         sent = _deliver_whatsapp(
             payload,
             to=gate["to"],
             caption=str(params.get("caption") or f"{name} — para ti, manito"),
         )
+    except WhatsAppNotConfigured:
+        return {"success": False, "error": WHATSAPP_NOT_SETUP_ES}
+    except PermissionError:
+        return {"success": False, "error": NOT_OWNER_ES}
     except Exception as exc:
         return {"success": False, "error": f"WhatsApp not sent: {exc}"}
     return {"success": True, "result": {
@@ -380,6 +467,7 @@ def send_me_link_doc() -> str:
 - **{TOOL_NAME}** — Manda un enlace o documento SOLO al WhatsApp y correo del dueño
   de ESTA instancia (EDITION_OWNER_WHATSAPP / EDITION_OWNER_EMAIL). Nunca clientes,
   nunca el Studio, nunca el otro hermano. Nunca uses send_me_this_link.
+  Si el dueño dice correo/email/mail, via=email; si no, WhatsApp.
   `{{"tool": "{TOOL_NAME}", "query": "https://ejemplo.com/agenda", "via": "whatsapp"}}`
   `{{"tool": "{TOOL_NAME}", "url": "https://ejemplo.com/doc", "via": "email"}}`
 """

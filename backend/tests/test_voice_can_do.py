@@ -10,6 +10,8 @@ from app.services.max.voice_can_do import (
 
 ACTION_PHRASES = (
     ("can you send me the 3D drawing on WhatsApp?", "send_me_link"),
+    ("puedes enviarme el enlace", "send_me_link"),
+    ("¿me puedes mandar el link?", "send_me_link"),
     ("can you check my calendar?", "get_today_agenda"),
     ("can you check the weather in Vienna?", "get_weather"),
 )
@@ -50,6 +52,27 @@ def test_can_you_do_tool_routes_actions():
     assert res["success"]
     assert res["result"]["action_tool"] == "send_me_link"
     assert res["result"]["answer"] is None
+
+
+def test_spanish_send_phrases_are_actions_with_via():
+    from app.services.max.send_me_link import infer_via
+    for phrase in (
+        "puedes enviarme el enlace",
+        "¿me puedes mandar el link?",
+        "envíame el dibujo",
+        "mándame el enlace",
+        "pásame el link",
+    ):
+        assert matching_action_tool(phrase) == "send_me_link", phrase
+        assert answer_can_you_do(phrase) is None, phrase
+        res = can_you_do({"question": phrase})
+        assert res["result"]["action_tool"] == "send_me_link", phrase
+        assert res["result"]["answer"] is None, phrase
+    mail = can_you_do({"question": "puedes enviarme el enlace por correo"})
+    assert mail["result"]["via"] == "email"
+    wa = can_you_do({"question": "¿me puedes mandar el link?"})
+    assert wa["result"]["via"] == "whatsapp"
+    assert infer_via("pásalo a mi email") == "email"
 
 
 def test_capability_list_covers_today_and_send():
