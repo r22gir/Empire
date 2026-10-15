@@ -438,6 +438,10 @@ PROOF_TOOL_EXACT = frozenset({
     "search_invoices",
     "search_payments",
     "search_customers",
+    "get_today_agenda",
+    "list_schedule",
+    "send_me_link",
+    "can_you_do",
 })
 
 

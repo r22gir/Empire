@@ -705,16 +705,16 @@ def greeting(locale: Optional[str] = None, *, include_owner: bool = True) -> str
     if lang.startswith("es"):
         if is_maxine():
             if include_owner:
-                return f"Hola, soy {name}. Llevo el portafolio de desarrollos en ConstructionForge."
-            return f"Hola, soy {name}."
+                return f"¡Quiubo manito! Hola, soy {name}. Llevo el portafolio de desarrollos en ConstructionForge."
+            return f"¡Quiubo manito! Hola, soy {name}."
         if is_amp():
             if include_owner:
                 return (
-                    f"Hola, soy {name}. Juan Diego Giraldo tiene dos empresas aquí: "
+                    f"¡Quiubo manito! Hola, soy {name}. Juan Diego Giraldo tiene dos empresas aquí: "
                     "AMP (coaching) y Cibernettic (tecnología). Yo llevo la operación de las dos."
                 )
-            return f"Hola, soy {name}."
-        return f"Hola, soy {name}."
+            return f"¡Quiubo manito! Hola, soy {name}."
+        return f"¡Quiubo manito! Hola, soy {name}."
     if is_maxine():
         if include_owner:
             return f"Hi, I'm {name}. I run the development portfolio in ConstructionForge."
