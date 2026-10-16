@@ -2,6 +2,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { API } from '../lib/api';
 import { EXAMPLE_PIPELINE, EXAMPLE_WORK_ROWS, useExampleMode } from './exampleData';
+import { gateLive } from './liveGate';
 import {
   PIPELINE_STAGES,
   STAGE_KICK,
@@ -107,17 +108,21 @@ export default function WorkPipeline({
       getJson(`${API}/leads/pipeline`),
     ]).then(([quotes, jobs, leads]) => {
       if (!cancelled) setLive(recordsFromApi(quotes, jobs, leads));
+    }).catch(() => {
+      if (!cancelled) setLive([]);
     });
     return () => { cancelled = true; };
   }, [example]);
 
+  const gated = useMemo(() => gateLive(example, live, EXAMPLE_PIPELINE), [example, live]);
   const grouped = useMemo(
-    () => groupPipeline(example || !live ? EXAMPLE_PIPELINE : live),
-    [example, live],
+    () => groupPipeline(gated.data ?? []),
+    [gated],
   );
+  const loading = gated.kind === 'loading';
 
   return (
-    <section className="studio-work" data-testid="studio-work-pipeline" aria-label="Work pipeline">
+    <section className="studio-work" data-testid="studio-work-pipeline" aria-label="Work pipeline" data-live={gated.kind}>
       <header style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: 8 }}>
         <h1 className="v3-disp" style={{ fontSize: 28, margin: 0 }}>Flow</h1>
         <span className="studio-ex">Lead → Quote → Job → Cut → Install → Paid</span>
@@ -132,22 +137,25 @@ export default function WorkPipeline({
             onClick={() => setStage(s)}
             data-testid={`studio-stage-${s}`}
           >
-            {STAGE_LABEL[s]} {grouped[s].length}
+            {STAGE_LABEL[s]} {loading ? '…' : grouped[s].length}
           </button>
         ))}
       </div>
 
       <div className="studio-plist">
         <p className="studio-ex" style={{ marginBottom: 8 }}>{STAGE_KICK[stage]} · oldest first</p>
-        {grouped[stage].length === 0 && <p className="studio-ex">No cards in this stage.</p>}
-        {grouped[stage].map((c) => <CardView key={c.id} card={c} onOpen={onOpen} />)}
+        {loading && <p className="studio-empty" data-testid="studio-work-loading">Loading pipeline…</p>}
+        {!loading && grouped[stage].length === 0 && <p className="studio-empty" data-testid="studio-work-empty">No cards in this stage.</p>}
+        {!loading && grouped[stage].map((c) => <CardView key={c.id} card={c} onOpen={onOpen} />)}
       </div>
 
       <div className="studio-kanban" data-testid="studio-kanban">
         {PIPELINE_STAGES.map((s) => (
-          <div key={s} className="studio-col">
-            <h4>{STAGE_LABEL[s]} <span>{grouped[s].length}</span></h4>
-            {grouped[s].map((c) => <CardView key={c.id} card={c} onOpen={onOpen} />)}
+          <div key={s} className="studio-col" data-testid={`studio-col-${s}`}>
+            <h4>{STAGE_LABEL[s]} <span>{loading ? '…' : grouped[s].length}</span></h4>
+            {loading && <p className="studio-empty">Loading…</p>}
+            {!loading && grouped[s].length === 0 && <p className="studio-empty">No jobs</p>}
+            {!loading && grouped[s].map((c) => <CardView key={c.id} card={c} onOpen={onOpen} />)}
           </div>
         ))}
       </div>

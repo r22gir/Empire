@@ -201,6 +201,12 @@
   width: 100%; border: 0; border-radius: 999px; background: var(--st-gold); color: #1a1408;
   font: 600 12px/1 var(--font-inter, sans-serif); padding: 8px 10px; cursor: pointer;
 }
+.studio-empty {
+  color: var(--st-mut);
+  font: 500 12px/1.4 var(--font-inter, sans-serif);
+  margin: 8px 0 0;
+  padding: 8px 2px;
+}
 .studio-pcard .sec {
   margin-top: 6px; width: 100%; border: 1px solid var(--st-line); border-radius: 999px;
   background: transparent; color: var(--st-ink); font: 500 11px/1 var(--font-inter, sans-serif);

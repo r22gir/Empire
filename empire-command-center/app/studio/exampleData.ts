@@ -8,12 +8,6 @@ export const EXAMPLE_MARK = 'EXAMPLE';
 
 export const EXAMPLE_OWNER = 'Rafael';
 
-export const EXAMPLE_INTENTS = [
-  { id: 'today', label: "What's on today" },
-  { id: 'photo', label: 'Quote from photo' },
-  { id: 'link', label: 'Send me a link' },
-] as const;
-
 export const EXAMPLE_TRANSCRIPT = "What's on today and send me the route.";
 
 export const EXAMPLE_NEEDS = [

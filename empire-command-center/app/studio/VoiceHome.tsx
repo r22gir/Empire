@@ -4,7 +4,8 @@ import { Camera, Keyboard, Link2, Mic, Sun, X } from 'lucide-react';
 import { Orb } from '../v3/ui';
 import { useLiveVoice } from '../components/LiveVoiceCall';
 import { EDITION } from '../v3/edition';
-import { EXAMPLE_INTENTS, EXAMPLE_MARK, EXAMPLE_TRANSCRIPT, useExampleMode } from './exampleData';
+import { EXAMPLE_MARK, EXAMPLE_TRANSCRIPT, useExampleMode } from './exampleData';
+import { STUDIO_INTENTS } from './studioIntents';
 
 export default function VoiceHome({
   onKeyboard,
@@ -47,7 +48,7 @@ export default function VoiceHome({
       {voice.error && !example ? <p className="studio-ex" style={{ color: '#f08a7a', marginTop: 8 }}>{voice.error}</p> : null}
 
       <div className="studio-intents" role="group" aria-label="One-tap intents">
-        {EXAMPLE_INTENTS.map((it) => (
+        {STUDIO_INTENTS.map((it) => (
           <button key={it.id} type="button" className="studio-intent" onClick={() => onIntent(it.id)} data-testid={`studio-intent-${it.id}`}>
             <span className="ic">
               {it.id === 'today' ? <Sun size={16} /> : it.id === 'photo' ? <Camera size={16} /> : <Link2 size={16} />}

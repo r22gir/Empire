@@ -33,18 +33,19 @@ export default function JobContextPane({
 
   if (!example && !activeJob) return null;
 
+  const liveLines = (quote?.areas || quote?.items || []).slice(0, 6).map((a: any) => ({
+    area: a.area || a.name || a.description || 'Line',
+    qty: a.qty != null ? String(a.qty) : '',
+    sqft: a.width_in != null ? formatInches(a.width_in) : '',
+    total: a.total != null ? `$${Number(a.total).toFixed(2)}` : '',
+  }));
   const title = example
     ? `${EXAMPLE_JOB_CONTEXT.number} · ${EXAMPLE_JOB_CONTEXT.client}`
-    : `${activeJob?.job_number || 'JOB'} · ${activeJob?.client_name || 'Client'}`;
+    : `${activeJob?.job_number || 'Job'} · ${activeJob?.client_name || 'Client'}`;
   const status = example ? EXAMPLE_JOB_CONTEXT.status : (activeJob?.pipeline_stage || activeJob?.status || '');
   const lines: { area: string; qty: string; sqft: string; total: string }[] = example
     ? EXAMPLE_JOB_CONTEXT.lines
-    : (quote?.areas || quote?.items || []).slice(0, 6).map((a: any) => ({
-      area: a.area || a.name || a.description || 'Line',
-      qty: a.qty != null ? String(a.qty) : '—',
-      sqft: a.width_in != null ? formatInches(a.width_in) : '—',
-      total: a.total != null ? `$${a.total}` : '$—',
-    }));
+    : liveLines;
 
   return (
     <aside

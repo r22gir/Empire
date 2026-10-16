@@ -36,7 +36,7 @@ test('four tabs and three intents are in the daily path', () => {
   assert.match(tabs, /k: 'money'/);
   assert.match(tabs, /studio-tab-\$\{t\.k\}/);
   assert.match(voice, /studio-intent-\$\{it\.id\}/);
-  const intents = read('studio/exampleData.ts');
+  const intents = read('studio/studioIntents.ts');
   assert.match(intents, /What's on today/);
   assert.match(intents, /Quote from photo/);
   assert.match(intents, /Send me a link/);

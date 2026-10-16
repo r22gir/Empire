@@ -1,18 +1,10 @@
 'use client';
-import { useHomeData, money as fmtMoney } from '../components/home3/useHomeData';
-import { EXAMPLE_MONEY, EXAMPLE_MARK, useExampleMode } from './exampleData';
+import { EXAMPLE_MARK, useExampleMode } from './exampleData';
+import { useStudioMoney } from './useStudioMoney';
 
 export default function MoneyHome({ onOpen }: { onOpen: (href: string) => void }) {
-  const d = useHomeData();
   const example = useExampleMode();
-  const money = example
-    ? EXAMPLE_MONEY
-    : {
-      toCollect: d.figures.overdueTotal != null ? fmtMoney(d.figures.overdueTotal) : '—',
-      depositsDue: '—',
-      paidMtd: '—',
-      mark: '',
-    };
+  const { figures: money } = useStudioMoney();
 
   return (
     <section data-testid="studio-money" aria-label="Money">
@@ -22,9 +14,9 @@ export default function MoneyHome({ onOpen }: { onOpen: (href: string) => void }
       </header>
       <article className="studio-card">
         <div className="studio-money">
-          <div><label>To collect</label><b>{money.toCollect}</b></div>
-          <div><label>Deposits due</label><b>{money.depositsDue}</b></div>
-          <div><label>Paid MTD</label><b>{money.paidMtd}</b></div>
+          <div><label>To collect</label><b data-testid="studio-money-collect">{money.toCollect}</b></div>
+          <div><label>Deposits due</label><b data-testid="studio-money-deposits">{money.depositsDue}</b></div>
+          <div><label>Paid MTD</label><b data-testid="studio-money-paid">{money.paidMtd}</b></div>
         </div>
       </article>
       <div className="studio-cards" style={{ marginTop: 14 }}>
