@@ -37,7 +37,7 @@ export default function JobContextPane({
     ? `${EXAMPLE_JOB_CONTEXT.number} · ${EXAMPLE_JOB_CONTEXT.client}`
     : `${activeJob?.job_number || 'JOB'} · ${activeJob?.client_name || 'Client'}`;
   const status = example ? EXAMPLE_JOB_CONTEXT.status : (activeJob?.pipeline_stage || activeJob?.status || '');
-  const lines = example
+  const lines: { area: string; qty: string; sqft: string; total: string }[] = example
     ? EXAMPLE_JOB_CONTEXT.lines
     : (quote?.areas || quote?.items || []).slice(0, 6).map((a: any) => ({
       area: a.area || a.name || a.description || 'Line',
