@@ -50,6 +50,14 @@ const NAV_SECTIONS = [
   { id: 'docs', label: 'Docs', icon: FileText },
 ] as const;
 
+const WORKROOM_PRIMARY = [
+  { id: 'jobs', label: 'Jobs' },
+  { id: 'quotes', label: 'Quotes' },
+  { id: 'customers', label: 'Clients' },
+  { id: 'docs', label: 'Docs' },
+] as const;
+const WORKROOM_PRIMARY_IDS = new Set<string>(['jobs', 'quotes', 'customers', 'docs', 'jobhub']);
+
 type Section = typeof NAV_SECTIONS[number]['id'];
 
 interface WorkroomPageProps {
@@ -172,20 +180,37 @@ export default function WorkroomPage({ initialSection }: WorkroomPageProps) {
               <span className="cy-tab-ico" style={{ color: 'var(--cy-teal)' }}><Inbox size={15} /></span>
               <span className="cy-tab-label">Inbox capture</span>
             </a>
-            {NAV_SECTIONS.map((nav, ni) => {
+            {NAV_SECTIONS.filter((nav) => WORKROOM_PRIMARY_IDS.has(nav.id) && nav.id !== 'jobhub').map((nav) => {
               const Icon = nav.icon;
-              const isActive = section === nav.id && !selectedCustomer;
+              const isActive = (section === nav.id || (nav.id === 'jobs' && (section === 'jobhub' || section === 'overview' || section === 'work-orders'))) && !selectedCustomer;
               return (
                 <button key={nav.id}
-                  onClick={() => { setSection(nav.id); setSelectedCustomer(null); setNavKey(k => k + 1); }}
+                  onClick={() => { setSection(nav.id === 'jobs' ? 'jobhub' : nav.id); setSelectedCustomer(null); setNavKey(k => k + 1); }}
                   className={`cy-tab${isActive ? ' is-active' : ''}`}
                   aria-current={isActive ? 'page' : undefined}
                 >
                   <span className="cy-tab-ico"><Icon size={15} /></span>
-                  <span className="cy-tab-label">{nav.label}</span>
+                  <span className="cy-tab-label">{nav.id === 'customers' ? 'Clients' : nav.label}</span>
                 </button>
               );
             })}
+            <details className="cy-tab" style={{ cursor: 'pointer' }}>
+              <summary className="cy-tab-label" style={{ listStyle: 'none' }}>More</summary>
+              {NAV_SECTIONS.filter((nav) => !WORKROOM_PRIMARY_IDS.has(nav.id)).map((nav) => {
+                const Icon = nav.icon;
+                const isActive = section === nav.id && !selectedCustomer;
+                return (
+                  <button key={nav.id}
+                    onClick={() => { setSection(nav.id); setSelectedCustomer(null); setNavKey(k => k + 1); }}
+                    className={`cy-tab${isActive ? ' is-active' : ''}`}
+                    aria-current={isActive ? 'page' : undefined}
+                  >
+                    <span className="cy-tab-ico"><Icon size={15} /></span>
+                    <span className="cy-tab-label">{nav.label}</span>
+                  </button>
+                );
+              })}
+            </details>
           </div>
         </div>
       </nav>

@@ -9,6 +9,7 @@ import {
   studioLogout,
   type TrustedDevice,
 } from '../../lib/studio-auth';
+import { STUDIO_MODULES } from '../../studio/moduleHome';
 
 function formatWhen(value?: string | null): string {
   if (!value) return 'Unknown';
@@ -145,6 +146,25 @@ export default function SettingsScreen() {
               ))}
             </ul>
           )}
+        </section>
+
+        <section data-testid="studio-system-settings" className="rounded-xl overflow-hidden mb-6" style={{ background: 'white', border: '1px solid #e8e4de' }}>
+          <div className="px-5 py-3" style={{ background: '#faf8f4', borderBottom: '1px solid #e8e4de' }}>
+            <h2 style={{ fontSize: 14, fontWeight: 600, color: '#1a1a1a', margin: 0 }}>System</h2>
+            <p style={{ fontSize: 12, color: '#888', margin: '4px 0 0' }}>
+              Model picker, Ollama, tokens, OpenClaw, continuity, hardware, developer tools, and planned modules. Out of the daily path.
+            </p>
+          </div>
+          <ul className="divide-y" style={{ borderColor: '#ece8e0' }}>
+            {STUDIO_MODULES.filter((m) => m.home === 'settings-system' || m.home === 'settings-planned').map((m) => (
+              <li key={m.id}>
+                <a href={m.path} style={{ display: 'block', padding: '12px 20px', color: '#1a1a1a', textDecoration: 'none', fontSize: 14 }}>
+                  {m.name}
+                  {m.planned ? <span style={{ marginLeft: 8, fontSize: 10, color: '#888', textTransform: 'uppercase' }}>planned</span> : null}
+                </a>
+              </li>
+            ))}
+          </ul>
         </section>
 
         <button
