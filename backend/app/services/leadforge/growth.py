@@ -397,7 +397,12 @@ async def approve(item_id: int, *, confirm: bool, approved_by: str = "rafael", *
                 (item.get("prospect_id"), to, item.get("to_name") or "", item.get("subject") or "(no subject)",
                  _to_html(item["body"])))
             draft_id = cur.lastrowid
-    result = await cs.send_draft(draft_id)
+    preview = cs.preview_send(draft_id=draft_id)
+    result = await cs.send_draft(
+        draft_id,
+        confirm_token=preview.get("confirm_token") or None,
+        confirm=True,
+    )
     ok = result.get("status") == "sent"
     with _db() as conn:
         conn.execute("UPDATE approval_queue SET status=?, decided_at=?, sent_at=?, result=? WHERE id=?",
