@@ -127,9 +127,9 @@ def test_recorded_total_across_editions_sets_baseline(monkeypatch, tmp_path):
     record_usage(input_tokens=110, output_tokens=0)
     over = usage_summary()
     assert over["used"] == 210
-    assert over["level"] == "blocked"
+    assert over["level"] == "paused"
     assert over["total_spend_hit"] is False
-    assert enforce_usage_cap(text="corto") is None
+    assert enforce_usage_cap(text="corto")
     assert enforce_usage_cap(text="x" * 500)
 
 
@@ -217,11 +217,12 @@ def test_chat_stream_respects_usage_cap(monkeypatch, tmp_path):
 
     record_usage(input_tokens=200, output_tokens=0)
     short = asyncio.run(collect("hola"))
-    assert short == [("STREAMED", "minimax-test")]
+    assert short[0][1] == "usage-cap"
+    assert "pausa" in short[0][0]
 
     heavy = asyncio.run(collect("x" * 500))
     assert heavy[0][1] == "usage-cap"
-    assert "tope" in heavy[0][0]
+    assert "pausa" in heavy[0][0]
 
     record_usage(input_tokens=800, output_tokens=0)
     stopped = asyncio.run(collect("hola"))

@@ -54,14 +54,15 @@ def test_usage_cap_warns_then_soft_blocks_heavy_only(monkeypatch, tmp_path):
     assert enforce_usage_cap(text="hola") is None
 
     record_usage(input_tokens=50, output_tokens=0, model="MiniMax-M3")
-    blocked = usage_summary()
-    assert blocked["level"] == "blocked"
-    assert blocked["month"]["tokens"] == 210
-    assert enforce_usage_cap(text="un mensaje corto") is None
+    paused = usage_summary()
+    assert paused["level"] == "paused"
+    assert paused["month"]["tokens"] == 210
+    assert "pausa" in (paused["message"] or "")
+    assert enforce_usage_cap(text="un mensaje corto")
     heavy = enforce_usage_cap(text="x" * 500)
-    assert heavy and "tope" in heavy
+    assert heavy and "pausa" in heavy
     generated = enforce_usage_cap(text="hola", source="generate")
-    assert generated and "mensajes cortos" in generated
+    assert generated and "pausa" in generated
 
 
 def test_family_forces_minimax_m3(monkeypatch, tmp_path):

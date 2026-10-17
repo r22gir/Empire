@@ -93,7 +93,7 @@ interface Props {
   streamingContent: string;
   streamingSteps?: string[];
   streamingModel: string;
-  onSend: (msg: string, imageFilename?: string | null) => void;
+  onSend: (msg: string, imageFilename?: string | null, usageSource?: string) => void;
   onStop: () => void;
   onScreenChange?: (screen: string) => void;
   onProductNavigate?: (product: string, screen?: string, section?: string) => void;
@@ -372,12 +372,12 @@ export default function ChatScreen({ messages, isStreaming, streamingContent, st
               setVoiceDraft(session);
             } catch (ingestErr) {
               console.warn('Voice draft ingest failed:', ingestErr);
-              onSend(data.text);
+              onSend(data.text, null, 'voice');
               setVoiceStatus('');
             }
           } else if (data.text) {
             // Mic dictation is a normal chat message unless document intent/mode was explicit.
-            onSend(data.text);
+            onSend(data.text, null, 'voice');
             setVoiceStatus('');
           } else {
             setVoiceStatus('');

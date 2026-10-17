@@ -57,7 +57,7 @@ def test_existing_20_percent_instance_cap_still_works(monkeypatch, tmp_path):
     record_usage(input_tokens=2_000_001, output_tokens=0)
     summary = usage_summary()
     assert summary["cap_percent"] == 20.0
-    assert summary["level"] == "blocked"
+    assert summary["level"] == "paused"
     assert enforce_usage_cap(text="x" * 500)
 
 

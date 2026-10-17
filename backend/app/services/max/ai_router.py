@@ -6,6 +6,7 @@ import base64
 import subprocess
 import re
 import uuid
+from contextvars import ContextVar
 from enum import Enum
 from dataclasses import dataclass
 from typing import List, Optional, AsyncGenerator, Tuple, Any
@@ -68,6 +69,20 @@ class TaskComplexity(Enum):
 _COMPLEXITY_ORDER = {TaskComplexity.SIMPLE: 0, TaskComplexity.MODERATE: 1,
                      TaskComplexity.COMPLEX: 2, TaskComplexity.CRITICAL: 3}
 _conversation_floors: dict[str, TaskComplexity] = {}
+
+# Per-task meter identity for MiniMax reserve(). Unset → background.
+# Never store source/desk on the shared ai_router instance (concurrent races).
+_meter_ctx: ContextVar[Optional[tuple[str, Optional[str]]]] = ContextVar(
+    "max_ai_router_meter", default=None
+)
+
+
+def current_meter_context() -> tuple[str, Optional[str]]:
+    """Return (source, desk) for reserve(). Unset means background."""
+    val = _meter_ctx.get()
+    if val is None:
+        return "", None
+    return val
 
 
 def apply_conversation_floor(conversation_id: str | None, complexity: TaskComplexity) -> TaskComplexity:
@@ -1290,7 +1305,13 @@ class AIRouter:
                 return model, refusal
             try:
                 from app.services.minimax_meter import enforce as enforce_minimax
-                meter_refusal = enforce_minimax(kind="text", input_tokens=max(1, len(user_text) // 4))
+                meter_refusal = enforce_minimax(
+                    kind="text",
+                    input_tokens=max(1, len(user_text) // 4),
+                    source=source,
+                    desk=desk,
+                    request_kind="chat",
+                )
                 if meter_refusal:
                     return model, meter_refusal
             except Exception:
@@ -1308,6 +1329,17 @@ class AIRouter:
             return model, None
 
     async def chat(self, messages: List[AIMessage], model: Optional[AIModel] = None, image_filename: Optional[str] = None, desk: Optional[str] = None, system_prompt: Optional[str] = None, tenant_id: str = "founder", source: str = "", conversation_id: str = "", tools: Optional[list] = None) -> AIResponse:
+        token = _meter_ctx.set((source or "", desk))
+        try:
+            return await self._chat_after_meter(
+                messages, model=model, image_filename=image_filename, desk=desk,
+                system_prompt=system_prompt, tenant_id=tenant_id, source=source,
+                conversation_id=conversation_id, tools=tools,
+            )
+        finally:
+            _meter_ctx.reset(token)
+
+    async def _chat_after_meter(self, messages: List[AIMessage], model: Optional[AIModel] = None, image_filename: Optional[str] = None, desk: Optional[str] = None, system_prompt: Optional[str] = None, tenant_id: str = "founder", source: str = "", conversation_id: str = "", tools: Optional[list] = None) -> AIResponse:
         model, refusal = self._family_chat_prep(
             messages,
             desk=desk,
@@ -1537,6 +1569,18 @@ class AIRouter:
     # ── Streaming chat ──────────────────────────────────────────────────
 
     async def chat_stream(self, messages: List[AIMessage], model: Optional[AIModel] = None, image_filename: Optional[str] = None, desk: Optional[str] = None, system_prompt: Optional[str] = None, tenant_id: str = "founder", source: str = "", conversation_id: str = "") -> AsyncGenerator[tuple[str, str], None]:
+        token = _meter_ctx.set((source or "", desk))
+        try:
+            async for item in self._chat_stream_after_meter(
+                messages, model=model, image_filename=image_filename, desk=desk,
+                system_prompt=system_prompt, tenant_id=tenant_id, source=source,
+                conversation_id=conversation_id,
+            ):
+                yield item
+        finally:
+            _meter_ctx.reset(token)
+
+    async def _chat_stream_after_meter(self, messages: List[AIMessage], model: Optional[AIModel] = None, image_filename: Optional[str] = None, desk: Optional[str] = None, system_prompt: Optional[str] = None, tenant_id: str = "founder", source: str = "", conversation_id: str = "") -> AsyncGenerator[tuple[str, str], None]:
         model, refusal = self._family_chat_prep(
             messages,
             desk=desk,
@@ -2294,11 +2338,15 @@ class AIRouter:
 
         input_text = " ".join((m.content or "") for m in (messages or []) if getattr(m, "content", None))
         estimate = max(1, len(input_text) // 4)
+        source, desk = current_meter_context()
         reservation = reserve(
             kind="text",
             model=self.minimax_model or "MiniMax-M3",
             input_tokens=estimate,
             output_tokens=0,
+            source=source,
+            desk=desk,
+            request_kind="chat",
         )
         if reservation.blocked:
             raise MeterBlocked(reservation.message)

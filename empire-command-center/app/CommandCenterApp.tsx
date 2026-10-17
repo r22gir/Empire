@@ -501,8 +501,8 @@ export default function CommandCenter() {
     setActiveScreen(moduleScreenMap[module] || 'dashboard');
   }, [activeProduct, activeScreen, activeSection, pushHistory]);
 
-  const handleSendMessage = useCallback((msg: string, imageFilename?: string | null) => {
-    chat.sendMessage(msg, imageFilename);
+  const handleSendMessage = useCallback((msg: string, imageFilename?: string | null, usageSource?: string) => {
+    chat.sendMessage(msg, imageFilename, undefined, usageSource);
   }, [chat]);
 
   // /preview/cockpit "Ask Max anything": /?product=owner&ask=<text> opens Max

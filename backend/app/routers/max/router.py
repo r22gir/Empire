@@ -803,8 +803,17 @@ class ChatRequest(BaseModel):
     desk: Optional[str] = None
     conversation_id: Optional[str] = None
     channel: Optional[str] = None  # "telegram", "web", etc.
+    usage_source: Optional[str] = None  # "web" | "voice" — soft cap / meter only
     chat_id: Optional[str] = None  # Telegram chat ID for founder detection
     presentation: bool = False  # Presentation Mode: short speech, detail on the stage
+
+
+def _meter_usage_source(request: ChatRequest) -> str:
+    """Soft-cap / meter identity only. Never used for privileges or history."""
+    explicit = (getattr(request, "usage_source", None) or "").strip()
+    if explicit:
+        return explicit
+    return (request.channel or "").strip()
 
 
 class RoutingStateUpdateRequest(BaseModel):
@@ -2843,6 +2852,7 @@ async def _chat_with_max_service_impl(
             f"path in telegram_bot._chat_with_max is the correct shape."
         )
 
+    _usage_source = _meter_usage_source(request)
     request.channel = canonical_channel or request.channel
     if canonical_chat_id is not None:
         request.chat_id = canonical_chat_id
@@ -3353,7 +3363,7 @@ async def _chat_with_max_service_impl(
 
         if not _family_search_failed:
             response = await asyncio.wait_for(
-                ai_router.chat(messages, model=model, image_filename=request.image_filename, desk=request.desk, system_prompt=enriched_prompt, conversation_id=request.conversation_id or "", tools=_tools),
+                ai_router.chat(messages, model=model, image_filename=request.image_filename, desk=request.desk, system_prompt=enriched_prompt, conversation_id=request.conversation_id or "", tools=_tools, source=_usage_source),
                 timeout=_resolve_max_chat_timeout(request.message),
             )
 
@@ -3501,7 +3511,7 @@ async def _chat_with_max_service_impl(
                     current_response = await ai_router.chat(
                         loop_messages, model=model, desk=request.desk,
                         system_prompt=enriched_prompt, conversation_id=request.conversation_id or "",
-                        tools=_tools,
+                        tools=_tools, source=_usage_source,
                     )
                     final_content = current_response.content
                     continue
@@ -3641,7 +3651,7 @@ async def _chat_with_max_service_impl(
             # e9c18cc. Tool-result scaffolding goes on the system channel.
             loop_messages.append(AIMessage(role="system", content=f"{followup_instruction}\n\n{tool_summary}"))
 
-            current_response = await ai_router.chat(loop_messages, model=model, desk=request.desk, system_prompt=enriched_prompt, conversation_id=request.conversation_id or "", tools=_tools)
+            current_response = await ai_router.chat(loop_messages, model=model, desk=request.desk, system_prompt=enriched_prompt, conversation_id=request.conversation_id or "", tools=_tools, source=_usage_source)
             # Only keep the FINAL round's response — previous rounds are context for the AI, not for the user
             final_content = current_response.content
 
@@ -3660,6 +3670,7 @@ async def _chat_with_max_service_impl(
                 _final_resp = await ai_router.chat(
                     _final_msgs, model=model, desk=request.desk, system_prompt=enriched_prompt,
                     conversation_id=request.conversation_id or "",
+                    source=_usage_source,
                 )
                 _recovered = strip_tool_blocks(_final_resp.content or "")
                 if _recovered.strip():
@@ -3760,7 +3771,8 @@ async def _chat_with_max_service_impl(
                 grounded_messages.append(AIMessage(role="system", content=_fg_grounded["message"]))
                 grounded_response = await ai_router.chat(
                     grounded_messages, model=model, desk=request.desk,
-                    system_prompt=enriched_prompt, conversation_id=request.conversation_id or "", tools=_tools
+                    system_prompt=enriched_prompt, conversation_id=request.conversation_id or "", tools=_tools,
+                    source=_usage_source,
                 )
                 final_content = grounded_response.content
 
@@ -4064,6 +4076,7 @@ async def chat_stream(request: ChatRequest, http_request: Request):
 
 async def _chat_stream_impl(request: ChatRequest, http_request: Request | None = None):
     """SSE streaming endpoint body (see chat_stream)."""
+    _usage_source = _meter_usage_source(request)
     msg_ctx = {"channel": request.channel or "", "chat_id": request.chat_id or ""}
     founder = is_founder_message(msg_ctx)
     if founder:
@@ -4445,7 +4458,7 @@ async def _chat_stream_impl(request: ChatRequest, http_request: Request | None =
             _initial_iter = ai_router.chat_stream(
                 messages, model=model, image_filename=request.image_filename,
                 desk=request.desk, system_prompt=enriched_prompt,
-                source=request.channel or "", conversation_id=request.conversation_id or "",
+                source=_usage_source, conversation_id=request.conversation_id or "",
             ).__aiter__()
             while True:
                 try:
@@ -4527,7 +4540,7 @@ async def _chat_stream_impl(request: ChatRequest, http_request: Request | None =
                         followup_text = ""
                         _action_followup_iter = ai_router.chat_stream(
                             loop_messages, model=model, desk=request.desk,
-                            system_prompt=enriched_prompt, source=request.channel or "",
+                            system_prompt=enriched_prompt, source=_usage_source,
                             conversation_id=request.conversation_id or "",
                         ).__aiter__()
                         while True:
@@ -4706,7 +4719,7 @@ async def _chat_stream_impl(request: ChatRequest, http_request: Request | None =
                 followup_text = ""
                 _followup_iter = ai_router.chat_stream(
                     loop_messages, model=model, desk=request.desk,
-                    system_prompt=enriched_prompt, source=request.channel or "",
+                    system_prompt=enriched_prompt, source=_usage_source,
                     conversation_id=request.conversation_id or "",
                 ).__aiter__()
                 while True:
@@ -4740,6 +4753,7 @@ async def _chat_stream_impl(request: ChatRequest, http_request: Request | None =
                     _complete_resp = await ai_router.chat(
                         _complete_msgs, model=model, desk=request.desk, system_prompt=enriched_prompt,
                         conversation_id=request.conversation_id or "",
+                        source=_usage_source,
                     )
                     _replacement = repair_reply_structure(strip_tool_blocks(_complete_resp.content or ""))
                     if _replacement:
