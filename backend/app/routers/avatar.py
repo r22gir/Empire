@@ -302,6 +302,12 @@ async def avatar_live(websocket: WebSocket):
         logger.warning("avatar/live: rejected websocket (%s)", via)
         await websocket.close(code=4401, reason="unauthorized")
         return
+    try:
+        from app.edition import is_family_edition
+        from app.services.founder_activity import maybe_mark_founder_active
+        maybe_mark_founder_active(not is_family_edition(), "max_voice")
+    except Exception:
+        logger.debug("founder activity mark on voice session skipped", exc_info=True)
     await websocket.accept()
     try:
         await handle_live_call(websocket, auth_via=via, user=user)

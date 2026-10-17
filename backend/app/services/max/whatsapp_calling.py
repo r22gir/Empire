@@ -1072,7 +1072,7 @@ async def handle_call_connect(
     upstream_ws: Any = None,
 ) -> dict[str, Any]:
     """Handles an incoming connect event with SDP offer (full setup, awaited)."""
-    from app.services.max.whatsapp_channel import is_allowlisted
+    from app.services.max.whatsapp_channel import is_allowlisted, mark_founder_whatsapp_activity
 
     # 1. Allowlist check
     if not is_allowlisted(from_number):
@@ -1087,6 +1087,8 @@ async def handle_call_connect(
         temp_call = WhatsAppVoiceCall(call_id, from_number, http_post=http_post)
         await temp_call.post_calls_action("reject")
         return {"action": "rejected", "call_id": call_id, "reason": "calling_disabled"}
+
+    mark_founder_whatsapp_activity(from_number, "whatsapp_voice")
 
     if call_id in _active_whatsapp_calls:
         logger.info("whatsapp_call[%s] duplicate connect webhook ignored", call_id)

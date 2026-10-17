@@ -442,6 +442,17 @@ def _stub_snapshot() -> Optional[dict[str, Any]]:
             "remains": {"ok": True, "available": True, "remaining_pct": 15.0, "used_pct": 85.0},
             "credits": {"ok": True, "available": True, "balance": 2000},
         }
+    if stub == "stale":
+        return {
+            "remains": {
+                "ok": True,
+                "available": True,
+                "remaining_pct": 90.0,
+                "used_pct": 10.0,
+                "stale": True,
+            },
+            "credits": {"ok": False, "available": False, "balance": None},
+        }
     return None
 
 

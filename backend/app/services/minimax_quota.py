@@ -231,6 +231,14 @@ def _ttl_for(payload: Optional[dict]) -> float:
     return failure_ttl()
 
 
+def remains_cache_age_s() -> Optional[float]:
+    """Seconds since the last remains cache store. None if never stored."""
+    at = float(_cache.get("remains_at") or 0)
+    if at <= 0:
+        return None
+    return max(0.0, time.time() - at)
+
+
 def _cache_fresh(key: str) -> Optional[dict]:
     row = _cache.get(key)
     at = float(_cache.get(f"{key}_at") or 0)
