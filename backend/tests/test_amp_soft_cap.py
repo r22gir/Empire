@@ -8,6 +8,7 @@ from pathlib import Path
 from app.services.instance_usage import (
     MENSAJE_OVERAGE,
     MENSAJE_PAUSED,
+    MENSAJE_PAUSED_REMAINS,
     MENSAJE_PAUSED_RESERVE,
     MENSAJE_PAUSED_SIGNAL,
     MENSAJE_PAUSED_STALE,
@@ -168,6 +169,8 @@ def test_desk_chat_never_gets_overage_even_with_allowed_signal(monkeypatch, tmp_
     assert enforce_usage_cap(kind="chat", source="unknown-job") is not None
     assert enforce_usage_cap(kind="chat", source="web") is None
     assert enforce_usage_cap(kind="chat", source="voice") is None
+    assert enforce_usage_cap(kind="chat", source="dashboard") is None
+    assert enforce_usage_cap(kind="chat", source="dashboard", desk="finance") is not None
 
 
 def test_paused_names_reserve_low(monkeypatch, tmp_path):
@@ -208,3 +211,121 @@ def test_brother_ceiling_pct_uses_the_lower_value(monkeypatch, tmp_path):
     )
     assert family_overage_allowed() is True
     assert usage_summary()["level"] == "overage"
+
+
+def test_remains_unavailable_is_not_reserve_low(monkeypatch, tmp_path):
+    _env(monkeypatch, tmp_path)
+    _set_used(250)
+    _write_signal(
+        tmp_path,
+        overage_allowed=False,
+        founder_active=False,
+        reserve_ok=False,
+        reason="remains_unavailable",
+    )
+    summary = usage_summary()
+    assert summary["message"] == MENSAJE_PAUSED_REMAINS
+    assert "reserva baja" not in summary["message"]
+    assert "saldo de Max" in summary["message"]
+    public = public_usage_summary()
+    assert public["meter_label_es"] == "En pausa: no puedo leer el saldo de Max"
+
+    _write_signal(
+        tmp_path,
+        overage_allowed=False,
+        founder_active=False,
+        reserve_ok=False,
+        reason="remains_stale",
+    )
+    assert usage_summary()["message"] == MENSAJE_PAUSED_REMAINS
+    assert enforce_usage_cap(text="hola", source="web") == MENSAJE_PAUSED_REMAINS
+
+
+def test_max_chat_and_stream_overage_with_frontend_channel(monkeypatch, tmp_path):
+    """Juan's /max/chat and stream (default frontend channel) get overage; desk does not."""
+    _env(monkeypatch, tmp_path)
+    _set_used(250)
+    _write_signal(tmp_path, overage_allowed=True, founder_active=False)
+    monkeypatch.setenv("MINIMAX_METER_DIR", str(tmp_path / "meter"))
+    monkeypatch.setenv("MINIMAX_REMAINS_STUB", "ok")
+    monkeypatch.setenv("MINIMAX_REMAINS_PROBE", "0")
+    (tmp_path / "meter").mkdir(parents=True, exist_ok=True)
+
+    from app.services.max.ai_router import AIResponse, ai_router
+
+    seen: list[tuple[str, str, object]] = []
+
+    async def fake_chat(
+        messages, model=None, image_filename=None, desk=None, system_prompt=None,
+        tenant_id="founder", source="", conversation_id="", tools=None,
+    ):
+        seen.append(("chat", source, desk))
+        _model, refusal = ai_router._family_chat_prep(
+            messages, desk=desk, tools=bool(tools), source=source,
+            image_filename=image_filename, model=model,
+        )
+        if refusal:
+            return AIResponse(content=refusal, model_used="usage-cap", fallback_used=False)
+        return AIResponse(content="ok manito", model_used="MiniMax-M3", fallback_used=False)
+
+    async def fake_stream(
+        messages, model=None, image_filename=None, desk=None, system_prompt=None,
+        tenant_id="founder", source="", conversation_id="",
+    ):
+        seen.append(("stream", source, desk))
+        _model, refusal = ai_router._family_chat_prep(
+            messages, desk=desk, tools=False, source=source,
+            image_filename=image_filename, model=model,
+        )
+        if refusal:
+            yield refusal, "usage-cap"
+            return
+        yield "ok manito", "MiniMax-M3"
+
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    from app.routers.max.router import router
+
+    monkeypatch.setattr(ai_router, "chat", fake_chat)
+    monkeypatch.setattr(ai_router, "chat_stream", fake_stream)
+
+    app = FastAPI()
+    app.include_router(router, prefix="/api/v1")
+    client = TestClient(app)
+
+    chat = client.post("/api/v1/max/chat", json={"message": "hola manito", "channel": "web"})
+    assert chat.status_code == 200, chat.text
+    assert chat.json()["response"] == "ok manito"
+    assert chat.json()["model_used"] != "usage-cap"
+
+    stream = client.post("/api/v1/max/chat/stream", json={"message": "hola manito", "channel": "web"})
+    assert stream.status_code == 200, stream.text
+    assert "ok manito" in stream.text
+    assert "usage-cap" not in stream.text
+
+    old_client = client.post(
+        "/api/v1/max/chat/stream",
+        json={"message": "hola manito", "channel": "dashboard"},
+    )
+    assert old_client.status_code == 200, old_client.text
+    assert "ok manito" in old_client.text
+
+    sources = {src for _kind, src, _desk in seen}
+    assert "web" in sources
+    assert "dashboard" in sources
+    assert enforce_usage_cap(kind="chat", desk="finance", source="") is not None
+    desk_http = client.post(
+        "/api/v1/max/chat",
+        json={"message": "hola manito", "channel": "web", "desk": "finance"},
+    )
+    assert desk_http.status_code == 200
+    assert desk_http.json()["model_used"] == "usage-cap"
+    assert desk_http.json()["response"] != "ok manito"
+
+
+def test_use_chat_default_channel_is_web():
+    text = Path(__file__).resolve().parents[2].joinpath(
+        "empire-command-center/app/hooks/useChat.ts"
+    ).read_text(encoding="utf-8")
+    assert "channel || 'web'" in text
+    assert "channel || 'dashboard'" not in text

@@ -150,7 +150,7 @@ async def _max_chat(message: str, *, presentation: bool = False):
     from app.routers.max.router import ChatRequest as MaxChatRequest
     from app.routers.max.router import _chat_with_max_service
 
-    request = MaxChatRequest(message=message, channel="web_cc", presentation=presentation)
+    request = MaxChatRequest(message=message, channel="voice_live", presentation=presentation)
     return await _chat_with_max_service(
         request,
         canonical_channel="web_cc",

@@ -77,7 +77,8 @@ from typing import Optional
 HEAVY_KINDS = frozenset({"job", "generate", "desk_task", "vision", "social", "heavy"})
 BACKGROUND_KINDS = frozenset({"desk_task", "job", "generate", "social"})
 # Overage allowlist: named interactive sources only. Empty / unknown / desk = background.
-INTERACTIVE_SOURCES = frozenset({"web", "web_cc", "voice", "voice_live"})
+# dashboard is the old Command Center default; interactive only when desk is unset.
+INTERACTIVE_SOURCES = frozenset({"web", "web_cc", "voice", "voice_live", "dashboard"})
 INTERACTIVE_CURSOR_SOURCES = frozenset({"", "web", "web_cc", "user", "owner", "cursor_request"})
 DEFAULT_BASELINE_MONTHLY_TOKENS = 10_000_000.0
 MENSAJE_OVERAGE = (
@@ -100,10 +101,15 @@ MENSAJE_PAUSED_RESERVE = (
     "Manito, ya usaste tu 20% del mes y la reserva de Rafael está baja, "
     "así que lo extra queda en pausa."
 )
+MENSAJE_PAUSED_REMAINS = (
+    "Manito, ya usaste tu 20% del mes y no puedo leer el saldo de Max ahora, "
+    "así que lo extra queda en pausa. Vuelve a intentar en un rato."
+)
 METER_OVERAGE_ES = "Tiempo extra (Rafael no está)"
 METER_PAUSED_ES = "En pausa: Rafael está usando Max"
 METER_PAUSED_SIGNAL_ES = "En pausa: no hay señal de Rafael"
 METER_PAUSED_RESERVE_ES = "En pausa: la reserva de Rafael está baja"
+METER_PAUSED_REMAINS_ES = "En pausa: no puedo leer el saldo de Max"
 
 
 def _now() -> datetime:
@@ -195,6 +201,8 @@ def paused_reason_and_message(used_percent: Optional[float] = None) -> tuple[str
         return "signal_missing", MENSAJE_PAUSED_SIGNAL
     if reason == "founder_active" or signal.get("founder_active"):
         return "founder_active", MENSAJE_PAUSED
+    if reason in {"remains_unavailable", "remains_stale"}:
+        return "remains_unavailable", MENSAJE_PAUSED_REMAINS
     if reason == "reserve_low" or signal.get("reserve_ok") is False:
         return "reserve_low", MENSAJE_PAUSED_RESERVE
     return "signal_missing", MENSAJE_PAUSED_SIGNAL
@@ -207,6 +215,8 @@ def meter_label_for_reason(reason: str) -> str:
         return METER_PAUSED_SIGNAL_ES
     if reason == "reserve_low":
         return METER_PAUSED_RESERVE_ES
+    if reason == "remains_unavailable":
+        return METER_PAUSED_REMAINS_ES
     return METER_PAUSED_ES
 
 

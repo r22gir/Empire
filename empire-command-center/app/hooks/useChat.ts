@@ -154,7 +154,7 @@ export function useChat() {
         model: 'auto',
         history: historySlice,
         conversation_id: chatIdRef.current || undefined,
-        channel: channel || 'dashboard',
+        channel: channel || 'web',
       };
       if (desk) body.desk = desk;
       if (imageFilename) body.image_filename = imageFilename;

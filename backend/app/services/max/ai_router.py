@@ -1314,6 +1314,8 @@ class AIRouter:
             return model, None
 
     async def chat(self, messages: List[AIMessage], model: Optional[AIModel] = None, image_filename: Optional[str] = None, desk: Optional[str] = None, system_prompt: Optional[str] = None, tenant_id: str = "founder", source: str = "", conversation_id: str = "", tools: Optional[list] = None) -> AIResponse:
+        self._meter_source = source
+        self._meter_desk = desk
         model, refusal = self._family_chat_prep(
             messages,
             desk=desk,
@@ -1543,6 +1545,8 @@ class AIRouter:
     # ── Streaming chat ──────────────────────────────────────────────────
 
     async def chat_stream(self, messages: List[AIMessage], model: Optional[AIModel] = None, image_filename: Optional[str] = None, desk: Optional[str] = None, system_prompt: Optional[str] = None, tenant_id: str = "founder", source: str = "", conversation_id: str = "") -> AsyncGenerator[tuple[str, str], None]:
+        self._meter_source = source
+        self._meter_desk = desk
         model, refusal = self._family_chat_prep(
             messages,
             desk=desk,
@@ -2305,6 +2309,9 @@ class AIRouter:
             model=self.minimax_model or "MiniMax-M3",
             input_tokens=estimate,
             output_tokens=0,
+            source=getattr(self, "_meter_source", "") or "",
+            desk=getattr(self, "_meter_desk", None),
+            request_kind="chat",
         )
         if reservation.blocked:
             raise MeterBlocked(reservation.message)
