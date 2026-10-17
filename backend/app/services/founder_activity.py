@@ -137,12 +137,17 @@ def founder_is_active(now: Optional[datetime] = None) -> bool:
     return current - stamp <= window
 
 
+_PASSIVE_HTTP_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
+
+
 def mark_founder_active(source: str = "studio") -> dict[str, Any]:
     """Record founder activity. Disk writes are rate-limited to 1/30s.
 
     Always updates the in-memory stamp. Writes ``founder_activity.json``
-    and the family signal files when the rate limit allows, and always
-    on the first mark in this process.
+    when the rate limit allows (and always on the first mark in this
+    process). Does **not** write family signal files — the 60s loop
+    publishes those off-thread so a MiniMax remains probe cannot block
+    the Studio worker.
     """
     global _last_active_at, _last_source, _last_disk_write_mono
     now = _now()
@@ -165,12 +170,6 @@ def mark_founder_active(source: str = "studio") -> dict[str, Any]:
             _atomic_write(activity_path(), snapshot)
         except OSError as exc:
             logger.debug("founder_activity disk write skipped: %s", exc)
-        try:
-            from app.services.family_signal import write_family_signals
-
-            write_family_signals(now=now)
-        except Exception as exc:
-            logger.debug("family signal write after founder activity skipped: %s", exc)
     return snapshot
 
 
@@ -181,3 +180,17 @@ def maybe_mark_founder_active(is_founder: bool, source: str = "studio") -> None:
         mark_founder_active(source)
     except Exception:
         logger.debug("mark_founder_active failed", exc_info=True)
+
+
+def mark_http_founder_activity(method: str, verified: bool) -> None:
+    """CF Access / founder session: real actions only, never polled GETs.
+
+    Dashboard polls (quotes-v2, jobs, finance/dashboard, …) are GET and
+    must not keep the founder marked active. Non-GET plus chat/voice/PIN
+    handlers mark on their own paths.
+    """
+    if not verified:
+        return
+    if (method or "").upper() in _PASSIVE_HTTP_METHODS:
+        return
+    maybe_mark_founder_active(True, "cf_access")

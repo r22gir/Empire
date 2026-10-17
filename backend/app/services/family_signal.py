@@ -4,7 +4,8 @@ Studio only. Family editions (Max-e / Maxine) read
 ``<dir>/founder-signal/status.json`` from their own tree; they cannot
 read Studio's data dir. This module never imports amp or maxine code.
 
-Schema (no extra fields, no personal data, no secrets)::
+Schema 1 (required keys; extra optional fields are backward compatible
+because family readers ignore unknown fields)::
 
     {
       "schema": 1,
@@ -13,8 +14,17 @@ Schema (no extra fields, no personal data, no secrets)::
       "founder_last_active_at": "...Z" | null,
       "reserve_ok": bool,
       "overage_allowed": bool,
-      "reason": "founder_active" | "reserve_low" | "inputs_unreadable" | "inactive_reserve_ok"
+      "reason": "founder_active" | "reserve_low" | "remains_unavailable"
+               | "remains_stale" | "inactive_reserve_ok"
     }
+
+Optional extras (informational / family ceiling)::
+
+    remaining_pct, used_tokens, month, brother_ceiling_pct
+
+``reserve_ok`` is MiniMax plan ``remaining_pct >= FOUNDER_RESERVE_PCT``
+(default 40). Token sums are informational only and never drive reserve.
+Unavailable or stale remains fail closed.
 
 ``overage_allowed`` is (not founder_active) and reserve_ok.
 Brothers start at 20% each; past 20% they may continue only while
@@ -35,7 +45,7 @@ logger = logging.getLogger("max.family_signal")
 
 SCHEMA = 1
 SIGNAL_REL = Path("founder-signal") / "status.json"
-STATUS_KEYS = (
+REQUIRED_STATUS_KEYS = (
     "schema",
     "updated_at",
     "founder_active",
@@ -44,14 +54,24 @@ STATUS_KEYS = (
     "overage_allowed",
     "reason",
 )
+# Schema 1 extras: family readers ignore unknown fields.
+OPTIONAL_STATUS_KEYS = (
+    "brother_ceiling_pct",
+    "remaining_pct",
+    "used_tokens",
+    "month",
+)
+STATUS_KEYS = REQUIRED_STATUS_KEYS + OPTIONAL_STATUS_KEYS
 DEFAULT_FAMILY_DIRS = "/data/amp,/data/maxine"
 DEFAULT_RESERVE_PCT = 40.0
 DEFAULT_BROTHER_CEILING_PCT = 40.0
 DEFAULT_POOL_FLOOR = 10_000_000.0
+DEFAULT_REMAINS_MAX_AGE_S = 120.0
 REASONS = (
     "founder_active",
     "reserve_low",
-    "inputs_unreadable",
+    "remains_unavailable",
+    "remains_stale",
     "inactive_reserve_ok",
 )
 
@@ -81,12 +101,24 @@ def reserve_pct() -> float:
     return min(100.0, _float_env("FOUNDER_RESERVE_PCT", DEFAULT_RESERVE_PCT))
 
 
+def remains_max_age_s() -> float:
+    return max(1.0, _float_env("FOUNDER_REMAINS_MAX_AGE_S", DEFAULT_REMAINS_MAX_AGE_S))
+
+
 def brother_ceiling_pct() -> float:
-    """Family overage ceiling (default 40%). 8a/8b enforce it; Studio only publishes the signal."""
+    """Family overage ceiling. 8a/8b enforce it; Studio only publishes it.
+
+    Prefer ``FAMILY_ABSOLUTE_MAX_PCT`` (amp/maxine). Fall back to
+    ``FAMILY_BROTHER_CEILING_PCT`` when only that is set.
+    """
+    abs_raw = (os.getenv("FAMILY_ABSOLUTE_MAX_PCT") or "").strip()
+    if abs_raw:
+        return min(100.0, _float_env("FAMILY_ABSOLUTE_MAX_PCT", DEFAULT_BROTHER_CEILING_PCT))
     return min(100.0, _float_env("FAMILY_BROTHER_CEILING_PCT", DEFAULT_BROTHER_CEILING_PCT))
 
 
 def pool_floor() -> float:
+    """Informational only — not used for reserve_ok."""
     return _float_env("EMPIRE_USAGE_DEFAULT_BASELINE_TOKENS", DEFAULT_POOL_FLOOR)
 
 
@@ -178,34 +210,70 @@ def _meter_month_tokens(month: str) -> tuple[int, bool]:
         return 0, False
 
 
-def _plan_reserve_ok() -> tuple[bool, bool]:
-    """(plan_ok, readable). Unreadable remains => not ok.
+def _reserve_from_remains() -> dict[str, Any]:
+    """reserve_ok from MiniMax remaining_pct. Fail closed if missing or stale.
 
-    When the MiniMax /token_plan/remains endpoint is readable, plan usage
-    must stay below the existing hard-stop margin. Stubs in tests set
-    MINIMAX_REMAINS_STUB (never live HTTP from this module's tests).
+    Uses the existing fetch_remains / _plan_snapshot path (stubs via
+    MINIMAX_REMAINS_STUB in tests; never live HTTP from this module's tests).
     """
+    remaining: Optional[float] = None
+    available = False
+    stale = False
     try:
-        from app.services.minimax_meter import _plan_snapshot, plan_hard_stop_pct
+        from app.services.minimax_meter import _plan_snapshot, _stub_snapshot
 
         snap = _plan_snapshot()
         remains = (snap or {}).get("remains") or {}
-        if not remains.get("available"):
-            return False, False
-        stop = plan_hard_stop_pct()
-        used = remains.get("used_pct")
-        remaining = remains.get("remaining_pct")
-        if used is not None and float(used) >= stop:
-            return False, True
-        if remaining is not None and float(remaining) <= max(0.0, 100.0 - stop):
-            return False, True
-        return True, True
+        available = bool(remains.get("available") and remains.get("ok", True))
+        raw_remaining = remains.get("remaining_pct")
+        if raw_remaining is not None:
+            remaining = float(raw_remaining)
+        stale = bool(remains.get("stale"))
+        stub = _stub_snapshot()
+        if stub is None:
+            try:
+                from app.services.minimax_quota import remains_cache_age_s
+
+                age = remains_cache_age_s()
+            except Exception:
+                age = None
+            max_age = remains_max_age_s()
+            if age is None or age > max_age:
+                stale = True
     except Exception:
-        return False, False
+        available = False
+        remaining = None
+        stale = False
+
+    if stale and remaining is not None:
+        return {
+            "reserve_ok": False,
+            "readable": False,
+            "stale": True,
+            "remaining_pct": remaining,
+            "why": "remains_stale",
+        }
+    if not available or remaining is None:
+        return {
+            "reserve_ok": False,
+            "readable": False,
+            "stale": False,
+            "remaining_pct": remaining,
+            "why": "remains_unavailable",
+        }
+    needed = reserve_pct()
+    ok = remaining + 1e-12 >= needed
+    return {
+        "reserve_ok": bool(ok),
+        "readable": True,
+        "stale": False,
+        "remaining_pct": remaining,
+        "why": None if ok else "reserve_low",
+    }
 
 
 def recorded_month_tokens(month: Optional[str] = None) -> dict[str, Any]:
-    """Sum Studio meter + family usage DBs for the UTC month."""
+    """Sum Studio meter + family usage DBs for the UTC month (informational)."""
     month = month or _now().strftime("%Y-%m")
     readable = True
     tokens = 0
@@ -241,21 +309,13 @@ def compute_status(now: Optional[datetime] = None) -> dict[str, Any]:
     last = last_active_at()
     active = founder_is_active(current)
     usage = recorded_month_tokens(current.strftime("%Y-%m"))
-    inputs_ok = bool(usage["readable"])
-    plan_ok, plan_readable = _plan_reserve_ok()
-    if not plan_readable:
-        inputs_ok = False
-
-    pool = max(float(usage["tokens"]), pool_floor())
-    remaining = max(0.0, pool - float(usage["tokens"]))
-    reserve_share = remaining / pool if pool else 0.0
-    reserve_needed = reserve_pct() / 100.0
-    usage_reserve_ok = reserve_share + 1e-12 >= reserve_needed
-    reserve_ok = bool(inputs_ok and usage_reserve_ok and plan_ok)
+    reserve = _reserve_from_remains()
+    remaining_pct = reserve.get("remaining_pct")
+    reserve_ok = bool(reserve["reserve_ok"])
     overage_allowed = (not active) and reserve_ok
 
-    if not inputs_ok:
-        reason = "inputs_unreadable"
+    if not reserve["readable"]:
+        reason = reserve["why"] or "remains_unavailable"
     elif active:
         reason = "founder_active"
     elif not reserve_ok:
@@ -264,6 +324,9 @@ def compute_status(now: Optional[datetime] = None) -> dict[str, Any]:
         reason = "inactive_reserve_ok"
 
     last_iso = _iso(last) if last is not None else None
+    remaining_out: Optional[float] = None
+    if remaining_pct is not None:
+        remaining_out = round(float(remaining_pct), 2)
     return {
         "schema": SCHEMA,
         "updated_at": _iso(current),
@@ -272,15 +335,27 @@ def compute_status(now: Optional[datetime] = None) -> dict[str, Any]:
         "reserve_ok": bool(reserve_ok),
         "overage_allowed": bool(overage_allowed),
         "reason": reason,
+        "brother_ceiling_pct": brother_ceiling_pct(),
+        "remaining_pct": remaining_out,
+        "used_tokens": int(usage.get("tokens") or 0),
+        "month": usage.get("month"),
     }
 
 
 def _status_only(payload: dict[str, Any]) -> dict[str, Any]:
-    return {key: payload[key] for key in STATUS_KEYS}
+    out = {key: payload[key] for key in REQUIRED_STATUS_KEYS}
+    for key in OPTIONAL_STATUS_KEYS:
+        if key in payload:
+            out[key] = payload[key]
+    return out
 
 
 def write_family_signals(now: Optional[datetime] = None) -> dict[str, Any]:
-    """Write status.json into each existing family dir. Missing dirs are skipped."""
+    """Write status.json into each existing family dir. Missing dirs are skipped.
+
+    Sync. Call from the 60s loop via ``write_family_signals_offthread`` so the
+    MiniMax remains probe (up to 3s) never blocks the Studio event loop.
+    """
     status = _status_only(compute_status(now=now))
     for root in family_signal_dirs():
         if not root.exists():
@@ -293,6 +368,13 @@ def write_family_signals(now: Optional[datetime] = None) -> dict[str, Any]:
         except OSError as exc:
             logger.debug("family signal skip %s: %s", dest, exc)
     return status
+
+
+async def write_family_signals_offthread(now: Optional[datetime] = None) -> dict[str, Any]:
+    """Run remains probe + file writes off the event loop."""
+    import asyncio
+
+    return await asyncio.to_thread(write_family_signals, now)
 
 
 def read_signal(root: Path) -> Optional[dict[str, Any]]:

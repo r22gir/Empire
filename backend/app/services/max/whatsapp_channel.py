@@ -260,6 +260,24 @@ def is_allowlisted(wa_id: str | None) -> bool:
     return any(item.endswith(tail) and len(tail) == 10 for item in allowed)
 
 
+def mark_founder_whatsapp_activity(sender: str | None, source: str = "whatsapp_inbound") -> bool:
+    """Mark founder activity for allowlisted WhatsApp senders.
+
+    Covers replies handled before Max (quote intake, photo status) as well
+    as max_chat. Returns True when a mark was requested.
+    """
+    if not is_allowlisted(sender):
+        return False
+    try:
+        from app.services.founder_activity import maybe_mark_founder_active
+
+        maybe_mark_founder_active(True, source)
+    except Exception:
+        logger.debug("founder activity mark on WhatsApp skipped", exc_info=True)
+        return False
+    return True
+
+
 def _load_state() -> dict[str, Any]:
     path = _state_path()
     if not path.is_file():
@@ -2085,6 +2103,9 @@ async def process_webhook(
                 "sent": False,
             })
             continue
+        # Quote intake / photo status / job-file replies happen before Max.
+        # Mark here so those founder actions count even when max_chat is skipped.
+        mark_founder_whatsapp_activity(sender, "whatsapp_inbound")
         fields = _inbound_log_fields(message)
         from app.services.max.whatsapp_log import (
             combined_job_hint,

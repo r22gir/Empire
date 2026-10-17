@@ -69,16 +69,21 @@ async def luxe_public_edge_middleware(request: Request, call_next):
 async def founder_activity_middleware(request: Request, call_next):
     """Record founder presence from Cloudflare Access / verified Studio session.
 
-    Rate-limited inside mark_founder_active (1 write / 30s). Never logs
-    tokens, PINs, or message content.
+    Marks only real actions (non-GET). Dashboard polls such as quotes-v2,
+    jobs, and finance/dashboard must not keep the founder active forever.
+    Chat, voice, and PIN mark on their own handlers. Rate-limited inside
+    mark_founder_active (1 write / 30s). Never logs tokens, PINs, or
+    message content.
     """
     try:
         from app.edition import is_family_edition
         if not is_family_edition():
             from app.services.max.founder_session import resolve_founder_session
-            if resolve_founder_session(request).get("verified"):
-                from app.services.founder_activity import maybe_mark_founder_active
-                maybe_mark_founder_active(True, "cf_access")
+            from app.services.founder_activity import mark_http_founder_activity
+            mark_http_founder_activity(
+                request.method,
+                bool(resolve_founder_session(request).get("verified")),
+            )
     except Exception:
         pass
     return await call_next(request)
@@ -606,8 +611,8 @@ async def start_background_services():
     async def _family_signal_loop():
         while True:
             try:
-                from app.services.family_signal import write_family_signals
-                write_family_signals()
+                from app.services.family_signal import write_family_signals_offthread
+                await write_family_signals_offthread()
             except Exception as loop_error:
                 print(f"✗ family signal: {loop_error}")
             await asyncio.sleep(60)
