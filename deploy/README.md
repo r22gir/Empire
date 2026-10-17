@@ -6,7 +6,7 @@ This directory is install-only. It does not deploy application code.
 | Script | Purpose |
 |---|---|
 | `backup_family_data.sh` | Nightly encrypted `tar.zst` of family trees onto BACKUP1, restore-test, retention, optional rclone |
-| `disk_watch.sh` | 80% warn / 90% critical on `/`, `/data`, and `/media/rg/BACKUP1`; dry-run cleanup list |
+| `disk_watch.sh` | 80% warn / 90% critical on `/`, `/data`, and `/media/rg/BACKUP1` (df/mount); du/find `/` and `/data` only unless `DISK_WATCH_SCAN_BACKUP=1`; dry-run cleanup list |
 
 Systemd user units live in `systemd/user/`. The short host runbook is
 [`docs/runbooks/empiredell-family-data.md`](../docs/runbooks/empiredell-family-data.md).
@@ -158,7 +158,16 @@ archive, failed restore-test, failed rclone).
 
 ## Install (disk watch)
 
+On the Dell, `~/empire-repo` is a holding checkout without `deploy/`. The
+live script stays at `~/empire-ops/deploy/disk_watch.sh`. Copy the README
+and family-data runbook next to that ops tree so `Documentation=` resolves.
+
 ```bash
+mkdir -p ~/empire-ops/deploy ~/empire-ops/docs/runbooks
+cp deploy/disk_watch.sh ~/empire-ops/deploy/disk_watch.sh
+cp deploy/README.md ~/empire-ops/deploy/README.md
+cp docs/runbooks/empiredell-family-data.md \
+   ~/empire-ops/docs/runbooks/empiredell-family-data.md
 cp deploy/systemd/user/empire-disk-watch.service \
    deploy/systemd/user/empire-disk-watch.timer \
    ~/.config/systemd/user/
@@ -166,8 +175,32 @@ systemctl --user daemon-reload
 systemctl --user enable --now empire-disk-watch.timer
 ```
 
-Watches `/`, `/data`, and `/media/rg/BACKUP1`. If BACKUP1 is unplugged the
-watch treats that as a **warning** (it will not `df` the empty stub on `/`).
+Watches `/`, `/data`, and `/media/rg/BACKUP1` (df / mount). du and grower
+`find` run on `/` and `/data` only. BACKUP1 is skipped for those scans
+unless `DISK_WATCH_SCAN_BACKUP=1` (vfat + thousands of `recup_dir.*`
+trees used to make hourly runs miss alerts). Bound each du with
+`timeout` / `nice` / `ionice` (`DU_TIMEOUT_S`, default 60). Top-N uses
+an `awk` reader that consumes the whole ranking so systemd's
+`IgnoreSIGPIPE=yes` cannot turn a closed pipe into exit 2 (reserved for
+real critical usage).
+
+The unit keeps `ExecStart` on the ops copy and points `Documentation=`
+at the README/runbook copies there (not `~/empire-repo`, which has no
+`deploy/` on this host):
+
+```
+Documentation=file://%h/empire-ops/deploy/README.md
+Documentation=file://%h/empire-ops/docs/runbooks/empiredell-family-data.md
+ExecStart=%h/empire-ops/deploy/disk_watch.sh
+```
+
+After Rafael's yes, copy the merged script, this README, and the runbook
+into `~/empire-ops` as above, then
+`systemctl --user start empire-disk-watch.service` once and read the
+journal.
+
+If BACKUP1 is unplugged the watch treats that as a **warning** (it will
+not `df` the empty stub on `/`).
 
 Alerts use the existing Max notification API
 (`POST /api/v1/notifications/internal`) and, when `SENDGRID_API_KEY` or
