@@ -554,6 +554,12 @@ def _family_text_block(edition: str, add_tokens: int, month: str, rows: list[dic
     per = edition_text_share_pct()
     mine_pct = (mine / pool) * 100.0 if pool else 0.0
     if mine_pct > per + 1e-9:
+        try:
+            from app.services.instance_usage import family_overage_allowed, is_background_request
+            if family_overage_allowed(mine_pct) and not is_background_request(kind="text"):
+                return None
+        except Exception:
+            pass
         return bilingual(
             f"Tope de esta edición: Max-e y Maxine pueden usar cada una el {per:g}% "
             f"del cupo de texto MiniMax (el mismo 20% que INSTANCE_USAGE_CAP_PCT). "

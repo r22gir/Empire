@@ -12,6 +12,8 @@ type Usage = {
   used_percent?: number | null;
   remaining_percent?: number | null;
   limit_note_es?: string;
+  overage_active?: boolean;
+  meter_label_es?: string;
 };
 
 export default function UsageCard() {
@@ -35,14 +37,17 @@ export default function UsageCard() {
   if (!family) return null;
   const note = usage?.limit_note_es || `Tu uso está limitado al ${usage?.cap_percent ?? 20}% del uso total de MiniMax.`;
 
-  const warn = usage?.level === 'warn' || usage?.level === 'blocked';
+  const warn = usage?.level === 'warn' || usage?.level === 'paused' || usage?.level === 'blocked';
+  const extra = usage?.level === 'overage';
+  const label = usage?.meter_label_es
+    || (extra ? 'Tiempo extra (Rafael no está)' : usage?.level === 'paused' ? 'En pausa: Rafael está usando Max' : '');
 
   return (
     <section
       aria-label="Uso"
       style={{
-        background: warn ? '#fff7ed' : '#fff',
-        border: `1px solid ${usage?.level === 'blocked' ? '#c2410c' : warn ? '#fdba74' : '#e5e2dc'}`,
+        background: extra ? '#f0fdf4' : warn ? '#fff7ed' : '#fff',
+        border: `1px solid ${usage?.level === 'blocked' || usage?.level === 'paused' ? '#c2410c' : extra ? '#86efac' : warn ? '#fdba74' : '#e5e2dc'}`,
         borderRadius: 12,
         padding: '12px 14px',
         minWidth: 220,
@@ -53,12 +58,13 @@ export default function UsageCard() {
         {note}
         {typeof usage?.used_percent === 'number' ? ` · ${usage.used_percent}% del total usado` : ''}
         {typeof usage?.remaining_percent === 'number' ? ` · queda ${usage.remaining_percent}% hasta el tope` : ''}
+        {label ? ` · ${label}` : ''}
       </div>
       <a href="/uso" style={{ display: 'inline-block', marginTop: 8, fontSize: 12, color: '#9a7b2f', fontWeight: 700 }}>
         Ver el uso del mes
       </a>
       {usage?.message ? (
-        <p style={{ margin: '8px 0 0', fontSize: 12, color: usage.level === 'blocked' ? '#9a3412' : '#9a7b2f' }}>
+        <p style={{ margin: '8px 0 0', fontSize: 12, color: usage.level === 'blocked' || usage.level === 'paused' ? '#9a3412' : '#9a7b2f' }}>
           {usage.message}
         </p>
       ) : null}

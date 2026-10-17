@@ -47,15 +47,21 @@ USD for display and for case 1 is:
 
     tokens / 1_000_000 * MINIMAX_USD_PER_MILLION_TOKENS
 
-``level`` is compared to the cap as a share of total:
+``level`` is compared to the **base** cap (20) as a share of total.
+The old hard wall is replaced by a Rafael-aware soft cap:
 
-- ``ok``     — ``used_percent`` < 80% of ``cap_percent`` (under 16 when cap is 20)
-- ``warn``   — at least 80% of the cap, still under the cap
-- ``blocked``— ``used_percent`` ≥ ``cap_percent``, or this instance used the whole baseline
+- ``ok``      — ``used_percent`` < 80% of ``cap_percent`` (under 16 when cap is 20)
+- ``warn``    — at least 80% of the cap, still under the cap
+- ``overage`` — over the base cap, Studio signal allows extra, under the absolute max
+- ``paused``  — over the base cap and extra is not allowed (Rafael active,
+  reserve low, stale/missing signal, or past ``FAMILY_ABSOLUTE_MAX_PCT``)
+- ``blocked`` — only ``total_spend_hit`` (this instance used the whole baseline)
 
-At ``blocked``, heavy work is refused in Spanish; a short chat reply
-still runs unless this instance has used the whole baseline
-(the total spend limit).
+Overage (interactive chat/voice by the owner) is allowed only while
+``family_overage_allowed()`` is true. Background kinds
+(``desk_task``, ``job``, ``generate``, ``social``, scheduler-sourced)
+never run on overage. Missing / stale / malformed founder signal
+fail closed (no overage).
 
 ``GET /api/v1/edition/usage`` is ``public_usage_summary()``: used
 percent of EmpireBox total, remaining percent until the cap, level,
@@ -70,11 +76,60 @@ from datetime import datetime, timezone
 from typing import Optional
 
 HEAVY_KINDS = frozenset({"job", "generate", "desk_task", "vision", "social", "heavy"})
+BACKGROUND_KINDS = frozenset({"desk_task", "job", "generate", "social"})
 DEFAULT_BASELINE_MONTHLY_TOKENS = 10_000_000.0
+MENSAJE_OVERAGE = (
+    "Manito, ya pasaste tu 20% del mes. Sigues con tiempo extra "
+    "mientras Rafael no está usando Max."
+)
+MENSAJE_PAUSED = (
+    "Manito, ya usaste tu 20% del mes y Rafael está usando Max ahora, "
+    "así que lo extra queda en pausa. Vuelve a intentar en un rato."
+)
+METER_OVERAGE_ES = "Tiempo extra (Rafael no está)"
+METER_PAUSED_ES = "En pausa: Rafael está usando Max"
 
 
 def _now() -> datetime:
     return datetime.now(timezone.utc)
+
+
+def absolute_max_percent() -> float:
+    """Safety ceiling above the base 20%. Confirm with Rafael; default 40."""
+    raw = os.getenv("FAMILY_ABSOLUTE_MAX_PCT", "").strip() or "40"
+    try:
+        value = float(raw)
+    except ValueError:
+        value = 40.0
+    return max(cap_percent(), value)
+
+
+def family_overage_allowed(used_percent: Optional[float] = None) -> bool:
+    """True when Studio's signal allows extra AND the edition is under the ceiling.
+
+    Name is stable for briefs 2a / 7a. Fail closed on a missing signal.
+    """
+    from app.edition import is_family_edition
+    from app.services.founder_signal import read_founder_signal
+
+    if not is_family_edition():
+        return False
+    signal = read_founder_signal()
+    if not signal.get("overage_allowed"):
+        return False
+    if used_percent is None:
+        used_percent = _used_percent()
+    if used_percent is None:
+        return False
+    return float(used_percent) < absolute_max_percent()
+
+
+def is_background_request(*, kind: str = "", source: str = "") -> bool:
+    labels = {(kind or "").strip().lower(), (source or "").strip().lower()}
+    if labels & BACKGROUND_KINDS:
+        return True
+    src = (source or "").strip().lower()
+    return "scheduler" in src
 
 
 def cap_percent() -> float:
@@ -324,6 +379,26 @@ def _period_totals(conn, column: str, value: str) -> dict:
     }
 
 
+def _used_percent() -> Optional[float]:
+    """This instance's share of the baseline pie. No level / signal logic."""
+    from app.edition import is_family_edition
+
+    if not is_family_edition():
+        return None
+    basis, baseline = _baseline()
+    if not baseline or float(baseline) <= 0:
+        return 0.0
+    conn = _connect()
+    if conn is None:
+        return 0.0
+    try:
+        month = _period_totals(conn, "month", _now().strftime("%Y-%m"))
+    finally:
+        conn.close()
+    used = month["cost_usd"] if basis == "usd" else float(month["tokens"])
+    return round(used / float(baseline) * 100.0, 1)
+
+
 def usage_summary() -> dict:
     from app.edition import edition_name, is_family_edition
 
@@ -384,14 +459,13 @@ def usage_summary() -> dict:
                 "También los mensajes cortos quedan en pausa."
             )
         elif used_percent >= pct:
-            level = "blocked"
-            message = (
-                f"Llegamos al tope de esta instancia "
-                f"({pct:g}% del uso total de EmpireBox este mes). "
-                f"Esta instancia ya usó el {used_percent:g}% del total. "
-                "Los trabajos largos quedan en pausa. "
-                "Puedo seguir contestando mensajes cortos."
-            )
+            extra_ok = family_overage_allowed(used_percent)
+            if extra_ok:
+                level = "overage"
+                message = MENSAJE_OVERAGE
+            else:
+                level = "paused"
+                message = MENSAJE_PAUSED
         elif used_percent >= warn_at:
             level = "warn"
             message = (
@@ -428,6 +502,7 @@ PUBLIC_USAGE_KEYS = (
     "level",
     "message",
     "limit_note_es",
+    "overage_active",
 )
 
 
@@ -439,7 +514,15 @@ def public_usage_summary() -> dict:
     cap_percent is the maximum share this instance may use (default 20).
     """
     summary = usage_summary()
-    return {key: summary.get(key) for key in PUBLIC_USAGE_KEYS}
+    public = {key: summary.get(key) for key in PUBLIC_USAGE_KEYS}
+    public["overage_active"] = summary.get("level") == "overage"
+    if summary.get("level") == "overage":
+        public["meter_label_es"] = METER_OVERAGE_ES
+    elif summary.get("level") == "paused":
+        public["meter_label_es"] = METER_PAUSED_ES
+    else:
+        public["meter_label_es"] = ""
+    return public
 
 
 def is_heavy_request(*, kind: str, text: str, desk: Optional[str], tools: bool, source: str, image: bool) -> bool:
@@ -460,16 +543,21 @@ def enforce_usage_cap(
     source: str = "",
     image: bool = False,
 ) -> Optional[str]:
-    """Return a Spanish refusal for heavy work at 100%, or None to proceed."""
+    """Refuse over-base background always; interactive only when overage is allowed."""
     from app.edition import is_family_edition
 
     if not is_family_edition():
         return None
     summary = usage_summary()
-    if summary["level"] != "blocked":
-        return None
     if summary.get("total_spend_hit"):
         return summary["message"]
-    if not is_heavy_request(kind=kind, text=text, desk=desk, tools=tools, source=source, image=image):
+    used = summary.get("used_percent")
+    pct = summary.get("cap_percent") or cap_percent()
+    if used is None or float(used) < float(pct):
+        return None
+    # Over the base 20%. Background never uses overage.
+    if is_background_request(kind=kind, source=source):
+        return summary["message"]
+    if family_overage_allowed(used):
         return None
     return summary["message"]
