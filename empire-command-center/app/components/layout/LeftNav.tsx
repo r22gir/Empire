@@ -186,7 +186,7 @@ export function editionNavGroups(edition: string = editionFromEnv()): NavGroup[]
       if (item.id === 'cibernettic' && !ampEdition) return false;
       if (item.id === 'archivo' && !ampEdition && !maxineEdition) return false;
       if (item.id === 'ayuda' && !ampEdition && !maxineEdition) return false;
-      if (item.id === 'pedir-cursor' && !ampEdition && !maxineEdition) return false;
+      if (item.id === 'pedir-cursor' && !ampEdition) return false;
       if (item.id === 'family-help' && (ampEdition || maxineEdition)) return false;
       if (item.id === 'minimax-usage' && (ampEdition || maxineEdition)) return false;
       if (maxineEdition) return !MAXINE_HIDDEN_NAV.has(item.id);

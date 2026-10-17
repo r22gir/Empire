@@ -27,10 +27,12 @@ def _env(monkeypatch, tmp_path, edition="amp"):
     monkeypatch.setenv("AMP_JWT_SECRET", "test-secret")
     monkeypatch.setenv("INSTANCE_USAGE_CAP_PCT", "20")
     monkeypatch.setenv("EMPIRE_USAGE_BASELINE_MONTHLY_TOKENS", "10000000")
-    monkeypatch.setenv("CURSOR_REQUEST_EST_TOKENS", "150000")
+    monkeypatch.setenv("CURSOR_REQUEST_EST_TOKENS", "60000")
     monkeypatch.setenv("FAMILY_ABSOLUTE_MAX_PCT", "40")
     monkeypatch.delenv("EMPIRE_USAGE_BASELINE_MONTHLY_USD", raising=False)
     monkeypatch.setattr("app.services.instance_usage._usage_data_roots", lambda: [root])
+    from app.services import cursor_requests as cr
+    monkeypatch.setattr(cr, "EXPECTED_DATA_DIRS", {"amp": str(root)})
     return root
 
 
@@ -146,7 +148,7 @@ def test_soft_cap_accept_and_reject(monkeypatch, tmp_path):
         "SELECT kind, provider, model, input_tokens FROM llm_usage WHERE kind = 'cursor_request'"
     ).fetchone()
     conn.close()
-    assert row == ("cursor_request", "cursor", "cloud-agent", 150000)
+    assert row == ("cursor_request", "cursor", "cloud-agent", 60000)
 
     usage_db = root / "usage" / "usage.db"
     if usage_db.is_file():
@@ -215,3 +217,58 @@ def test_no_outbound_from_create(monkeypatch, tmp_path):
         assert False
     except RuntimeError as exc:
         assert "must not send email" in str(exc)
+
+
+def test_default_est_tokens_is_60000(monkeypatch, tmp_path):
+    root = _env(monkeypatch, tmp_path)
+    monkeypatch.delenv("CURSOR_REQUEST_EST_TOKENS", raising=False)
+    from app.services.cursor_requests import DEFAULT_EST_TOKENS, est_tokens
+    assert DEFAULT_EST_TOKENS == 60_000
+    assert est_tokens() == 60_000
+
+
+def test_declined_refunds_estimate(monkeypatch, tmp_path):
+    root = _env(monkeypatch, tmp_path)
+    from app.services.cursor_requests import create, set_status_cli
+    import sqlite3
+
+    item = create(title="No se hará", body="Chief e lo declina y se devuelve el estimado.")
+    set_status_cli(item["id"], "declined")
+    conn = sqlite3.connect(root / "usage" / "usage.db")
+    tokens = conn.execute(
+        "SELECT COALESCE(SUM(input_tokens), 0) FROM llm_usage WHERE kind = 'cursor_request'"
+    ).fetchone()[0]
+    conn.close()
+    assert tokens == 0
+
+
+def test_validate_edition_data_dir_has_no_pytest_bypass(monkeypatch, tmp_path):
+    _env(monkeypatch, tmp_path)
+    from app.services import cursor_requests as cr
+
+    monkeypatch.setattr(cr, "EXPECTED_DATA_DIRS", {"amp": "/data/amp"})
+    monkeypatch.setenv("EMPIRE_EDITION", "amp")
+    monkeypatch.setenv("EMPIRE_DATA_DIR", str(tmp_path / "amp"))
+    monkeypatch.setenv("PYTEST_CURRENT_TEST", "test_validate_edition_data_dir_has_no_pytest_bypass")
+    try:
+        cr.validate_edition_data_dir()
+        assert False, "tmp dir must not pass without monkeypatched expected path"
+    except cr.CursorRequestError as exc:
+        assert "EMPIRE_DATA_DIR" in str(exc)
+    assert "maxine" not in cr.EXPECTED_DATA_DIRS
+
+
+def test_pedir_cursor_copy_spanish_manito():
+    text = Path(__file__).resolve().parents[2].joinpath(
+        "empire-command-center/app/lib/pedirCursorCopy.ts"
+    ).read_text(encoding="utf-8")
+    assert "Pedir a Cursor" in text
+    assert "no lanza nada solo" in text
+    assert "Rafael da el sí final" in text
+    assert "¿Qué necesitas y por qué?" in text
+    assert "En cola" in text
+    assert "PR listo para revisar" in text
+    assert "Aprobado por ti" in text
+    assert "Pediste cambios" in text
+    assert "No se hará" in text
+    assert "Guárdalo y lo mandas en un rato" in text

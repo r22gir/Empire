@@ -40,7 +40,7 @@ MAX_FILES = 5
 MAX_FILE_BYTES = 5 * 1024 * 1024
 TITLE_MAX = 120
 BODY_MAX = 4000
-DEFAULT_EST_TOKENS = 150_000
+DEFAULT_EST_TOKENS = 60_000
 MENSAJE_PAUSED = (
     "Manito, ya usaste tu 20% del mes y Rafael está usando Max ahora. "
     "Guárdalo y lo mandas en un rato."
@@ -51,7 +51,7 @@ MENSAJE_APPROVED = (
 MENSAJE_CHANGES = (
     "Listo, manito. Pediste cambios. Chief e lo vuelve a revisar."
 )
-EXPECTED_DATA_DIRS = {"amp": "/data/amp", "maxine": "/data/maxine"}
+EXPECTED_DATA_DIRS = {"amp": "/data/amp"}
 
 
 class CursorRequestError(Exception):
@@ -134,7 +134,7 @@ def _row(row: sqlite3.Row) -> dict:
 
 
 def validate_edition_data_dir() -> None:
-    """CLI: EMPIRE_DATA_DIR must match EMPIRE_EDITION. Tests under pytest may use tmp."""
+    """CLI: EMPIRE_DATA_DIR must match EMPIRE_EDITION. Amp only."""
     edition = (os.getenv("EMPIRE_EDITION") or "").strip().lower()
     data = (os.getenv("EMPIRE_DATA_DIR") or "").strip()
     expected = EXPECTED_DATA_DIRS.get(edition)
@@ -148,8 +148,6 @@ def validate_edition_data_dir() -> None:
     except OSError:
         expected_resolved = expected
     if resolved == expected_resolved:
-        return
-    if os.getenv("PYTEST_CURRENT_TEST") and Path(resolved).name == edition:
         return
     raise CursorRequestError(
         f"EMPIRE_DATA_DIR debe ser {expected} para EMPIRE_EDITION={edition}."
@@ -409,7 +407,28 @@ def _apply_status(
         conn.commit()
     finally:
         conn.close()
+    if new_status == "declined":
+        _refund_estimate(item)
     return get(req_id)
+
+
+def _refund_estimate(item: dict) -> None:
+    """Undo the create-time token estimate when Chief e declines."""
+    from app.services.instance_usage import record_usage
+
+    tokens = int(item.get("est_tokens") or 0)
+    if tokens <= 0:
+        return
+    history = item.get("history") or []
+    if any(isinstance(h, dict) and h.get("status") == "declined" for h in history[:-1]):
+        return
+    record_usage(
+        input_tokens=-tokens,
+        output_tokens=0,
+        model="cloud-agent",
+        provider="cursor",
+        kind="cursor_request",
+    )
 
 
 def set_status_cli(

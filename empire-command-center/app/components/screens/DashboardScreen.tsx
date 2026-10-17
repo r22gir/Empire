@@ -42,7 +42,7 @@ export default function DashboardScreen({ activeTab }: { activeTab: BusinessTab 
       </div>
       <div style={{ marginTop: 12, display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'flex-start' }}>
         {family ? <UsageCard /> : null}
-        {family ? (
+        {edition === 'amp' ? (
           <a
             href="/pedir-cursor"
             style={{
