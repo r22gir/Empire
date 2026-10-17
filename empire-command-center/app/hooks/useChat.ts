@@ -108,7 +108,7 @@ export function useChat() {
     input: string,
     imageFilename?: string | null,
     desk?: string,
-    channel?: string,
+    usageSource?: string,
   ) => {
     if (!input.trim() || streamingRef.current) return;
 
@@ -154,7 +154,8 @@ export function useChat() {
         model: 'auto',
         history: historySlice,
         conversation_id: chatIdRef.current || undefined,
-        channel: channel || 'web',
+        channel: 'dashboard',
+        usage_source: usageSource || 'web',
       };
       if (desk) body.desk = desk;
       if (imageFilename) body.image_filename = imageFilename;

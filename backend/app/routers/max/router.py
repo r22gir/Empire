@@ -803,8 +803,17 @@ class ChatRequest(BaseModel):
     desk: Optional[str] = None
     conversation_id: Optional[str] = None
     channel: Optional[str] = None  # "telegram", "web", etc.
+    usage_source: Optional[str] = None  # "web" | "voice" — soft cap / meter only
     chat_id: Optional[str] = None  # Telegram chat ID for founder detection
     presentation: bool = False  # Presentation Mode: short speech, detail on the stage
+
+
+def _meter_usage_source(request: ChatRequest) -> str:
+    """Soft-cap / meter identity only. Never used for privileges or history."""
+    explicit = (getattr(request, "usage_source", None) or "").strip()
+    if explicit:
+        return explicit
+    return (request.channel or "").strip()
 
 
 class RoutingStateUpdateRequest(BaseModel):
@@ -2843,7 +2852,7 @@ async def _chat_with_max_service_impl(
             f"path in telegram_bot._chat_with_max is the correct shape."
         )
 
-    _usage_source = (request.channel or "").strip() or "web"
+    _usage_source = _meter_usage_source(request)
     request.channel = canonical_channel or request.channel
     if canonical_chat_id is not None:
         request.chat_id = canonical_chat_id
@@ -4067,7 +4076,7 @@ async def chat_stream(request: ChatRequest, http_request: Request):
 
 async def _chat_stream_impl(request: ChatRequest, http_request: Request | None = None):
     """SSE streaming endpoint body (see chat_stream)."""
-    _usage_source = (request.channel or "").strip() or "web"
+    _usage_source = _meter_usage_source(request)
     msg_ctx = {"channel": request.channel or "", "chat_id": request.chat_id or ""}
     founder = is_founder_message(msg_ctx)
     if founder:

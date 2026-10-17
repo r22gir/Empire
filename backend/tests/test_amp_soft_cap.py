@@ -241,8 +241,8 @@ def test_remains_unavailable_is_not_reserve_low(monkeypatch, tmp_path):
     assert enforce_usage_cap(text="hola", source="web") == MENSAJE_PAUSED_REMAINS
 
 
-def test_max_chat_and_stream_overage_with_frontend_channel(monkeypatch, tmp_path):
-    """Juan's /max/chat and stream (default frontend channel) get overage; desk does not."""
+def test_max_chat_and_stream_overage_with_usage_source(monkeypatch, tmp_path):
+    """Juan's chats send usage_source separately; channel stays dashboard."""
     _env(monkeypatch, tmp_path)
     _set_used(250)
     _write_signal(tmp_path, overage_allowed=True, founder_active=False)
@@ -293,15 +293,28 @@ def test_max_chat_and_stream_overage_with_frontend_channel(monkeypatch, tmp_path
     app.include_router(router, prefix="/api/v1")
     client = TestClient(app)
 
-    chat = client.post("/api/v1/max/chat", json={"message": "hola manito", "channel": "web"})
+    chat = client.post(
+        "/api/v1/max/chat",
+        json={"message": "hola manito", "channel": "dashboard", "usage_source": "web"},
+    )
     assert chat.status_code == 200, chat.text
     assert chat.json()["response"] == "ok manito"
     assert chat.json()["model_used"] != "usage-cap"
 
-    stream = client.post("/api/v1/max/chat/stream", json={"message": "hola manito", "channel": "web"})
+    stream = client.post(
+        "/api/v1/max/chat/stream",
+        json={"message": "hola manito", "channel": "dashboard", "usage_source": "web"},
+    )
     assert stream.status_code == 200, stream.text
     assert "ok manito" in stream.text
     assert "usage-cap" not in stream.text
+
+    voice = client.post(
+        "/api/v1/max/chat/stream",
+        json={"message": "hola manito", "channel": "dashboard", "usage_source": "voice"},
+    )
+    assert voice.status_code == 200, voice.text
+    assert "ok manito" in voice.text
 
     old_client = client.post(
         "/api/v1/max/chat/stream",
@@ -312,20 +325,197 @@ def test_max_chat_and_stream_overage_with_frontend_channel(monkeypatch, tmp_path
 
     sources = {src for _kind, src, _desk in seen}
     assert "web" in sources
+    assert "voice" in sources
     assert "dashboard" in sources
     assert enforce_usage_cap(kind="chat", desk="finance", source="") is not None
     desk_http = client.post(
         "/api/v1/max/chat",
-        json={"message": "hola manito", "channel": "web", "desk": "finance"},
+        json={"message": "hola manito", "channel": "dashboard", "usage_source": "web", "desk": "finance"},
     )
     assert desk_http.status_code == 200
     assert desk_http.json()["model_used"] == "usage-cap"
     assert desk_http.json()["response"] != "ok manito"
 
 
-def test_use_chat_default_channel_is_web():
+def test_use_chat_keeps_dashboard_channel_and_sends_usage_source():
     text = Path(__file__).resolve().parents[2].joinpath(
         "empire-command-center/app/hooks/useChat.ts"
     ).read_text(encoding="utf-8")
-    assert "channel || 'web'" in text
-    assert "channel || 'dashboard'" not in text
+    assert "channel: 'dashboard'" in text
+    assert "usage_source: usageSource || 'web'" in text
+    assert "channel || 'web'" not in text
+
+
+def test_concurrent_desk_during_web_chat_does_not_race(monkeypatch, tmp_path):
+    """A desk call mid-web-chat must not steal the web ContextVar (or vice versa)."""
+    import asyncio
+
+    _env(monkeypatch, tmp_path)
+    monkeypatch.setenv("MINIMAX_METER_DIR", str(tmp_path / "meter"))
+    monkeypatch.setenv("MINIMAX_REMAINS_STUB", "ok")
+    monkeypatch.setenv("MINIMAX_REMAINS_PROBE", "0")
+    monkeypatch.setenv("MINIMAX_TEXT_POOL_FLOOR", "1000")
+    monkeypatch.setenv("MINIMAX_EDITION_TEXT_SHARE_PCT", "20")
+    (tmp_path / "meter").mkdir(parents=True, exist_ok=True)
+
+    from app.services.max.ai_router import AIMessage, _meter_ctx, ai_router, current_meter_context
+
+    seen: list[tuple[str, object]] = []
+    barrier = asyncio.Barrier(2)
+
+    async def web_chat():
+        token = _meter_ctx.set(("web", None))
+        try:
+            await barrier.wait()
+            await asyncio.sleep(0)
+            seen.append(("web", current_meter_context()))
+            reservation = ai_router._reserve_minimax_text(
+                [AIMessage(role="user", content="hola manito")]
+            )
+            seen.append(("web-reserve", (not reservation.blocked, reservation.message)))
+        finally:
+            _meter_ctx.reset(token)
+
+    async def desk_call():
+        token = _meter_ctx.set(("", "finance"))
+        try:
+            await barrier.wait()
+            await asyncio.sleep(0)
+            seen.append(("desk", current_meter_context()))
+            reservation = ai_router._reserve_minimax_text(
+                [AIMessage(role="user", content="audit books")]
+            )
+            seen.append(("desk-reserve", (reservation.blocked, reservation.message)))
+        finally:
+            _meter_ctx.reset(token)
+
+    _set_used(250)
+    _write_signal(tmp_path, overage_allowed=True, founder_active=False)
+    from app.services.minimax_meter import record
+    record(kind="text", edition="amp", model="MiniMax-M3", input_tokens=250, output_tokens=0)
+
+    asyncio.run(asyncio.gather(web_chat(), desk_call()))
+    ctxs = {label: value for label, value in seen if label in {"web", "desk"}}
+    assert ctxs["web"] == ("web", None)
+    assert ctxs["desk"] == ("", "finance")
+    assert getattr(ai_router, "_meter_source", None) in (None, "")
+    web_ok, _web_msg = next(v for label, v in seen if label == "web-reserve")
+    desk_blocked, _desk_msg = next(v for label, v in seen if label == "desk-reserve")
+    assert web_ok is True
+    assert desk_blocked is True
+
+
+def test_minimax_chat_bypass_inside_chat_context_is_refused(monkeypatch, tmp_path):
+    """_minimax_chat without a set ContextVar is background, even if leftover attrs say web."""
+    _env(monkeypatch, tmp_path)
+    _set_used(250)
+    _write_signal(tmp_path, overage_allowed=True, founder_active=False)
+    monkeypatch.setenv("MINIMAX_METER_DIR", str(tmp_path / "meter"))
+    monkeypatch.setenv("MINIMAX_REMAINS_STUB", "ok")
+    monkeypatch.setenv("MINIMAX_REMAINS_PROBE", "0")
+    monkeypatch.setenv("MINIMAX_TEXT_POOL_FLOOR", "1000")
+    monkeypatch.setenv("MINIMAX_EDITION_TEXT_SHARE_PCT", "20")
+    (tmp_path / "meter").mkdir(parents=True, exist_ok=True)
+    from app.services.minimax_meter import record
+    record(kind="text", edition="amp", model="MiniMax-M3", input_tokens=250, output_tokens=0)
+
+    from app.services.max.ai_router import AIMessage, _meter_ctx, ai_router, current_meter_context
+    from app.services.minimax_meter import MeterBlocked
+
+    # Leftover instance attrs from the old shared-object design must not grant overage.
+    ai_router._meter_source = "web"
+    ai_router._meter_desk = None
+    assert current_meter_context() == ("", None)
+
+    reservation = ai_router._reserve_minimax_text(
+        [AIMessage(role="user", content="bypass spend")]
+    )
+    assert reservation.blocked is True
+
+    # Inside a real chat() context the same leftover attrs are ignored; ContextVar wins.
+    token = _meter_ctx.set(("web", None))
+    try:
+        assert current_meter_context() == ("web", None)
+        ok = ai_router._reserve_minimax_text(
+            [AIMessage(role="user", content="typed chat")]
+        )
+        assert ok.blocked is False
+        # A nested bypass that clears the ContextVar is refused again.
+        _meter_ctx.reset(token)
+        token = None
+        bypass = ai_router._reserve_minimax_text(
+            [AIMessage(role="user", content="bypass after reset")]
+        )
+        assert bypass.blocked is True
+    finally:
+        if token is not None:
+            _meter_ctx.reset(token)
+
+    async def _call_minimax():
+        try:
+            await ai_router._minimax_chat([AIMessage(role="user", content="direct bypass")])
+        except MeterBlocked:
+            return "refused"
+        except Exception as exc:
+            return f"other:{type(exc).__name__}"
+        return "allowed"
+
+    import asyncio
+    assert asyncio.run(_call_minimax()) == "refused"
+
+
+def test_dashboard_stream_still_shows_pin_card(monkeypatch, tmp_path):
+    """Dashboard stream is not founder (same as base); PIN card is emitted."""
+    from app.services.max.guardrails import is_founder_message
+
+    assert is_founder_message({"channel": "dashboard"}) is False
+    assert is_founder_message({"channel": "web"}) is True
+    assert is_founder_message({"channel": "web_cc"}) is True
+
+    monkeypatch.setenv("FOUNDER_PIN", "918273")
+    monkeypatch.setattr("app.services.max.tool_executor.FOUNDER_PIN", "918273")
+    _env(monkeypatch, tmp_path)
+
+    from app.services.max.ai_router import ai_router
+
+    async def fake_stream(
+        messages, model=None, image_filename=None, desk=None, system_prompt=None,
+        tenant_id="founder", source="", conversation_id="",
+    ):
+        yield (
+            "```tool\n"
+            '{"tool": "shell_execute", "command": "pwd"}\n'
+            "```",
+            "MiniMax-M3",
+        )
+
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    from app.routers.max.router import router
+
+    monkeypatch.setattr(ai_router, "chat_stream", fake_stream)
+
+    app = FastAPI()
+    app.include_router(router, prefix="/api/v1")
+    client = TestClient(app)
+
+    stream = client.post(
+        "/api/v1/max/chat/stream",
+        json={
+            "message": "run pwd on the server",
+            "channel": "dashboard",
+            "usage_source": "web",
+        },
+    )
+    assert stream.status_code == 200, stream.text
+    assert "pin_required" in stream.text
+    assert "resume_id" in stream.text
+    # usage_source must not flip privileges: web stream would be founder on /chat,
+    # but this path is /stream with channel=dashboard.
+    web_as_channel = client.post(
+        "/api/v1/max/chat/stream",
+        json={"message": "run pwd on the server", "channel": "web"},
+    )
+    assert web_as_channel.status_code == 200
+    # Base: dashboard asks for the card. Do not require web-as-channel to skip it
+    # (PIN gate runs for founder too); just prove dashboard still emits it.

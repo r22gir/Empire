@@ -93,7 +93,7 @@ interface Props {
   streamingContent: string;
   streamingSteps?: string[];
   streamingModel: string;
-  onSend: (msg: string, imageFilename?: string | null, channel?: string) => void;
+  onSend: (msg: string, imageFilename?: string | null, usageSource?: string) => void;
   onStop: () => void;
   onScreenChange?: (screen: string) => void;
   onProductNavigate?: (product: string, screen?: string, section?: string) => void;
