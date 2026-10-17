@@ -807,13 +807,21 @@ function ProspectFinderSection() {
   );
 }
 
-function DraftReviewPanel({ campaignId }: { campaignId: number }) {
+function DraftReviewPanel({ campaignId, family }: { campaignId: number; family?: boolean }) {
   const [drafts, setDrafts] = useState<any[]>([]);
   const [selectedDraft, setSelectedDraft] = useState<any>(null);
   const [sending, setSending] = useState<number | null>(null);
   const [editMode, setEditMode] = useState(false);
   const [editSubject, setEditSubject] = useState('');
   const [editBody, setEditBody] = useState('');
+  const [confirmBox, setConfirmBox] = useState<{
+    kind: 'single' | 'bulk';
+    draftId?: number;
+    count: number;
+    recipients: string[];
+    confirm_token: string;
+    mensaje?: string;
+  } | null>(null);
 
   const canSendDraft = (draft: any) => Boolean(draft?.to_email && ['edited', 'reviewed'].includes(draft?.status));
   const sendableDrafts = drafts.filter(canSendDraft);
@@ -823,23 +831,28 @@ function DraftReviewPanel({ campaignId }: { campaignId: number }) {
       .then(r => r.json()).then(d => setDrafts(d.drafts || d || [])).catch(() => {});
   }, [campaignId]);
 
+  const refreshDrafts = () => {
+    fetch(`${LF_API}/leadforge/campaigns/drafts?campaign_id=${campaignId}`)
+      .then(r => r.json()).then(d => setDrafts(d.drafts || d || [])).catch(() => {});
+  };
+
   const sendDraft = async (draftId: number) => {
     const draft = drafts.find(d => d.id === draftId);
     if (!canSendDraft(draft)) {
-      alert('Review or edit this draft before sending.');
+      alert(family ? 'Manito, revisa o edita el borrador antes de enviarlo.' : 'Review or edit this draft before sending.');
       return;
     }
     setSending(draftId);
     try {
-      const res = await fetch(`${LF_API}/leadforge/campaigns/drafts/${draftId}/send`, { method: 'POST' });
+      const res = await fetch(`${LF_API}/leadforge/campaigns/drafts/${draftId}/send-preview`, { method: 'POST' });
       const data = await res.json();
-      if (data.success || data.status === 'sent') {
-        setDrafts(prev => prev.map(d => d.id === draftId ? { ...d, status: 'sent' } : d));
-        setSelectedDraft(null);
-      } else {
-        alert(`Send failed: ${data.error || 'Unknown error'}`);
+      if (!res.ok) {
+        alert(data.mensaje || data.detail || (family ? 'No se pudo preparar el envío.' : 'Send preview failed'));
+        setSending(null);
+        return;
       }
-    } catch { alert('Send failed'); }
+      setConfirmBox({ kind: 'single', draftId, count: data.count || 0, recipients: data.recipients || [], confirm_token: data.confirm_token, mensaje: data.mensaje });
+    } catch { alert(family ? 'No se pudo preparar el envío.' : 'Send failed'); }
     setSending(null);
   };
 
@@ -856,15 +869,47 @@ function DraftReviewPanel({ campaignId }: { campaignId: number }) {
 
   const sendAllReviewed = async () => {
     if (sendableDrafts.length === 0) {
-      alert('No reviewed or edited drafts are ready to send.');
+      alert(family ? 'Manito, no hay borradores listos para enviar.' : 'No reviewed or edited drafts are ready to send.');
       return;
     }
-    const res = await fetch(`${LF_API}/leadforge/campaigns/${campaignId}/send-reviewed`, { method: 'POST' });
+    const res = await fetch(`${LF_API}/leadforge/campaigns/${campaignId}/send-preview`, { method: 'POST' });
     const data = await res.json();
-    alert(`Sent: ${data.sent || 0}, Failed: ${data.failed || 0}, Skipped: ${data.skipped || 0}`);
-    // Refresh
-    fetch(`${LF_API}/leadforge/campaigns/drafts?campaign_id=${campaignId}`)
-      .then(r => r.json()).then(d => setDrafts(d.drafts || d || [])).catch(() => {});
+    if (!res.ok) {
+      alert(data.mensaje || data.detail || (family ? 'No se pudo preparar el envío.' : 'Send preview failed'));
+      return;
+    }
+    setConfirmBox({ kind: 'bulk', count: data.count || 0, recipients: data.recipients || [], confirm_token: data.confirm_token, mensaje: data.mensaje });
+  };
+
+  const confirmSend = async () => {
+    if (!confirmBox?.confirm_token) return;
+    const url = confirmBox.kind === 'single'
+      ? `${LF_API}/leadforge/campaigns/drafts/${confirmBox.draftId}/send`
+      : `${LF_API}/leadforge/campaigns/${campaignId}/send-reviewed`;
+    setSending(confirmBox.draftId ?? -1);
+    try {
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ confirm_token: confirmBox.confirm_token, confirm: true }),
+      });
+      const data = await res.json();
+      if (data.mensaje && !data.sent) {
+        alert(data.mensaje);
+      } else if (data.detail) {
+        alert(typeof data.detail === 'string' ? data.detail : (family ? 'No se envió nada.' : 'Send blocked'));
+      } else if (confirmBox.kind === 'single' && (data.success || data.status === 'sent')) {
+        setDrafts(prev => prev.map(d => d.id === confirmBox.draftId ? { ...d, status: 'sent' } : d));
+        setSelectedDraft(null);
+      } else {
+        alert(data.mensaje || (family
+          ? `Enviados: ${data.sent || 0}. Fallaron: ${data.failed || 0}.`
+          : `Sent: ${data.sent || 0}, Failed: ${data.failed || 0}, Skipped: ${data.skipped || 0}`));
+        refreshDrafts();
+      }
+    } catch { alert(family ? 'No se pudo enviar.' : 'Send failed'); }
+    setConfirmBox(null);
+    setSending(null);
   };
 
   if (drafts.length === 0) return null;
@@ -884,7 +929,7 @@ function DraftReviewPanel({ campaignId }: { campaignId: number }) {
         <div style={{ fontSize: 10, fontWeight: 600, color: '#888' }}>DRAFTS ({drafts.length})</div>
         <button onClick={sendAllReviewed} disabled={sendableDrafts.length === 0}
           style={{ fontSize: 9, padding: '3px 8px', background: sendableDrafts.length === 0 ? '#d1d5db' : '#16a34a', color: '#fff', border: 'none', borderRadius: 4, cursor: sendableDrafts.length === 0 ? 'not-allowed' : 'pointer', fontWeight: 600 }}>
-          Send Reviewed ({sendableDrafts.length})
+          {family ? `Enviar revisados (${sendableDrafts.length})` : `Send Reviewed (${sendableDrafts.length})`}
         </button>
       </div>
 
@@ -948,7 +993,9 @@ function DraftReviewPanel({ campaignId }: { campaignId: number }) {
                   {canSendDraft(selectedDraft) && (
                     <button onClick={() => sendDraft(selectedDraft.id)} disabled={sending === selectedDraft.id}
                       style={{ padding: '6px 14px', background: '#16a34a', color: '#fff', border: 'none', borderRadius: 6, fontSize: 11, fontWeight: 600, cursor: 'pointer' }}>
-                      {sending === selectedDraft.id ? 'Sending...' : '📧 Send via Gmail'}
+                      {sending === selectedDraft.id
+                        ? (family ? 'Preparando…' : 'Sending...')
+                        : (family ? '📧 Enviar (con confirmación)' : '📧 Send via Gmail')}
                     </button>
                   )}
                   {!selectedDraft.to_email && (
@@ -967,6 +1014,36 @@ function DraftReviewPanel({ campaignId }: { campaignId: number }) {
                 </div>
               </>
             )}
+          </div>
+        </div>
+      )}
+
+      {confirmBox && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.55)', zIndex: 9995, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+          onClick={() => setConfirmBox(null)}>
+          <div style={{ background: '#fff', borderRadius: 14, padding: 22, maxWidth: 440, width: '90%' }}
+            onClick={e => e.stopPropagation()}>
+            <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 8 }}>
+              ¿Seguro, manito? Vas a enviar {confirmBox.count} correos a prospectos reales.
+            </div>
+            {confirmBox.mensaje && (
+              <div style={{ fontSize: 12, color: '#b45309', marginBottom: 8 }}>{confirmBox.mensaje}</div>
+            )}
+            <div style={{ fontSize: 12, color: '#555', marginBottom: 12 }}>
+              {(confirmBox.recipients || []).length === 0
+                ? 'No hay destinatarios listos.'
+                : (confirmBox.recipients || []).map((r: string) => <div key={r}>{r}</div>)}
+            </div>
+            <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+              <button onClick={() => setConfirmBox(null)}
+                style={{ padding: '6px 14px', background: '#f5f3ef', color: '#666', border: 'none', borderRadius: 6, fontSize: 11, cursor: 'pointer' }}>
+                Cancelar
+              </button>
+              <button onClick={confirmSend} disabled={!confirmBox.confirm_token || confirmBox.count === 0}
+                style={{ padding: '6px 14px', background: confirmBox.count === 0 ? '#d1d5db' : '#16a34a', color: '#fff', border: 'none', borderRadius: 6, fontSize: 11, fontWeight: 600, cursor: confirmBox.count === 0 ? 'not-allowed' : 'pointer' }}>
+                Sí, enviar
+              </button>
+            </div>
           </div>
         </div>
       )}
@@ -1025,7 +1102,9 @@ function CampaignsSection() {
     setExecuting(true);
     const res = await fetch(`${LF_API}/leadforge/campaigns/execute`, { method: 'POST' });
     const data = await res.json();
-    alert(`Executed: ${data.executed || 0}, Skipped: ${data.skipped || 0}, Errors: ${data.errors || 0}`);
+    alert(data.mensaje || (family
+      ? `Listo: ${data.drafted || data.executed || 0} borradores. No se envió nada.`
+      : `Executed: ${data.executed || 0}, Skipped: ${data.skipped || 0}, Errors: ${data.errors || 0}`));
     setExecuting(false);
     fetchCampaigns();
     if (selectedCampaign) loadDetail(selectedCampaign.id);
@@ -1137,7 +1216,7 @@ function CampaignsSection() {
               )}
 
               {/* Drafts section */}
-              <DraftReviewPanel campaignId={selectedCampaign.id} />
+              <DraftReviewPanel campaignId={selectedCampaign.id} family={family} />
             </div>
           )}
         </div>
