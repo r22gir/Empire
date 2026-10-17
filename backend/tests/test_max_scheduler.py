@@ -30,6 +30,7 @@ def test_max_scheduler_starts_and_registers_jobs(monkeypatch):
                 "weekly_report",
                 "brain_sync",
                 "expire_crypto_payments",
+                "nightly_drive_export",
             }
         finally:
             scheduler.scheduler.shutdown(wait=False)
