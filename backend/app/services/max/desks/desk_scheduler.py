@@ -3,9 +3,14 @@ Desk Scheduler — Autonomous daily tasks for AI desks.
 Fires real tasks at scheduled times, executes them with AI,
 stores results, and sends Telegram summaries to the founder.
 Also handles event-driven triggers (new quotes, stale projects, service down).
+
+Family editions (Maxine / Max-e) default to an empty daily schedule so
+Workroom desk jobs do not burn the brother's token share. Opt specific
+keys back in with FAMILY_DESK_SCHEDULE (comma-separated ``desk:title``).
 """
 import asyncio
 import logging
+import os
 import socket
 from datetime import datetime
 from .base_desk import TaskState
@@ -67,6 +72,50 @@ EMPIRE_SERVICES = {
     "Ollama": 11434,
 }
 
+WORKROOM_HEALTH_PORTS = frozenset(EMPIRE_SERVICES.values())
+
+
+def _family_mode() -> bool:
+    try:
+        from app.edition import is_family_edition
+        return bool(is_family_edition())
+    except Exception:
+        return False
+
+
+def family_desk_schedule_keys() -> list[str]:
+    """Opt-in ``desk:title`` keys for family editions. Unknown keys ignored."""
+    raw = os.getenv("FAMILY_DESK_SCHEDULE", "").strip()
+    if not raw:
+        return []
+    return [part.strip() for part in raw.split(",") if part.strip()]
+
+
+def active_daily_schedule():
+    """Workroom keeps DAILY_SCHEDULE. Family default is empty."""
+    if not _family_mode():
+        return list(DAILY_SCHEDULE)
+    allowed = set(family_desk_schedule_keys())
+    if not allowed:
+        return []
+    return [row for row in DAILY_SCHEDULE if f"{row[2]}:{row[3]}" in allowed]
+
+
+def family_health_ports() -> dict[str, int]:
+    """Edition's own backend/frontend only — never Workroom ports."""
+    ports: dict[str, int] = {}
+    backend = os.getenv("EMPIRE_BACKEND_PORT", "").strip()
+    frontend = os.getenv("EMPIRE_FRONTEND_EXPECTED_PORT", "").strip()
+    if backend.isdigit():
+        port = int(backend)
+        if port not in WORKROOM_HEALTH_PORTS:
+            ports["Edition backend"] = port
+    if frontend.isdigit():
+        port = int(frontend)
+        if port not in WORKROOM_HEALTH_PORTS:
+            ports["Edition frontend"] = port
+    return ports
+
 
 class DeskScheduler:
     """Runs proactive scheduled tasks and event-driven triggers for AI desks."""
@@ -92,68 +141,106 @@ class DeskScheduler:
 
         while self._running:
             try:
-                now = datetime.now()
-                today = now.strftime("%Y-%m-%d")
-
-                # Check scheduled tasks
-                for hour, minute, desk_id, title, description in DAILY_SCHEDULE:
-                    task_key = f"{desk_id}:{title}"
-                    if (
-                        now.hour == hour
-                        and now.minute == minute
-                        and self._last_run.get(task_key) != today
-                    ):
-                        self._last_run[task_key] = today
-                        asyncio.create_task(
-                            self._execute_desk_task(desk_id, title, description, source="scheduler")
-                        )
-
-                # Event check: service health (every 5 min)
-                if now.minute % 5 == 0:
-                    task_key = f"health_monitor:{now.hour}:{now.minute}"
-                    if self._last_run.get("health_monitor_tick") != f"{today}:{now.hour}:{now.minute}":
-                        self._last_run["health_monitor_tick"] = f"{today}:{now.hour}:{now.minute}"
-                        asyncio.create_task(self._check_service_health())
-
-                # v6.0 Morning brief: 7:30 AM daily
-                if now.hour == 7 and now.minute == 30:
-                    brief_key = f"morning_brief:{today}"
-                    if self._last_run.get("morning_brief") != brief_key:
-                        self._last_run["morning_brief"] = brief_key
-                        asyncio.create_task(self._generate_morning_brief())
-
-                # v6.0 Weekly report: Monday 8:00 AM
-                if now.weekday() == 0 and now.hour == 8 and now.minute == 0:
-                    week_key = f"weekly_report:{today}"
-                    if self._last_run.get("weekly_report") != week_key:
-                        self._last_run["weekly_report"] = week_key
-                        asyncio.create_task(self._generate_weekly_report())
-
-                # Accuracy digest: 10:00 PM daily
-                if now.hour == 22 and now.minute == 0:
-                    digest_key = f"accuracy_digest:{today}"
-                    if self._last_run.get("accuracy_digest") != digest_key:
-                        self._last_run["accuracy_digest"] = digest_key
-                        asyncio.create_task(self._send_accuracy_digest())
-
-                # v6.0 Pipeline executor: process pending subtasks (every 2 min)
-                if now.minute % 2 == 0:
-                    pl_tick = f"{today}:{now.hour}:{now.minute}"
-                    if self._last_run.get("pipeline_tick") != pl_tick:
-                        self._last_run["pipeline_tick"] = pl_tick
-                        asyncio.create_task(self._run_pipeline_executor())
-
+                await self.tick()
             except Exception as e:
                 logger.warning(f"Scheduler tick error: {e}")
 
             await asyncio.sleep(60)  # Check every minute
 
+    async def tick(self, now: datetime | None = None) -> None:
+        """One scheduler pass. Tests freeze *now*; production uses local time."""
+        now = now or datetime.now()
+        today = now.strftime("%Y-%m-%d")
+        family = _family_mode()
+        pending = []
+
+        for hour, minute, desk_id, title, description in active_daily_schedule():
+            task_key = f"{desk_id}:{title}"
+            if (
+                now.hour == hour
+                and now.minute == minute
+                and self._last_run.get(task_key) != today
+            ):
+                self._last_run[task_key] = today
+                pending.append(
+                    self._execute_desk_task(desk_id, title, description, source="scheduler")
+                )
+
+        # Workroom-only: health probes, Telegram briefs, pipeline LLM.
+        # Family owner brief lives on MaxScheduler (8:00, EDITION_OWNER_EMAIL).
+        if not family:
+            if now.minute % 5 == 0:
+                health_tick = f"{today}:{now.hour}:{now.minute}"
+                if self._last_run.get("health_monitor_tick") != health_tick:
+                    self._last_run["health_monitor_tick"] = health_tick
+                    pending.append(self._check_service_health())
+
+            if now.hour == 7 and now.minute == 30:
+                brief_key = f"morning_brief:{today}"
+                if self._last_run.get("morning_brief") != brief_key:
+                    self._last_run["morning_brief"] = brief_key
+                    pending.append(self._generate_morning_brief())
+
+            if now.weekday() == 0 and now.hour == 8 and now.minute == 0:
+                week_key = f"weekly_report:{today}"
+                if self._last_run.get("weekly_report") != week_key:
+                    self._last_run["weekly_report"] = week_key
+                    pending.append(self._generate_weekly_report())
+
+            if now.hour == 22 and now.minute == 0:
+                digest_key = f"accuracy_digest:{today}"
+                if self._last_run.get("accuracy_digest") != digest_key:
+                    self._last_run["accuracy_digest"] = digest_key
+                    pending.append(self._send_accuracy_digest())
+
+            if now.minute % 2 == 0:
+                pl_tick = f"{today}:{now.hour}:{now.minute}"
+                if self._last_run.get("pipeline_tick") != pl_tick:
+                    self._last_run["pipeline_tick"] = pl_tick
+                    pending.append(self._run_pipeline_executor())
+
+        if pending:
+            await asyncio.gather(*pending, return_exceptions=True)
+
     def stop(self):
         self._running = False
         logger.info("Desk scheduler stopped")
 
+    def _family_desk_task_allowed(
+        self, desk_id: str, title: str, description: str, source: str
+    ) -> bool:
+        """Background desk work never uses overage; skip when context is unchanged."""
+        try:
+            from app.services.instance_usage import enforce_usage_cap
+
+            refusal = enforce_usage_cap(
+                kind="desk_task",
+                text=description or title,
+                source=source or "scheduler",
+                desk=desk_id,
+            )
+            if refusal:
+                logger.info("[Scheduler] skip desk task (usage cap): %s → %s", desk_id, title)
+                return False
+        except Exception:
+            logger.warning("[Scheduler] usage cap check failed; skipping family desk task")
+            return False
+        try:
+            from app.services.family_job_skip import skip_if_unchanged
+
+            context = f"{desk_id}\n{title}\n{description or ''}\n{source or ''}"
+            if skip_if_unchanged(f"desk:{desk_id}:{title}", context):
+                logger.info("[Scheduler] skip desk task (unchanged): %s → %s", desk_id, title)
+                return False
+        except Exception:
+            logger.warning("[Scheduler] skip-if-unchanged failed; skipping family desk task")
+            return False
+        return True
+
     async def _execute_desk_task(self, desk_id: str, title: str, description: str, source: str = "scheduler"):
         """Execute a task directly through the desk manager — no HTTP roundtrip."""
+        if _family_mode() and not self._family_desk_task_allowed(desk_id, title, description, source):
+            return
         logger.info(f"[Scheduler] Executing: {desk_id} → {title}")
 
         try:
@@ -165,7 +252,8 @@ class DeskScheduler:
             )
 
             # If the desk completed it with canned/short text, enhance with AI
-            if task.state.value == "completed" and source == "scheduler":
+            # Family opt-in tasks still skip Telegram / OpenClaw (Workroom).
+            if task.state.value == "completed" and source == "scheduler" and not _family_mode():
                 result_len = len(task.result or "")
                 if result_len < 500:
                     try:
@@ -178,7 +266,7 @@ class DeskScheduler:
                         logger.warning(f"AI enhancement failed for {desk_id}: {e}")
 
             # If desk handler escalated or failed, try OpenClaw as fallback
-            if task.state.value in ("escalated", "failed"):
+            if task.state.value in ("escalated", "failed") and not _family_mode():
                 try:
                     from app.routers.openclaw_bridge import dispatch_desk_task_to_openclaw
                     logger.info(f"[Scheduler] Trying OpenClaw fallback for: {desk_id} → {title}")
@@ -200,14 +288,15 @@ class DeskScheduler:
             # Store to database
             await self._persist_task(desk_id, task)
 
-            # Send Telegram summary
-            await self._notify_telegram(desk_id, title, task)
+            if not _family_mode():
+                await self._notify_telegram(desk_id, title, task)
 
             logger.info(f"[Scheduler] Completed: {desk_id} → {title} ({task.state.value})")
 
         except Exception as e:
             logger.error(f"[Scheduler] Failed: {desk_id} → {title}: {e}")
-            await self._notify_telegram_error(desk_id, title, str(e))
+            if not _family_mode():
+                await self._notify_telegram_error(desk_id, title, str(e))
 
     async def _persist_task(self, desk_id: str, task):
         """Save task result to the SQLite tasks table."""
@@ -282,9 +371,16 @@ class DeskScheduler:
 
     async def _check_service_health(self):
         """Check all Empire services — alert on status changes."""
+        if _family_mode():
+            # Never probe Workroom ports from a family instance.
+            services = family_health_ports()
+            if not services:
+                return
+        else:
+            services = EMPIRE_SERVICES
         changes = []
 
-        for name, port in EMPIRE_SERVICES.items():
+        for name, port in services.items():
             is_up = self._port_open(port)
             was_up = self._service_status.get(name)
 
