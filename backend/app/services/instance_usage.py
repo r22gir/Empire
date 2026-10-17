@@ -37,7 +37,9 @@ import sqlite3
 from datetime import datetime, timezone
 from typing import Optional
 
-HEAVY_KINDS = frozenset({"job", "generate", "desk_task", "vision", "social", "heavy"})
+HEAVY_KINDS = frozenset({
+    "job", "generate", "desk_task", "vision", "social", "heavy", "cursor_request",
+})
 # Overage is an allowlist: only Camilo's named interactive sources.
 # Empty, unknown, desk=, scheduler, generate, etc. never get extra.
 INTERACTIVE_OVERAGE_SOURCES = frozenset({

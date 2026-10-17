@@ -3,6 +3,7 @@ import { useState, useEffect } from 'react';
 import { useAssistantName } from '../../lib/assistant';
 import { useEdition } from '../../lib/edition';
 import UsageCard from '../UsageCard';
+import PedirCursorCard from '../PedirCursorCard';
 import HelpMenu from '../voice/HelpMenu';
 import MaxeBusinesses from '../voice/MaxeBusinesses';
 import ArchivoCard from '../voice/ArchivoCard';
@@ -42,6 +43,7 @@ export default function DashboardScreen({ activeTab }: { activeTab: BusinessTab 
       </div>
       <div style={{ marginTop: 12, display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'flex-start' }}>
         {family ? <UsageCard /> : null}
+        {family ? <PedirCursorCard /> : null}
         {family ? <HelpMenu /> : null}
         {family ? <ArchivoCard /> : null}
         <WhatsAppStatus />
