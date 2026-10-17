@@ -66,6 +66,25 @@ async def luxe_public_edge_middleware(request: Request, call_next):
 # No-cache middleware — EVERY response gets anti-cache headers
 # This prevents phones/browsers/CDNs from serving stale data
 @app.middleware("http")
+async def founder_activity_middleware(request: Request, call_next):
+    """Record founder presence from Cloudflare Access / verified Studio session.
+
+    Rate-limited inside mark_founder_active (1 write / 30s). Never logs
+    tokens, PINs, or message content.
+    """
+    try:
+        from app.edition import is_family_edition
+        if not is_family_edition():
+            from app.services.max.founder_session import resolve_founder_session
+            if resolve_founder_session(request).get("verified"):
+                from app.services.founder_activity import maybe_mark_founder_active
+                maybe_mark_founder_active(True, "cf_access")
+    except Exception:
+        pass
+    return await call_next(request)
+
+
+@app.middleware("http")
 async def no_cache_middleware(request: Request, call_next):
     response = await call_next(request)
     response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0"
@@ -581,6 +600,23 @@ async def start_background_services():
         print("✓ Atlas Improvement Worker: started (idle unless MAX_IMPROVE_WORKER_ENABLED=1)")
     except Exception as e:
         print(f"✗ Atlas Improvement Worker: {e}")
+
+    # Family soft-cap signal: founder activity + reserve for Max-e / Maxine.
+    # Writes only into FAMILY_SIGNAL_DIRS (skipped if the dir is missing).
+    async def _family_signal_loop():
+        while True:
+            try:
+                from app.services.family_signal import write_family_signals
+                write_family_signals()
+            except Exception as loop_error:
+                print(f"✗ family signal: {loop_error}")
+            await asyncio.sleep(60)
+
+    try:
+        asyncio.create_task(_family_signal_loop())
+        print("✓ Family signal writer: every 60s on primary worker")
+    except Exception as e:
+        print(f"✗ Family signal writer: {e}")
 
     # ── Autonomous Startup Probes ──
     # Run immediate health check + brain context warm-up on boot
