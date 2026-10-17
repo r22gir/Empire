@@ -333,3 +333,60 @@ def test_dashboard_chat_and_stream_overage_reach_reserve(monkeypatch, tmp_path):
     assert desk.model_used == "usage-cap"
     assert "automáticas" in desk.content
     assert captured == []
+
+
+def test_minimax_chat_bypass_inside_dashboard_context_is_background(monkeypatch, tmp_path):
+    """Direct _minimax_chat must not inherit a dashboard chat's overage."""
+    import asyncio
+
+    _env(monkeypatch, tmp_path)
+    _write_signal(tmp_path, allowed=True, founder_active=False)
+    monkeypatch.setenv("MINIMAX_API_KEY", "sk-test-not-used")
+    monkeypatch.setenv("MINIMAX_METER_DIR", str(tmp_path / "meter"))
+    monkeypatch.setenv("MINIMAX_TEXT_POOL_FLOOR", "1000")
+    monkeypatch.setenv("MINIMAX_EDITION_TEXT_SHARE_PCT", "20")
+    monkeypatch.setenv("MINIMAX_REMAINS_PROBE", "0")
+    monkeypatch.setenv("MINIMAX_REMAINS_STUB", "ok")
+    monkeypatch.setenv("MAX_ALLOW_FALLBACK", "false")
+    (tmp_path / "meter").mkdir(parents=True, exist_ok=True)
+
+    from app.services.instance_usage import record_usage
+    from app.services.max.ai_router import AIMessage, AIRouter, _family_meter_ctx
+    from app.services.minimax_meter import MeterBlocked, record
+    from app.services.minimax_meter import reserve as real_reserve
+
+    record_usage(input_tokens=250, output_tokens=0)
+    record(kind="text", edition="maxine", model="MiniMax-M3", input_tokens=250, output_tokens=0)
+
+    captured = []
+
+    def wrap_reserve(**kwargs):
+        captured.append(dict(kwargs))
+        return real_reserve(**kwargs)
+
+    monkeypatch.setattr("app.services.minimax_meter.reserve", wrap_reserve)
+
+    router = AIRouter()
+    msg = [AIMessage(role="user", content="Hola manito")]
+
+    inherited = _family_meter_ctx.set({"source": "dashboard", "desk": None})
+    try:
+        with pytest.raises(MeterBlocked) as blocked:
+            asyncio.run(router._minimax_chat(msg))
+        assert "automáticas" in (blocked.value.message or str(blocked.value))
+        assert captured
+        assert all((c.get("source") or "") != "dashboard" for c in captured)
+    finally:
+        _family_meter_ctx.reset(inherited)
+
+    captured.clear()
+    allowed = asyncio.run(router.chat(msg, source="dashboard"))
+    assert allowed.model_used != "usage-cap"
+    assert any((c.get("source") or "") == "dashboard" and not c.get("desk") for c in captured)
+
+    captured.clear()
+    with pytest.raises(MeterBlocked) as leftover:
+        asyncio.run(router._minimax_chat(msg))
+    assert "automáticas" in (leftover.value.message or str(leftover.value))
+    assert captured
+    assert all((c.get("source") or "") != "dashboard" for c in captured)

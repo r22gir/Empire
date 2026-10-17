@@ -39,9 +39,15 @@ load_dotenv(Path(__file__).resolve().parents[3] / ".env")
 
 logger = logging.getLogger("max.ai_router")
 
-# chat() / chat_stream() set this in _family_chat_prep so reserve() sees the
+# chat() / chat_stream() bind this around the request so reserve() sees the
 # real source and desk even when MiniMax is reached through selected routing.
+# Default and any unbound value are background: never reuse an inherited source.
 _family_meter_ctx: ContextVar[dict] = ContextVar("family_minimax_meter", default={})
+
+
+def _background_meter_ctx() -> dict:
+    return {"source": "", "desk": None, "bound": False}
+
 
 class AIModel(Enum):
     GROK = "grok"
@@ -1269,6 +1275,11 @@ class AIRouter:
         model: Optional[AIModel],
     ) -> tuple[Optional[AIModel], Optional[str]]:
         """Force MiniMax on family editions. Return a Spanish cap refusal or None."""
+        _family_meter_ctx.set({
+            "source": (source or "").strip(),
+            "desk": desk,
+            "bound": True,
+        })
         try:
             from app.edition import is_family_edition
             from app.services.instance_usage import enforce_usage_cap
@@ -1285,7 +1296,6 @@ class AIRouter:
             )
             cap_kind = "desk_task" if desk else ("voice" if (source or "").strip().lower() == "voice" else "chat")
             cap_source = (source or "").strip()
-            _family_meter_ctx.set({"source": cap_source, "desk": desk})
             refusal = enforce_usage_cap(
                 kind=cap_kind,
                 text=user_text,
@@ -1321,6 +1331,40 @@ class AIRouter:
             return model, None
 
     async def chat(self, messages: List[AIMessage], model: Optional[AIModel] = None, image_filename: Optional[str] = None, desk: Optional[str] = None, system_prompt: Optional[str] = None, tenant_id: str = "founder", source: str = "", conversation_id: str = "", tools: Optional[list] = None) -> AIResponse:
+        token = _family_meter_ctx.set(_background_meter_ctx())
+        try:
+            return await self._chat_body(
+                messages,
+                model=model,
+                image_filename=image_filename,
+                desk=desk,
+                system_prompt=system_prompt,
+                tenant_id=tenant_id,
+                source=source,
+                conversation_id=conversation_id,
+                tools=tools,
+            )
+        finally:
+            _family_meter_ctx.reset(token)
+
+    async def chat_stream(self, messages: List[AIMessage], model: Optional[AIModel] = None, image_filename: Optional[str] = None, desk: Optional[str] = None, system_prompt: Optional[str] = None, tenant_id: str = "founder", source: str = "", conversation_id: str = "") -> AsyncGenerator[tuple[str, str], None]:
+        token = _family_meter_ctx.set(_background_meter_ctx())
+        try:
+            async for item in self._chat_stream_body(
+                messages,
+                model=model,
+                image_filename=image_filename,
+                desk=desk,
+                system_prompt=system_prompt,
+                tenant_id=tenant_id,
+                source=source,
+                conversation_id=conversation_id,
+            ):
+                yield item
+        finally:
+            _family_meter_ctx.reset(token)
+
+    async def _chat_body(self, messages: List[AIMessage], model: Optional[AIModel] = None, image_filename: Optional[str] = None, desk: Optional[str] = None, system_prompt: Optional[str] = None, tenant_id: str = "founder", source: str = "", conversation_id: str = "", tools: Optional[list] = None) -> AIResponse:
         model, refusal = self._family_chat_prep(
             messages,
             desk=desk,
@@ -1549,7 +1593,7 @@ class AIRouter:
 
     # ── Streaming chat ──────────────────────────────────────────────────
 
-    async def chat_stream(self, messages: List[AIMessage], model: Optional[AIModel] = None, image_filename: Optional[str] = None, desk: Optional[str] = None, system_prompt: Optional[str] = None, tenant_id: str = "founder", source: str = "", conversation_id: str = "") -> AsyncGenerator[tuple[str, str], None]:
+    async def _chat_stream_body(self, messages: List[AIMessage], model: Optional[AIModel] = None, image_filename: Optional[str] = None, desk: Optional[str] = None, system_prompt: Optional[str] = None, tenant_id: str = "founder", source: str = "", conversation_id: str = "") -> AsyncGenerator[tuple[str, str], None]:
         model, refusal = self._family_chat_prep(
             messages,
             desk=desk,
@@ -2312,10 +2356,16 @@ class AIRouter:
         from app.services.minimax_meter import MeterBlocked, pop_plan_warning, reserve
 
         ctx = _family_meter_ctx.get() or {}
-        if not source:
-            source = ctx.get("source") or ""
-        if desk is None:
-            desk = ctx.get("desk")
+        if not ctx.get("bound"):
+            # Prep never bound this call (raised before set, leftover, or bypass).
+            # Empty/unknown source is background — do not reuse an inherited source.
+            source = source or ""
+            desk = desk
+        else:
+            if not source:
+                source = ctx.get("source") or ""
+            if desk is None:
+                desk = ctx.get("desk")
         input_text = " ".join((m.content or "") for m in (messages or []) if getattr(m, "content", None))
         estimate = max(1, len(input_text) // 4)
         reservation = reserve(
