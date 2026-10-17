@@ -38,8 +38,11 @@ from datetime import datetime, timezone
 from typing import Optional
 
 HEAVY_KINDS = frozenset({"job", "generate", "desk_task", "vision", "social", "heavy"})
-BACKGROUND_OVERAGE_KINDS = frozenset({
-    "desk_task", "job", "generate", "social", "scheduler", "heavy",
+# Overage is an allowlist: only Camilo's named interactive sources.
+# Empty, unknown, desk=, scheduler, generate, etc. never get extra.
+INTERACTIVE_OVERAGE_SOURCES = frozenset({
+    "web", "web_cc", "chat", "voice", "owner", "cursor_request",
+    "dashboard", "whatsapp",
 })
 DEFAULT_BASELINE_MONTHLY_TOKENS = 10_000_000.0
 DEFAULT_ABSOLUTE_MAX_PCT = 40.0
@@ -52,12 +55,22 @@ MSG_PAUSED = (
     "Manito, ya usaste tu 20% del mes y Rafael está usando Max ahora, "
     "así que lo extra queda en pausa. Vuelve a intentar en un rato."
 )
+MSG_PAUSED_SIGNAL = (
+    "Manito, ya usaste tu 20% del mes y no pude leer la señal de Rafael "
+    "(falta o está vieja), así que lo extra queda en pausa. "
+    "Vuelve a intentar en un rato."
+)
+MSG_PAUSED_RESERVE = (
+    "Manito, ya usaste tu 20% del mes y la reserva de Rafael está baja, "
+    "así que lo extra queda en pausa. Vuelve a intentar en un rato."
+)
 MSG_BACKGROUND_OVERAGE = (
     "Manito, las tareas automáticas no corren en tiempo extra. "
     "Eso queda para tus chats."
 )
 MSG_ABSOLUTE = (
-    "Manito, ya llegaste al tope extra del mes. Hay que esperar un rato."
+    "Manito, ya llegaste al tope extra del mes ({ceiling:g}%). "
+    "Hay que esperar un rato."
 )
 
 
@@ -78,7 +91,7 @@ def cap_percent() -> float:
     return max(0.0, value)
 
 
-def absolute_max_pct() -> float:
+def _env_absolute_max_pct() -> float:
     raw = os.getenv("FAMILY_ABSOLUTE_MAX_PCT", "").strip()
     if raw:
         try:
@@ -86,6 +99,55 @@ def absolute_max_pct() -> float:
         except ValueError:
             pass
     return max(cap_percent(), DEFAULT_ABSOLUTE_MAX_PCT)
+
+
+def _signal_ceiling_pct(signal: Optional[dict] = None) -> Optional[float]:
+    if signal is None:
+        try:
+            from app.services.founder_signal import load_founder_signal
+            signal = load_founder_signal()
+        except Exception:
+            return None
+    raw = signal.get("brother_ceiling_pct") if signal else None
+    if raw is None or raw == "":
+        return None
+    try:
+        value = float(raw)
+    except (TypeError, ValueError):
+        return None
+    if value <= 0 or value > 100:
+        return None
+    return value
+
+
+def absolute_max_pct(*, signal: Optional[dict] = None) -> float:
+    """Hard ceiling: env FAMILY_ABSOLUTE_MAX_PCT, optionally lowered by Studio."""
+    env_ceiling = _env_absolute_max_pct()
+    extra = _signal_ceiling_pct(signal)
+    if extra is None:
+        return env_ceiling
+    return max(cap_percent(), min(env_ceiling, extra))
+
+
+def paused_message(*, signal: Optional[dict] = None, used_percent: Optional[float] = None) -> str:
+    """Spanish paused copy that names the real reason."""
+    if signal is None:
+        try:
+            from app.services.founder_signal import load_founder_signal
+            signal = load_founder_signal()
+        except Exception:
+            signal = {"ok": False, "reason": "missing"}
+    ceiling = absolute_max_pct(signal=signal)
+    if used_percent is not None and float(used_percent) >= ceiling:
+        return MSG_ABSOLUTE.format(ceiling=ceiling)
+    reason = str((signal or {}).get("reason") or "missing")
+    if not (signal or {}).get("ok"):
+        return MSG_PAUSED_SIGNAL
+    if (signal or {}).get("founder_active") or reason == "founder_active":
+        return MSG_PAUSED
+    if reason in {"reserve_low", "inputs_unreadable"} or not (signal or {}).get("reserve_ok"):
+        return MSG_PAUSED_RESERVE
+    return MSG_PAUSED_SIGNAL
 
 
 def usd_per_million() -> float:
@@ -341,7 +403,7 @@ def family_overage_allowed(*, used_percent: Optional[float] = None) -> bool:
         pct = _used_percent_now()
     if pct is None:
         return False
-    if float(pct) >= absolute_max_pct():
+    if float(pct) >= absolute_max_pct(signal=signal):
         return False
     return True
 
@@ -366,17 +428,20 @@ def _used_percent_now() -> Optional[float]:
 
 
 def is_background_request(*, kind: str, source: str, desk: Optional[str] = None) -> bool:
-    labels = {(kind or "").strip().lower(), (source or "").strip().lower()}
-    if labels & BACKGROUND_OVERAGE_KINDS:
+    """True unless this is a named interactive source with no desk.
+
+    Desk tasks call ``ai_router.chat(desk=..., source='')`` as kind=chat.
+    Any desk= value, empty source, or unknown source is background.
+    """
+    if desk:
         return True
-    if (kind or "").strip().lower() == "vision" and (source or "").strip().lower() not in {
-        "chat", "web", "voice", "owner",
-    }:
-        return True
-    if desk and (source or "").strip().lower() in {"scheduler", "desk_scheduler", ""}:
-        if (kind or "").strip().lower() in {"desk_task", "job", ""}:
-            return (source or "").strip().lower() in {"scheduler", "desk_scheduler"}
-    return False
+    src = (source or "").strip().lower()
+    kind_l = (kind or "").strip().lower()
+    if src in INTERACTIVE_OVERAGE_SOURCES:
+        return False
+    if kind_l == "cursor_request":
+        return False
+    return True
 
 
 def usage_summary() -> dict:
@@ -434,6 +499,9 @@ def usage_summary() -> dict:
         used_percent = round(share * 100.0, 1)
         remaining_percent = max(0.0, round(pct - used_percent, 1))
         warn_at = pct * 0.8
+        from app.services.founder_signal import load_founder_signal
+        signal = load_founder_signal()
+        ceiling = absolute_max_pct(signal=signal)
         overage_ok = family_overage_allowed(used_percent=used_percent)
         if total_spend_hit:
             level = "blocked"
@@ -441,16 +509,16 @@ def usage_summary() -> dict:
                 "Llegamos al tope total de uso de EmpireBox este mes. "
                 "También los mensajes cortos quedan en pausa."
             )
-        elif used_percent >= absolute_max_pct():
+        elif used_percent >= ceiling:
             level = "paused"
-            message = MSG_ABSOLUTE
+            message = paused_message(signal=signal, used_percent=used_percent)
         elif used_percent >= pct:
             if overage_ok:
                 level = "overage"
                 message = MSG_OVERAGE
             else:
                 level = "paused"
-                message = MSG_PAUSED
+                message = paused_message(signal=signal, used_percent=used_percent)
         elif used_percent >= warn_at:
             level = "warn"
             message = (

@@ -60,6 +60,7 @@ def _fail_closed(reason: str) -> dict[str, Any]:
         "founder_last_active_at": None,
         "reserve_ok": False,
         "overage_allowed": False,
+        "brother_ceiling_pct": None,
         "reason": reason,
     }
 
@@ -87,6 +88,15 @@ def load_founder_signal(*, now: Optional[datetime] = None) -> dict[str, Any]:
     if age > signal_max_age_s() or age < -30:
         return _fail_closed("stale")
     allowed = bool(data.get("overage_allowed"))
+    ceiling = None
+    raw_ceiling = data.get("brother_ceiling_pct")
+    if raw_ceiling is not None and raw_ceiling != "":
+        try:
+            value = float(raw_ceiling)
+            if 0 < value <= 100:
+                ceiling = value
+        except (TypeError, ValueError):
+            ceiling = None
     return {
         "ok": True,
         "schema": SIGNAL_SCHEMA,
@@ -95,5 +105,6 @@ def load_founder_signal(*, now: Optional[datetime] = None) -> dict[str, Any]:
         "founder_last_active_at": data.get("founder_last_active_at"),
         "reserve_ok": bool(data.get("reserve_ok")),
         "overage_allowed": allowed,
+        "brother_ceiling_pct": ceiling,
         "reason": str(data.get("reason") or ("inactive_reserve_ok" if allowed else "founder_active")),
     }

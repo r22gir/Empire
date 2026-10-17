@@ -19,7 +19,17 @@ def _env(monkeypatch, tmp_path, edition="maxine"):
     monkeypatch.delenv("EMPIRE_USAGE_BASELINE_MONTHLY_USD", raising=False)
 
 
-def _write_signal(tmp_path: Path, *, allowed=True, founder_active=False, stale=False, malformed=False):
+def _write_signal(
+    tmp_path: Path,
+    *,
+    allowed=True,
+    founder_active=False,
+    stale=False,
+    malformed=False,
+    reserve_ok=None,
+    reason=None,
+    brother_ceiling_pct=None,
+):
     folder = tmp_path / "founder-signal"
     folder.mkdir(parents=True, exist_ok=True)
     path = folder / "status.json"
@@ -33,10 +43,14 @@ def _write_signal(tmp_path: Path, *, allowed=True, founder_active=False, stale=F
         "updated_at": updated.strftime("%Y-%m-%dT%H:%M:%SZ"),
         "founder_active": founder_active,
         "founder_last_active_at": now.strftime("%Y-%m-%dT%H:%M:%SZ"),
-        "reserve_ok": allowed and not founder_active,
+        "reserve_ok": (allowed and not founder_active) if reserve_ok is None else reserve_ok,
         "overage_allowed": allowed and not founder_active,
-        "reason": "inactive_reserve_ok" if allowed and not founder_active else "founder_active",
+        "reason": reason or (
+            "inactive_reserve_ok" if allowed and not founder_active else "founder_active"
+        ),
     }
+    if brother_ceiling_pct is not None:
+        payload["brother_ceiling_pct"] = brother_ceiling_pct
     path.write_text(json.dumps(payload), encoding="utf-8")
 
 
@@ -47,9 +61,9 @@ def test_ten_percent_chat_allowed_regardless_of_signal(monkeypatch, tmp_path):
     record_usage(input_tokens=100, output_tokens=0)
     assert usage_summary()["used_percent"] == 10.0
     assert usage_summary()["level"] == "ok"
-    assert enforce_usage_cap(text="hola manito", kind="chat") is None
+    assert enforce_usage_cap(text="hola manito", kind="chat", source="web") is None
     _write_signal(tmp_path, founder_active=True, allowed=False)
-    assert enforce_usage_cap(text="hola manito", kind="chat") is None
+    assert enforce_usage_cap(text="hola manito", kind="chat", source="web") is None
 
 
 def test_twenty_five_overage_allows_chat_refuses_desk(monkeypatch, tmp_path):
@@ -63,7 +77,7 @@ def test_twenty_five_overage_allows_chat_refuses_desk(monkeypatch, tmp_path):
     assert summary["level"] == "overage"
     assert summary["overage_active"] is True
     assert "tiempo extra" in summary["message"]
-    assert enforce_usage_cap(text="hola", kind="chat") is None
+    assert enforce_usage_cap(text="hola", kind="chat", source="web") is None
     desk = enforce_usage_cap(text="hola", kind="desk_task", source="scheduler")
     assert desk and "automáticas" in desk
 
@@ -83,9 +97,13 @@ def test_twenty_five_paused_without_good_signal(monkeypatch, tmp_path, signal):
     summary = usage_summary()
     assert summary["level"] == "paused"
     assert summary["overage_active"] is False
-    refused = enforce_usage_cap(text="hola", kind="chat")
+    refused = enforce_usage_cap(text="hola", kind="chat", source="web")
     assert refused and "pausa" in refused
     assert "Manito" in refused
+    if signal == "founder_active":
+        assert "Rafael está usando Max" in refused
+    elif signal in {"stale", "missing", "malformed"}:
+        assert "señal de Rafael" in refused
 
 
 def test_forty_five_refused_even_if_signal_allows(monkeypatch, tmp_path):
@@ -97,8 +115,9 @@ def test_forty_five_refused_even_if_signal_allows(monkeypatch, tmp_path):
     summary = usage_summary()
     assert summary["used_percent"] == 45.0
     assert summary["level"] == "paused"
-    refused = enforce_usage_cap(text="hola", kind="chat")
+    refused = enforce_usage_cap(text="hola", kind="chat", source="web")
     assert refused and "tope extra" in refused
+    assert "40%" in refused
 
 
 def test_minimax_family_text_mirrors_soft_cap(monkeypatch, tmp_path):
@@ -115,11 +134,11 @@ def test_minimax_family_text_mirrors_soft_cap(monkeypatch, tmp_path):
     from app.services.minimax_meter import check, record
 
     record(kind="text", edition="maxine", model="MiniMax-M3", input_tokens=250, output_tokens=0)
-    blocked = check(kind="text", edition="maxine", input_tokens=1)
+    blocked = check(kind="text", edition="maxine", input_tokens=1, source="web")
     assert blocked and "pausa" in blocked
 
     _write_signal(tmp_path / "maxine", allowed=True, founder_active=False)
-    assert check(kind="text", edition="maxine", input_tokens=1) is None
+    assert check(kind="text", edition="maxine", input_tokens=1, source="web") is None
     desk = check(kind="text", edition="maxine", input_tokens=1, source="desk_task")
     assert desk and "automáticas" in desk
 
@@ -139,3 +158,80 @@ def test_public_usage_hides_absolute_totals(monkeypatch, tmp_path):
     blob = json.dumps(public)
     assert "250" not in blob
     assert "1000" not in blob
+
+
+def test_desk_chat_with_empty_source_never_gets_overage(monkeypatch, tmp_path):
+    """Desk tasks call ai_router.chat(desk=..., source='') as kind=chat."""
+    import asyncio
+
+    _env(monkeypatch, tmp_path)
+    _write_signal(tmp_path, allowed=True, founder_active=False)
+    from app.services.instance_usage import enforce_usage_cap, record_usage
+    from app.services.max.ai_router import AIMessage, AIResponse, AIRouter
+
+    record_usage(input_tokens=250, output_tokens=0)
+    assert enforce_usage_cap(kind="chat", source="web") is None
+    refused = enforce_usage_cap(kind="chat", source="", desk="finance")
+    assert refused and "automáticas" in refused
+    empty_source = enforce_usage_cap(kind="chat", source="")
+    assert empty_source and "automáticas" in empty_source
+
+    async def fake_selected(self, **_kwargs):
+        return AIResponse(content="SHOULD NOT RUN", model_used="minimax-test")
+
+    monkeypatch.setattr(AIRouter, "_chat_via_selected_routing", fake_selected)
+    router = AIRouter()
+    resp = asyncio.run(
+        router.chat(
+            [AIMessage(role="user", content="Morning Invoice Audit")],
+            desk="finance",
+        )
+    )
+    assert resp.model_used == "usage-cap"
+    assert "automáticas" in resp.content
+
+    from app.services.minimax_meter import check, record
+
+    monkeypatch.setenv("MINIMAX_METER_DIR", str(tmp_path / "meter"))
+    monkeypatch.setenv("MINIMAX_TEXT_POOL_FLOOR", "1000")
+    monkeypatch.setenv("MINIMAX_EDITION_TEXT_SHARE_PCT", "20")
+    monkeypatch.setenv("MINIMAX_REMAINS_PROBE", "0")
+    monkeypatch.setenv("MINIMAX_REMAINS_STUB", "ok")
+    (tmp_path / "meter").mkdir(parents=True, exist_ok=True)
+    record(kind="text", edition="maxine", model="MiniMax-M3", input_tokens=250, output_tokens=0)
+    meter = check(kind="text", edition="maxine", input_tokens=1, source="", desk="finance")
+    assert meter and "automáticas" in meter
+    assert check(kind="text", edition="maxine", input_tokens=1, source="web") is None
+
+
+def test_brother_ceiling_pct_lowers_env_ceiling(monkeypatch, tmp_path):
+    _env(monkeypatch, tmp_path)
+    _write_signal(tmp_path, allowed=True, founder_active=False, brother_ceiling_pct=30)
+    from app.services.instance_usage import absolute_max_pct, enforce_usage_cap, record_usage, usage_summary
+
+    assert absolute_max_pct() == 30.0
+    record_usage(input_tokens=320, output_tokens=0)
+    summary = usage_summary()
+    assert summary["level"] == "paused"
+    refused = enforce_usage_cap(text="hola", kind="chat", source="web")
+    assert refused and "30%" in refused
+    assert "tope extra" in refused
+
+
+def test_paused_message_names_reserve_low(monkeypatch, tmp_path):
+    _env(monkeypatch, tmp_path)
+    _write_signal(
+        tmp_path,
+        allowed=False,
+        founder_active=False,
+        reserve_ok=False,
+        reason="reserve_low",
+    )
+    from app.services.instance_usage import enforce_usage_cap, record_usage, usage_summary
+
+    record_usage(input_tokens=250, output_tokens=0)
+    summary = usage_summary()
+    assert summary["level"] == "paused"
+    assert "reserva de Rafael" in summary["message"]
+    refused = enforce_usage_cap(text="hola", kind="chat", source="web")
+    assert refused and "reserva de Rafael" in refused

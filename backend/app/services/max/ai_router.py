@@ -1278,19 +1278,26 @@ class AIRouter:
             user_text = "\n".join(
                 (m.content or "") for m in (messages or []) if getattr(m, "role", "") != "system"
             )
+            cap_kind = "desk_task" if desk else ("voice" if (source or "").strip().lower() == "voice" else "chat")
+            cap_source = (source or "").strip()
             refusal = enforce_usage_cap(
-                kind="chat",
+                kind=cap_kind,
                 text=user_text,
                 desk=desk,
                 tools=bool(tools),
-                source=source,
+                source=cap_source,
                 image=bool(image_filename),
             )
             if refusal:
                 return model, refusal
             try:
                 from app.services.minimax_meter import enforce as enforce_minimax
-                meter_refusal = enforce_minimax(kind="text", input_tokens=max(1, len(user_text) // 4))
+                meter_refusal = enforce_minimax(
+                    kind="text",
+                    input_tokens=max(1, len(user_text) // 4),
+                    source=cap_source,
+                    desk=desk,
+                )
                 if meter_refusal:
                     return model, meter_refusal
             except Exception:
