@@ -49,7 +49,22 @@ If `findmnt` shows nothing, plug BACKUP1 in and wait for the desktop/usbmount
 to attach it. Do not `mkdir` backups under the empty stub.
 
 Disk watch warns at 80% and is critical at 90% on `/`, `/data`, and
-`/media/rg/BACKUP1`. An unmounted BACKUP1 is a warning (not a `df` of `/`).
+`/media/rg/BACKUP1` (df / mount). du and grower `find` cover `/` and
+`/data` only unless `DISK_WATCH_SCAN_BACKUP=1`. An unmounted BACKUP1 is
+a warning (not a `df` of `/`). Scan timeouts log and continue — they
+must not return exit 2 (reserved for real critical usage).
+
+The installed unit's `Documentation=` must be a file that exists:
+
+```
+Documentation=file://%h/empire-repo/deploy/README.md
+Documentation=file://%h/empire-repo/docs/runbooks/empiredell-family-data.md
+```
+
+`~/empire-ops/deploy/README.md` is not in that ops copy. After Rafael
+approves a merge, copy `deploy/disk_watch.sh` onto the live ops path
+**or** point `ExecStart=` at `~/empire-repo/deploy/disk_watch.sh`.
+
 Cleanup is list-only:
 
 ```bash

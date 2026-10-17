@@ -6,7 +6,7 @@ This directory is install-only. It does not deploy application code.
 | Script | Purpose |
 |---|---|
 | `backup_family_data.sh` | Nightly encrypted `tar.zst` of family trees onto BACKUP1, restore-test, retention, optional rclone |
-| `disk_watch.sh` | 80% warn / 90% critical on `/`, `/data`, and `/media/rg/BACKUP1`; dry-run cleanup list |
+| `disk_watch.sh` | 80% warn / 90% critical on `/`, `/data`, and `/media/rg/BACKUP1` (df/mount); du/find `/` and `/data` only unless `DISK_WATCH_SCAN_BACKUP=1`; dry-run cleanup list |
 
 Systemd user units live in `systemd/user/`. The short host runbook is
 [`docs/runbooks/empiredell-family-data.md`](../docs/runbooks/empiredell-family-data.md).
@@ -166,8 +166,35 @@ systemctl --user daemon-reload
 systemctl --user enable --now empire-disk-watch.timer
 ```
 
-Watches `/`, `/data`, and `/media/rg/BACKUP1`. If BACKUP1 is unplugged the
-watch treats that as a **warning** (it will not `df` the empty stub on `/`).
+Watches `/`, `/data`, and `/media/rg/BACKUP1` (df / mount). du and grower
+`find` run on `/` and `/data` only. BACKUP1 is skipped for those scans
+unless `DISK_WATCH_SCAN_BACKUP=1` (vfat + thousands of `recup_dir.*`
+trees used to make hourly runs miss alerts). Bound each du with
+`timeout` / `nice` / `ionice` (`DU_TIMEOUT_S`, default 60). Top-N uses
+an `awk` reader that consumes the whole ranking so systemd's
+`IgnoreSIGPIPE=yes` cannot turn a closed pipe into exit 2 (reserved for
+real critical usage).
+
+The repo unit's `Documentation=` lines point at this README and
+[`docs/runbooks/empiredell-family-data.md`](../docs/runbooks/empiredell-family-data.md):
+
+```
+Documentation=file://%h/empire-repo/deploy/README.md
+Documentation=file://%h/empire-repo/docs/runbooks/empiredell-family-data.md
+ExecStart=%h/empire-repo/deploy/disk_watch.sh
+```
+
+A live copy under `~/empire-ops/deploy/` is **not** a git checkout and
+has no README. If the installed unit still says
+`file://%h/empire-ops/deploy/README.md`, point `Documentation=` (and
+preferably `ExecStart=`) at the repo paths above. After Rafael's yes,
+copy the merged script to `~/empire-ops/deploy/disk_watch.sh` **or**
+repoint the unit at the repo path, then
+`systemctl --user start empire-disk-watch.service` once and read the
+journal.
+
+If BACKUP1 is unplugged the watch treats that as a **warning** (it will
+not `df` the empty stub on `/`).
 
 Alerts use the existing Max notification API
 (`POST /api/v1/notifications/internal`) and, when `SENDGRID_API_KEY` or

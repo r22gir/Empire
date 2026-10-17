@@ -4,12 +4,19 @@
 # Cleanup mode is dry-run only: it lists candidates and never deletes.
 # BACKUP1 is vfat and may be unplugged — an unmounted volume is a warning,
 # not a df of the empty /media/rg/BACKUP1 stub on the root disk.
+# BACKUP1 is df/mount-only by default (thousands of recup_dir.* trees). Set
+# DISK_WATCH_SCAN_BACKUP=1 to also du/find it. Top-N pipelines consume all
+# input so systemd IgnoreSIGPIPE cannot turn a closed head pipe into exit 2.
 #
 # Env:
 #   DISK_WATCH_MOUNTS   Space-separated mounts (default "/ /data /media/rg/BACKUP1")
 #   WARN_PCT / CRIT_PCT Thresholds (default 80 / 90)
 #   DISK_USAGE_FILE     Mock df table for tests (lines: "<mount> <pct|unmounted>")
-#   SCAN_ROOTS          Roots for du / grower scan (default: the mounts)
+#   SCAN_ROOTS          Roots for du / grower scan (default "/ /data")
+#   DISK_WATCH_SCAN_BACKUP=1  Also du/find BACKUP1 (off by default)
+#   DU_TIMEOUT_S        Bound du/find seconds (default 60)
+#   DU_DEPTH            du -d depth (default 2)
+#   GROWER_MAXDEPTH     find -maxdepth (default 6)
 #   MAX_NOTIFY_URL      Max internal notification endpoint
 #   ALERT_EMAIL         Forced to empirebox2026@gmail.com outside tests
 #   EMPIRE_OPS_TEST_MODE=1  Refuse live mounts / require temp SCAN_ROOTS
@@ -17,8 +24,8 @@
 # Exit:
 #   0  all mounts below warn
 #   1  warning threshold hit (or alert could not be delivered)
-#   2  critical threshold hit
-#   3  usage collection / scan failure
+#   2  critical threshold hit (usage only — never a scan/pipe failure)
+#   3  usage collection failure (df/mock table). Scan problems log and continue.
 set -euo pipefail
 
 umask 077
@@ -28,8 +35,12 @@ WARN_PCT="${WARN_PCT:-80}"
 CRIT_PCT="${CRIT_PCT:-90}"
 DISK_WATCH_MOUNTS="${DISK_WATCH_MOUNTS:-/ /data /media/rg/BACKUP1}"
 BACKUP_WATCH_VOLUME="${BACKUP_WATCH_VOLUME:-/media/rg/BACKUP1}"
-SCAN_ROOTS="${SCAN_ROOTS:-$DISK_WATCH_MOUNTS}"
+SCAN_ROOTS="${SCAN_ROOTS:-/ /data}"
 DISK_USAGE_FILE="${DISK_USAGE_FILE:-}"
+DU_TIMEOUT_S="${DU_TIMEOUT_S:-60}"
+DU_DEPTH="${DU_DEPTH:-2}"
+GROWER_MAXDEPTH="${GROWER_MAXDEPTH:-6}"
+FIND_TIMEOUT_S="${FIND_TIMEOUT_S:-$DU_TIMEOUT_S}"
 MAX_NOTIFY_URL="${MAX_NOTIFY_URL:-http://127.0.0.1:8000/api/v1/notifications/internal}"
 HARD_ALERT_EMAIL="empirebox2026@gmail.com"
 TOP_N="${TOP_N:-20}"
@@ -70,7 +81,8 @@ usage() {
   cat <<'EOF'
 Usage: disk_watch.sh [--cleanup] [--help]
 
-  (default)  Check /, /data, and /media/rg/BACKUP1. Warn at 80%, critical at 90%.
+  (default)  Check /, /data, and /media/rg/BACKUP1 (df/mount). Warn at 80%, critical at 90%.
+             du/find only /, /data unless DISK_WATCH_SCAN_BACKUP=1.
   --cleanup  Dry-run only: list reclaim candidates, do not delete.
 
 Alerts go to Max notifications / Max email (empirebox2026@gmail.com)
@@ -188,41 +200,121 @@ mount_pct() {
   df -P "$mount" | awk 'NR==2 { gsub(/%/,"",$5); print $5 }'
 }
 
+is_backup_watch_volume() {
+  local p="$1"
+  [[ "$p" == "$BACKUP_WATCH_VOLUME" || "$p" == /media/rg/BACKUP1 ]]
+}
+
+scan_backup_enabled() {
+  [[ "${DISK_WATCH_SCAN_BACKUP:-0}" == "1" ]]
+}
+
+should_du_or_find() {
+  local root="$1"
+  if is_backup_watch_volume "$root" && ! scan_backup_enabled; then
+    return 1
+  fi
+  return 0
+}
+
+# Run a command with timeout + nice/ionice. Never use `head` on this output:
+# systemd IgnoreSIGPIPE=yes turns EPIPE from `head` into sort exit 2, and
+# pipefail then aborts the script with the critical usage code.
+_run_bounded() {
+  local timeout_s="$1"
+  shift
+  local -a cmd=()
+  if command -v timeout >/dev/null 2>&1; then
+    cmd+=(timeout "$timeout_s")
+  fi
+  if command -v nice >/dev/null 2>&1; then
+    cmd+=(nice -n 19)
+  fi
+  if command -v ionice >/dev/null 2>&1; then
+    cmd+=(ionice -c3)
+  fi
+  cmd+=("$@")
+  "${cmd[@]}"
+}
+
+_bounded_du() {
+  local root="$1"
+  _run_bounded "$DU_TIMEOUT_S" du -x -d "$DU_DEPTH" --exclude='recup_dir.*' "$root"
+}
+
+# awk prints the first n lines and keeps reading the rest so sort never
+# hits a closed pipe (unlike `head -n`, which exits early).
+_top_n_consume() {
+  awk -v n="$TOP_N" 'NR<=n {print}'
+}
+
 log_top_space_users() {
   local root="$1"
   [[ -d "$root" ]] || { log "skip du: $root is not a directory"; return 0; }
+  if ! should_du_or_find "$root"; then
+    log "skip du: $root (BACKUP1 scan disabled; set DISK_WATCH_SCAN_BACKUP=1 to enable)"
+    return 0
+  fi
   if [[ "${EMPIRE_OPS_TEST_MODE:-}" != "1" ]]; then
-    if [[ "$root" == "$BACKUP_WATCH_VOLUME" || "$root" == /media/rg/BACKUP1 ]]; then
-      if ! volume_is_mounted "$root"; then
-        log "skip du: $root is not mounted"
-        return 0
-      fi
+    if is_backup_watch_volume "$root" && ! volume_is_mounted "$root"; then
+      log "skip du: $root is not mounted"
+      return 0
     fi
   fi
   log "top ${TOP_N} space users under $root"
-  # -x stays on one filesystem; failures on unreadable dirs are ignored.
-  du -x -d 2 "$root" 2>/dev/null | sort -nr | head -n "$TOP_N" | while IFS= read -r line; do
-    log "  du $line"
-  done
+
+  # Finish du (or time it out) before ranking. Never `head` the pipe:
+  # systemd IgnoreSIGPIPE=yes turns that EPIPE into sort exit 2, which
+  # pipefail used to report as a critical usage failure.
+  local raw out line rc=0
+  raw="$(mktemp "${TMPDIR:-/tmp}/disk-watch-du.XXXXXX")"
+  out="$(mktemp "${TMPDIR:-/tmp}/disk-watch-top.XXXXXX")"
+  set +e
+  _bounded_du "$root" >"$raw" 2>/dev/null
+  rc=$?
+  set -e
+  if [[ "$rc" -eq 124 ]]; then
+    log "du timed out for $root"
+    rm -f "$raw" "$out"
+    return 0
+  fi
+  set +o pipefail
+  sort -nr "$raw" | _top_n_consume >"$out" || true
+  set -o pipefail
+  while IFS= read -r line; do
+    [[ -n "$line" ]] && log "  du $line"
+  done <"$out"
+  rm -f "$raw" "$out"
+  return 0
+}
+
+_bounded_find() {
+  local root="$1"
+  shift
+  _run_bounded "$FIND_TIMEOUT_S" find "$root" -xdev -maxdepth "$GROWER_MAXDEPTH" "$@"
 }
 
 grower_candidates() {
-  local root name
+  local root
   for root in $SCAN_ROOTS; do
     [[ -d "$root" ]] || continue
+    if ! should_du_or_find "$root"; then
+      continue
+    fi
+    # Timeouts / unreadable dirs are ignored; never abort the watch.
     # node_modules and npm caches
-    find "$root" -type d \( -name node_modules -o -name '.npm' -o -name 'npm-cache' \) 2>/dev/null
+    _bounded_find "$root" -type d \( -name node_modules -o -name '.npm' -o -name 'npm-cache' \) 2>/dev/null || true
     # Next.js build output
-    find "$root" -type d -name '.next' 2>/dev/null
+    _bounded_find "$root" -type d -name '.next' 2>/dev/null || true
     # pip cache
-    find "$root" -type d \( -path '*/.cache/pip' -o -name 'pip-cache' \) 2>/dev/null
+    _bounded_find "$root" -type d \( -path '*/.cache/pip' -o -name 'pip-cache' \) 2>/dev/null || true
     # uploads
-    find "$root" -type d -name uploads 2>/dev/null
+    _bounded_find "$root" -type d -name uploads 2>/dev/null || true
     # tmp trees
     if [[ "$root" == "/tmp" || "$root" == */tmp ]]; then
       printf '%s\n' "$root"
     else
-      find "$root" -type d -name tmp 2>/dev/null
+      _bounded_find "$root" -type d -name tmp 2>/dev/null || true
     fi
   done
   # Host-wide known growers (skipped in test mode — live paths).
@@ -246,10 +338,10 @@ log_known_growers() {
       continue
     fi
     if [[ -e "$path" ]]; then
-      size="$(du -sh "$path" 2>/dev/null | awk '{print $1}')"
-      log "  $size  $path"
+      size="$(_run_bounded "${DU_TIMEOUT_S}" du -sh "$path" 2>/dev/null | awk '{print $1}')" || true
+      log "  ${size:-?}  $path"
     fi
-  done < <(grower_candidates | sort -u)
+  done < <(grower_candidates | sort -u) || true
 }
 
 cleanup_list() {
@@ -264,8 +356,8 @@ cleanup_list() {
       continue
     fi
     if [[ -e "$path" ]]; then
-      size="$(du -sh "$path" 2>/dev/null | awk '{print $1}')"
-      log "  CANDIDATE  $size  $path"
+      size="$(_run_bounded "${DU_TIMEOUT_S}" du -sh "$path" 2>/dev/null | awk '{print $1}')" || true
+      log "  CANDIDATE  ${size:-?}  $path"
       listed=1
     fi
   done < <(grower_candidates | sort -u)
