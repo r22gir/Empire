@@ -1,6 +1,6 @@
 [Unit]
 Description=Hourly EmpireDell disk watch
-Documentation=file://%h/empire-repo/deploy/README.md
+Documentation=file://%h/empire-ops/deploy/README.md
 
 [Timer]
 OnCalendar=hourly

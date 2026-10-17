@@ -48,6 +48,8 @@ export TOP_N=5
 echo "== disk_watch: defaults include BACKUP1 =="
 expect_file_contains "$SCRIPT" '/media/rg/BACKUP1' \
   "default mounts include /media/rg/BACKUP1"
+expect_file_contains "$SCRIPT" 'SCAN_ROOTS="${SCAN_ROOTS:-/ /data}"' \
+  "default SCAN_ROOTS is / and /data, not BACKUP1"
 
 echo "== disk_watch: below warn exits 0, no alert =="
 printf '/ 10\n/data 20\n/media/rg/BACKUP1 15\n' >"$USAGE"
@@ -131,6 +133,118 @@ expect_file_contains "$ROOT/cleanup.log" "uploads" "cleanup lists uploads"
 expect_file "$SCAN/proj/node_modules/pkg/index.js" "cleanup did not delete node_modules"
 expect_file "$SCAN/app/.next/cache/x" "cleanup did not delete .next"
 expect_file "$SCAN/site/uploads/a.jpg" "cleanup did not delete uploads"
+
+echo "== disk_watch: SIGPIPE-safe top-N on a fat tree, healthy usage =="
+python3 - "$SCAN/many" <<'PY'
+import os, sys
+root = sys.argv[1]
+os.makedirs(root, exist_ok=True)
+for i in range(5500):
+    d = os.path.join(root, f"d{i}")
+    os.makedirs(d, exist_ok=True)
+    with open(os.path.join(d, "f"), "w", encoding="utf-8") as fh:
+        fh.write("x")
+PY
+printf '/ 10\n/data 10\n/media/rg/BACKUP1 15\n' >"$USAGE"
+rm -f "$ALERT_LOG"
+set +e
+trap '' PIPE
+"$SCRIPT" >"$ROOT/sigpipe.log" 2>&1
+rc=$?
+trap - PIPE
+set -e
+expect_eq "$rc" "0" "fat-tree scan under ignored SIGPIPE exits 0"
+if grep -q "Broken pipe" "$ROOT/sigpipe.log"; then
+  fail "fat-tree scan must not log Broken pipe"
+else
+  pass "fat-tree scan has no Broken pipe"
+fi
+top_n_lines="$(grep -c " du " "$ROOT/sigpipe.log" || true)"
+if [[ "${top_n_lines:-0}" -ge 1 ]]; then
+  pass "fat-tree scan logged top-N du lines ($top_n_lines)"
+else
+  fail "fat-tree scan should log top-N du lines"
+fi
+expect_file_contains "$ROOT/sigpipe.log" "top 5 space users under $SCAN" \
+  "fat-tree scan still logs the top-N header"
+
+echo "== disk_watch: du timeout logs and continues, exit 0 =="
+TIMEOUT_SCAN="$ROOT/timeout-scan"
+mkdir -p "$TIMEOUT_SCAN/leaf"
+printf 'x\n' >"$TIMEOUT_SCAN/leaf/f"
+STUB_BIN="$ROOT/bin"
+mkdir -p "$STUB_BIN"
+cat >"$STUB_BIN/du" <<'EOF'
+#!/usr/bin/env bash
+sleep 30
+exit 0
+EOF
+chmod +x "$STUB_BIN/du"
+printf '/ 10\n/data 10\n/media/rg/BACKUP1 15\n' >"$USAGE"
+set +e
+PATH="$STUB_BIN:$PATH" DU_TIMEOUT_S=1 SCAN_ROOTS="$TIMEOUT_SCAN" \
+  "$SCRIPT" >"$ROOT/timeout.log" 2>&1
+rc=$?
+set -e
+expect_eq "$rc" "0" "du timeout continues and exits 0"
+expect_file_contains "$ROOT/timeout.log" "du timed out for $TIMEOUT_SCAN" \
+  "logs du timed out for the scan root"
+
+echo "== disk_watch: BACKUP1 is not du/find'd unless DISK_WATCH_SCAN_BACKUP=1 =="
+BACKUP_FAKE="$ROOT/backup1"
+mkdir -p "$BACKUP_FAKE/recup_dir.1" "$BACKUP_FAKE/keep"
+printf 'blob\n' >"$BACKUP_FAKE/recup_dir.1/x"
+printf 'keep\n' >"$BACKUP_FAKE/keep/y"
+printf '/ 10\n/data 10\n/media/rg/BACKUP1 15\n' >"$USAGE"
+set +e
+BACKUP_WATCH_VOLUME="$BACKUP_FAKE" \
+  SCAN_ROOTS="$SCAN $BACKUP_FAKE" \
+  DISK_WATCH_SCAN_BACKUP=0 \
+  "$SCRIPT" >"$ROOT/backup-skip.log" 2>&1
+rc=$?
+set -e
+expect_eq "$rc" "0" "BACKUP1 skip path exits 0"
+expect_file_contains "$ROOT/backup-skip.log" "BACKUP1 scan disabled" \
+  "logs that BACKUP1 du/find is skipped"
+if grep -q "top 5 space users under $BACKUP_FAKE" "$ROOT/backup-skip.log"; then
+  fail "BACKUP1 must not be du'd when DISK_WATCH_SCAN_BACKUP is unset"
+else
+  pass "BACKUP1 was not du'd by default"
+fi
+if grep -q "recup_dir" "$ROOT/backup-skip.log"; then
+  fail "BACKUP1 recup_dir must not appear in grower/du output by default"
+else
+  pass "BACKUP1 recup_dir was not scanned by default"
+fi
+
+set +e
+BACKUP_WATCH_VOLUME="$BACKUP_FAKE" \
+  SCAN_ROOTS="$SCAN $BACKUP_FAKE" \
+  DISK_WATCH_SCAN_BACKUP=1 \
+  "$SCRIPT" >"$ROOT/backup-scan.log" 2>&1
+rc=$?
+set -e
+expect_eq "$rc" "0" "BACKUP1 opt-in scan exits 0"
+expect_file_contains "$ROOT/backup-scan.log" "top 5 space users under $BACKUP_FAKE" \
+  "DISK_WATCH_SCAN_BACKUP=1 dus BACKUP1"
+
+echo "== disk_watch: unit ExecStart/Documentation stay on empire-ops =="
+UNIT="$REPO_ROOT/deploy/systemd/user/empire-disk-watch.service"
+TIMER="$REPO_ROOT/deploy/systemd/user/empire-disk-watch.timer"
+expect_file_contains "$UNIT" 'ExecStart=%h/empire-ops/deploy/disk_watch.sh' \
+  "unit ExecStart is ~/empire-ops/deploy/disk_watch.sh"
+expect_file_contains "$UNIT" 'Documentation=file://%h/empire-ops/deploy/README.md' \
+  "unit Documentation points at the ops README copy"
+expect_file_contains "$UNIT" \
+  'Documentation=file://%h/empire-ops/docs/runbooks/empiredell-family-data.md' \
+  "unit Documentation points at the ops runbook copy"
+expect_file_contains "$TIMER" 'Documentation=file://%h/empire-ops/deploy/README.md' \
+  "timer Documentation points at the ops README copy"
+if grep -q 'empire-repo' "$UNIT"; then
+  fail "disk-watch unit must not point at ~/empire-repo"
+else
+  pass "disk-watch unit does not mention empire-repo"
+fi
 
 echo "== disk_watch: test mode refuses live scan / live df =="
 set +e

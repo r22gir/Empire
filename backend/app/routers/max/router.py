@@ -1578,6 +1578,7 @@ def _hermes_channel_status_response(request: ChatRequest) -> ChatResponse:
 ARCHIVEFORGE_ROUTE_MARKERS = (
     "life magazine",
     "archiveforge",
+    "archive forge",
     "cover search",
     "cover lookup",
     "issue lookup",
@@ -1763,8 +1764,11 @@ def _is_archiveforge_info_request(message: str | None) -> bool:
     if any(marker in text for marker in ARCHIVEFORGE_INFO_MARKERS):
         return True
     # Route general question-style ArchiveForge asks to a truthful status/workflow response.
-    return ("archiveforge" in text or "life magazine" in text) and any(
-        token in text for token in ("what", "how", "help", "can", "publish", "workflow", "working", "features")
+    return (
+        "archiveforge" in text or "archive forge" in text or "life magazine" in text
+    ) and any(
+        token in text
+        for token in ("what", "how", "help", "can", "publish", "workflow", "working", "features")
     )
 
 
@@ -3160,7 +3164,22 @@ async def _chat_with_max_service(
     through here, so every exchange — including early returns, refusals
     and exceptions — lands in the session journal with the image copied.
     Best-effort: journal failures never change the response.
+
+    Founder activity is marked here (not only on the HTTP /chat handler)
+    so Telegram and WhatsApp in-process calls also count.
     """
+    if canonical_founder:
+        try:
+            from app.services.founder_activity import maybe_mark_founder_active
+            if canonical_channel == "telegram":
+                _mark_src = "telegram"
+            elif canonical_channel == "whatsapp":
+                _mark_src = "whatsapp_chat"
+            else:
+                _mark_src = "max_chat"
+            maybe_mark_founder_active(True, _mark_src)
+        except Exception:
+            logger.debug("founder activity mark skipped", exc_info=True)
     from datetime import datetime as _jdt, timezone as _jtz
     _j_start = _jdt.now(_jtz.utc)
     _j_message = request.message
@@ -4747,6 +4766,11 @@ async def _chat_stream_impl(request: ChatRequest, _founder_session: dict | None 
         pass
     if founder:
         logger.info(f"Founder message (stream) detected via chat_id={request.chat_id}")
+        try:
+            from app.services.founder_activity import maybe_mark_founder_active
+            maybe_mark_founder_active(True, "max_chat_stream")
+        except Exception:
+            logger.debug("founder activity mark skipped", exc_info=True)
 
     is_safe, reason = check_input(request.message, message_context=msg_ctx)
     if not is_safe:
@@ -7152,6 +7176,11 @@ async def verify_pin(request: VerifyPinRequest, http_request: Request = None):
     import os
     from app.services.max.founder_session import resolve_founder_session
     if resolve_founder_session(http_request).get("verified"):
+        try:
+            from app.services.founder_activity import maybe_mark_founder_active
+            maybe_mark_founder_active(True, "founder_session")
+        except Exception:
+            logger.debug("founder activity mark skipped", exc_info=True)
         return {"ok": True, "founder_session": True}
     # H62 FIX (2026-08-22): empty default — pre-fix this was "7777" (privilege-escalation literal). HOTFIX 4.2 only fixed tool_executor.py.
     from app.services.max.restricted_tool_resume import founder_pin_matches
@@ -7165,6 +7194,11 @@ async def verify_pin(request: VerifyPinRequest, http_request: Request = None):
         )
     if not founder_pin_matches(request.pin):
         raise HTTPException(status_code=403, detail="Invalid PIN")
+    try:
+        from app.services.founder_activity import maybe_mark_founder_active
+        maybe_mark_founder_active(True, "founder_pin")
+    except Exception:
+        logger.debug("founder activity mark skipped", exc_info=True)
 
 
 class ResumeRestrictedRequest(BaseModel):
