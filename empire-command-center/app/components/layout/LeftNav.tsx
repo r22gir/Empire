@@ -12,7 +12,7 @@ import {
   Crown, Scissors, TreePine, Gem, Share2, Bot, ShieldCheck, Server, Lightbulb,
   Cpu, Activity, Coins, Store, Wrench, Headphones, Target, Truck,
   Users, Repeat, Globe, FileText, Sparkles, Wallet, Sun, Heart,
-  ChevronsLeft, ChevronsRight, Camera, PawPrint, Monitor, Menu, X, PenTool,   CircleHelp, LifeBuoy, Gauge,
+  ChevronsLeft, ChevronsRight, Camera, PawPrint, Monitor, Menu, X, PenTool,   CircleHelp, LifeBuoy, Gauge, Code2,
   Building2, ShoppingCart, LayoutDashboard, Archive, BadgeCheck, FileAudio, DollarSign,
   ChevronDown, ChevronRight, LayoutGrid,
   FileStack,
@@ -56,6 +56,7 @@ export const NAV_GROUPS: NavGroup[] = [
       { id: 'minimax-usage', name: 'MiniMax usage', icon: <Gauge size={16} />, status: 'active', color: '#b8960c', screen: 'minimax-usage' as ScreenMode, kind: 'screen' },
       { id: 'archivo', name: 'Archivo', icon: <Archive size={16} />, status: 'active', color: '#b8960c', kind: 'product' },
       { id: 'ayuda', name: 'Ayuda', icon: <CircleHelp size={16} />, status: 'active', color: '#b8960c', kind: 'product' },
+      { id: 'pedir-cursor', name: 'Pedir a Cursor', icon: <Code2 size={16} />, status: 'active', color: '#b8960c', kind: 'product' },
       { id: 'workroom', name: 'Empire Workroom', icon: <Scissors size={16} />, status: 'active', color: '#16a34a', kind: 'product' },
       { id: 'craft', name: 'WoodCraft', icon: <TreePine size={16} />, status: 'active', color: '#ca8a04', kind: 'product' },
       // Daily Summary is the inline Dashboard panel (rightPanel) — toggled, not navigated.
@@ -169,6 +170,7 @@ const FAMILY_PAGE_HREF: Record<string, string> = {
   cibernettic: '/amp/empresas/cibernettic',
   archivo: '/archivo',
   ayuda: '/ayuda',
+  'pedir-cursor': '/pedir-cursor',
 };
 
 /**
@@ -184,6 +186,7 @@ export function editionNavGroups(edition: string = editionFromEnv()): NavGroup[]
       if (item.id === 'cibernettic' && !ampEdition) return false;
       if (item.id === 'archivo' && !ampEdition && !maxineEdition) return false;
       if (item.id === 'ayuda' && !ampEdition && !maxineEdition) return false;
+      if (item.id === 'pedir-cursor' && !ampEdition && !maxineEdition) return false;
       if (item.id === 'family-help' && (ampEdition || maxineEdition)) return false;
       if (item.id === 'minimax-usage' && (ampEdition || maxineEdition)) return false;
       if (maxineEdition) return !MAXINE_HIDDEN_NAV.has(item.id);

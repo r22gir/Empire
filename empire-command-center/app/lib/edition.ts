@@ -25,6 +25,7 @@ export const MAXINE_NAV_LABELS: Record<string, string> = {
   'daily-summary': 'Resumen del día',
   archivo: 'Archivo',
   ayuda: 'Ayuda',
+  'pedir-cursor': 'Pedir a Cursor',
 };
 
 export const AMP_NAV_LABELS: Record<string, string> = {
@@ -38,6 +39,7 @@ export const AMP_NAV_LABELS: Record<string, string> = {
   'daily-summary': 'Resumen del día',
   archivo: 'Archivo',
   ayuda: 'Ayuda',
+  'pedir-cursor': 'Pedir a Cursor',
 };
 
 export function editionFromEnv(): string {

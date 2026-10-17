@@ -42,6 +42,26 @@ export default function DashboardScreen({ activeTab }: { activeTab: BusinessTab 
       </div>
       <div style={{ marginTop: 12, display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'flex-start' }}>
         {family ? <UsageCard /> : null}
+        {family ? (
+          <a
+            href="/pedir-cursor"
+            style={{
+              display: 'inline-block',
+              background: '#fff',
+              border: '1px solid #e5e2dc',
+              borderRadius: 12,
+              padding: '12px 14px',
+              minWidth: 220,
+              color: '#1a1a1a',
+              textDecoration: 'none',
+            }}
+          >
+            <div style={{ fontSize: 11, fontWeight: 800, letterSpacing: 0.6, color: '#9a7b2f' }}>PEDIR A CURSOR</div>
+            <div style={{ marginTop: 6, fontSize: 12, color: '#5C5650' }}>
+              Esto no lanza nada solo: Chief e lo revisa, te muestra el cambio y Rafael da el sí final.
+            </div>
+          </a>
+        ) : null}
         {family ? <HelpMenu /> : null}
         {family ? <ArchivoCard /> : null}
         <WhatsAppStatus />

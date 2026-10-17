@@ -74,7 +74,7 @@ import sqlite3
 from datetime import datetime, timezone
 from typing import Optional
 
-HEAVY_KINDS = frozenset({"job", "generate", "desk_task", "vision", "social", "heavy"})
+HEAVY_KINDS = frozenset({"job", "generate", "desk_task", "vision", "social", "heavy", "cursor_request"})
 BACKGROUND_KINDS = frozenset({"desk_task", "job", "generate", "social"})
 # Overage allowlist: named interactive sources only. Empty / unknown / desk = background.
 # dashboard is the old Command Center default; interactive only when desk is unset.
