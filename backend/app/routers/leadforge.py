@@ -1712,6 +1712,11 @@ class NoteRequest(BaseModel):
     text: str
 
 
+class SendConfirm(BaseModel):
+    confirm_token: Optional[str] = None
+    confirm: bool = False
+
+
 @router.post("/leadforge/campaigns")
 def create_campaign(body: CampaignCreate):
     """Create a new campaign."""
@@ -1746,7 +1751,7 @@ def get_draft(draft_id: int):
     """Get single draft with full detail."""
     result = cs.get_draft(draft_id)
     if not result:
-        raise HTTPException(404, "Draft not found")
+        raise HTTPException(404, "No encuentro ese borrador, manito.")
     return {"draft": result}
 
 
@@ -1755,16 +1760,30 @@ def update_draft(draft_id: int, body: DraftUpdate):
     """Edit a draft (subject, body, attachments, etc). Sets status to 'edited'."""
     result = cs.update_draft(draft_id, body.model_dump(exclude_none=True))
     if not result:
-        raise HTTPException(404, "Draft not found")
+        raise HTTPException(404, "No encuentro ese borrador, manito.")
     return {"draft": result}
 
 
+@router.post("/leadforge/campaigns/drafts/{draft_id}/send-preview")
+def send_draft_preview(draft_id: int):
+    """Return masked recipients + confirm token. Does not send."""
+    if not cs.draft_exists(draft_id):
+        raise HTTPException(404, "No encuentro ese borrador, manito.")
+    preview = cs.preview_send_drafts([draft_id])
+    if preview.get("http_status"):
+        raise HTTPException(preview["http_status"], preview.get("error") or "error")
+    return preview
+
+
 @router.post("/leadforge/campaigns/drafts/{draft_id}/send")
-async def send_draft(draft_id: int):
-    """Send a single draft via email service."""
-    result = await cs.send_draft(draft_id)
+async def send_draft(draft_id: int, body: SendConfirm | None = None):
+    """Send a single draft only with a fresh confirm token and confirm=true."""
+    payload = body or SendConfirm()
+    result = await cs.send_draft(
+        draft_id, confirm_token=payload.confirm_token, confirm=payload.confirm,
+    )
     if "error" in result:
-        raise HTTPException(400, result["error"])
+        raise HTTPException(result.get("http_status") or 400, result["error"])
     return result
 
 
@@ -1819,10 +1838,26 @@ def get_campaign(campaign_id: int):
     return {"campaign": result}
 
 
+@router.post("/leadforge/campaigns/{campaign_id}/send-preview")
+def send_campaign_preview(campaign_id: int):
+    """Return masked recipients + confirm token for reviewed drafts. Does not send."""
+    if not cs.get_campaign(campaign_id):
+        raise HTTPException(404, "Campaign not found")
+    preview = cs.preview_send_campaign(campaign_id)
+    if preview.get("http_status"):
+        raise HTTPException(preview["http_status"], preview.get("error") or "error")
+    return preview
+
+
 @router.post("/leadforge/campaigns/{campaign_id}/send-reviewed")
-async def send_reviewed(campaign_id: int):
-    """Batch send all reviewed/edited drafts for a campaign."""
-    result = await cs.send_all_reviewed(campaign_id)
+async def send_reviewed(campaign_id: int, body: SendConfirm | None = None):
+    """Batch send reviewed drafts only with a fresh confirm token and confirm=true."""
+    payload = body or SendConfirm()
+    result = await cs.send_all_reviewed(
+        campaign_id, confirm_token=payload.confirm_token, confirm=payload.confirm,
+    )
+    if "error" in result:
+        raise HTTPException(result.get("http_status") or 400, result["error"])
     return result
 
 

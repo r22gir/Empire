@@ -21,8 +21,16 @@ from app.db.database import resolve_task_db_path
 DB_PATH = resolve_task_db_path()
 
 
+def _db_path() -> str:
+    return resolve_task_db_path()
+
+
 def _get_conn() -> sqlite3.Connection:
-    conn = sqlite3.connect(DB_PATH)
+    path = _db_path()
+    parent = os.path.dirname(path)
+    if parent:
+        os.makedirs(parent, exist_ok=True)
+    conn = sqlite3.connect(path)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA foreign_keys=ON")
@@ -75,6 +83,7 @@ CREATE TABLE IF NOT EXISTS campaigns (
     responded_count INTEGER DEFAULT 0,
     bounced_count INTEGER DEFAULT 0,
     reply_rate REAL DEFAULT 0.0,
+    drafted_count INTEGER DEFAULT 0,
     send_window_start TEXT DEFAULT '08:00',
     send_window_end TEXT DEFAULT '18:00',
     skip_weekends INTEGER DEFAULT 1,
@@ -160,10 +169,19 @@ CREATE TABLE IF NOT EXISTS campaign_attachments (
 """
 
 
+def _ensure_drafted_count(conn):
+    cols = {row[1] for row in conn.execute("PRAGMA table_info(campaigns)")}
+    if "drafted_count" not in cols:
+        conn.execute("ALTER TABLE campaigns ADD COLUMN drafted_count INTEGER DEFAULT 0")
+
+
 def _init_tables():
-    os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
+    parent = os.path.dirname(_db_path())
+    if parent:
+        os.makedirs(parent, exist_ok=True)
     with _db() as conn:
         conn.executescript(_SCHEMA)
+        _ensure_drafted_count(conn)
 
 
 try:
@@ -558,7 +576,7 @@ async def execute_next_steps() -> dict:
     """Find and execute all due enrollment steps. Async for non-blocking use."""
     now = datetime.utcnow()
     now_iso = now.isoformat()
-    results = {"executed": 0, "skipped": 0, "errors": 0, "manual_tasks": 0, "details": []}
+    results = {"executed": 0, "skipped": 0, "errors": 0, "manual_tasks": 0, "drafted": 0, "details": []}
 
     # Send window check
     current_time = now.strftime("%H:%M")
@@ -651,6 +669,14 @@ async def execute_next_steps() -> dict:
                         (cid, e["id"], e["prospect_id"], e["step_id"],
                          json.dumps({"step_type": step_type, "subject": rendered_subject,
                                      "body": rendered_body[:500], "reason": f"missing {step_type} contact"})))
+                    conn.execute(
+                        """UPDATE campaigns
+                           SET drafted_count = COALESCE(drafted_count, 0) + 1,
+                               updated_at = datetime('now')
+                           WHERE id = ?""",
+                        (cid,),
+                    )
+                    results["drafted"] += 1
                     _advance_enrollment(conn, e)
                 except Exception:
                     pass
@@ -700,16 +726,24 @@ async def execute_next_steps() -> dict:
                         ),
                     )
                     results["manual_tasks"] += 1
+                    results["drafted"] += 1
+                    conn.execute(
+                        """UPDATE campaigns
+                           SET drafted_count = COALESCE(drafted_count, 0) + 1,
+                               updated_at = datetime('now')
+                           WHERE id = ?""",
+                        (cid,),
+                    )
                     results["details"].append({
                         "enrollment_id": e["id"], "action": "manual_task_created",
                         "step_type": step_type,
                     })
                 else:
-                    # Auto-execute: log the send
+                    # Honest execute: only prepare a draft. Nothing is sent.
                     conn.execute(
                         """INSERT INTO campaign_activity
                            (campaign_id, enrollment_id, prospect_id, step_id, action_type, details)
-                           VALUES (?, ?, ?, ?, 'auto_sent', ?)""",
+                           VALUES (?, ?, ?, ?, 'drafted', ?)""",
                         (
                             cid, e["id"], e["prospect_id"], e["step_id"],
                             json.dumps({
@@ -721,14 +755,17 @@ async def execute_next_steps() -> dict:
                             }),
                         ),
                     )
-                    # Update campaign sent count
                     conn.execute(
-                        "UPDATE campaigns SET sent_count = sent_count + 1, updated_at = datetime('now') WHERE id = ?",
+                        """UPDATE campaigns
+                           SET drafted_count = COALESCE(drafted_count, 0) + 1,
+                               updated_at = datetime('now')
+                           WHERE id = ?""",
                         (cid,),
                     )
                     results["executed"] += 1
+                    results["drafted"] += 1
                     results["details"].append({
-                        "enrollment_id": e["id"], "action": "auto_sent",
+                        "enrollment_id": e["id"], "action": "drafted",
                         "step_type": step_type, "prospect_id": e["prospect_id"],
                     })
 
@@ -767,6 +804,16 @@ async def execute_next_steps() -> dict:
                     "enrollment_id": e["id"], "error": str(exc),
                 })
 
+    drafted = results["drafted"]
+    if drafted == 0:
+        results["mensaje"] = (
+            "Manito, no hay campañas activas ni prospectos inscritos, "
+            "así que no se preparó nada. Activa una campaña e inscribe prospectos."
+        )
+    else:
+        results["mensaje"] = (
+            f"Preparé {drafted} borradores para que los revises. No se envió nada."
+        )
     return results
 
 
@@ -1280,6 +1327,14 @@ def get_drafts(campaign_id: Optional[int] = None, status: Optional[str] = None, 
     return _dicts(rows)
 
 
+def draft_exists(draft_id: int) -> bool:
+    with _db() as conn:
+        row = conn.execute(
+            "SELECT id FROM campaign_drafts WHERE id = ?", (draft_id,)
+        ).fetchone()
+    return bool(row)
+
+
 def get_draft(draft_id: int) -> Optional[dict]:
     """Get single draft with full detail."""
     with _db() as conn:
@@ -1319,23 +1374,119 @@ def update_draft(draft_id: int, updates: dict) -> Optional[dict]:
     return get_draft(draft_id)
 
 
-async def send_draft(draft_id: int) -> dict:
-    """Send one draft via email service. Updates status to 'sent' or 'failed'."""
-    from app.services.max.email_service import EmailService
+def _is_denied_recipient(email: str | None) -> bool:
+    try:
+        from app.services.max.send_me_link import is_denied_email
+        return bool(is_denied_email(email))
+    except Exception:
+        return False
 
-    draft = get_draft(draft_id)
-    if not draft:
-        return {"error": "Draft not found"}
 
+def _sends_today(conn) -> int:
+    row = conn.execute(
+        """SELECT COUNT(*) AS n FROM campaign_drafts
+           WHERE status = 'sent' AND date(sent_at) = date('now')"""
+    ).fetchone()
+    return int(row[0] if row else 0)
+
+
+def _draft_skip_reason(conn, draft: dict) -> Optional[str]:
+    """Return a skip code if this draft must not be sent."""
     if not draft.get("to_email"):
-        return {"error": "No recipient email on this draft"}
-
+        return "no_email"
     if draft.get("status") not in ("edited", "reviewed"):
-        return {"error": "Draft must be reviewed or edited before sending"}
+        return "not_reviewed"
+    if _is_denied_recipient(draft.get("to_email")):
+        return "deny_list"
+    enrollment_id = draft.get("enrollment_id")
+    if enrollment_id:
+        row = conn.execute(
+            "SELECT status FROM campaign_enrollments WHERE id = ?",
+            (enrollment_id,),
+        ).fetchone()
+        if row and row[0] in ("opted_out", "bounced"):
+            return str(row[0])
+    return None
+
+
+def _eligible_drafts(conn, draft_ids: List[int]) -> List[dict]:
+    if not draft_ids:
+        return []
+    q = ",".join("?" * len(draft_ids))
+    rows = conn.execute(
+        f"SELECT * FROM campaign_drafts WHERE id IN ({q})",
+        draft_ids,
+    ).fetchall()
+    by_id = {int(r["id"]): _dict(r) for r in rows}
+    out = []
+    for did in draft_ids:
+        draft = by_id.get(int(did))
+        if not draft:
+            continue
+        if _draft_skip_reason(conn, draft):
+            continue
+        out.append(draft)
+    return out
+
+
+def _apply_send_caps(drafts: List[dict], already_today: int) -> List[dict]:
+    from app.services.leadforge.send_guard import max_send_per_day, max_send_per_request
+    remaining = max(0, max_send_per_day() - already_today)
+    cap = min(max_send_per_request(), remaining)
+    return drafts[:cap]
+
+
+def preview_send_drafts(draft_ids: List[int]) -> dict:
+    """Build a confirm-token preview. Never sends."""
+    from app.services.leadforge.send_guard import (
+        ConfirmSecretMissing, make_confirm_token, mask_email, real_send_enabled,
+        MENSAJE_SEND_DISABLED,
+    )
+    with _db() as conn:
+        eligible = _apply_send_caps(
+            _eligible_drafts(conn, [int(i) for i in draft_ids]),
+            _sends_today(conn),
+        )
+    ids = [int(d["id"]) for d in eligible]
+    try:
+        token, exp = make_confirm_token(ids) if ids else make_confirm_token([])
+    except ConfirmSecretMissing as exc:
+        return {"error": str(exc), "http_status": 503, "count": 0, "draft_ids": []}
+    payload = {
+        "count": len(ids),
+        "draft_ids": ids,
+        "recipients": [mask_email(d.get("to_email")) for d in eligible],
+        "confirm_token": token,
+        "expires_at": exp,
+        "real_send_enabled": real_send_enabled(),
+    }
+    if not real_send_enabled():
+        payload["mensaje"] = MENSAJE_SEND_DISABLED
+    return payload
+
+
+def preview_send_campaign(campaign_id: int) -> dict:
+    with _db() as conn:
+        rows = conn.execute(
+            """SELECT id FROM campaign_drafts
+               WHERE campaign_id = ? AND status IN ('reviewed', 'edited')
+                 AND to_email IS NOT NULL AND to_email != ''""",
+            (campaign_id,),
+        ).fetchall()
+        ids = [int(r["id"]) for r in rows]
+    out = preview_send_drafts(ids)
+    out["campaign_id"] = campaign_id
+    return out
+
+
+def _deliver_draft(draft: dict) -> dict:
+    """Call EmailService.send for one already-authorized draft."""
+    from app.services.max.email_service import EmailService
 
     email_svc = EmailService()
     if not email_svc.is_configured:
-        return {"error": "Email service not configured (no SendGrid/SMTP credentials)"}
+        return {"draft_id": draft["id"], "status": "failed",
+                "send_result": "Email service not configured (no SendGrid/SMTP credentials)"}
 
     try:
         success = email_svc.send(
@@ -1355,10 +1506,9 @@ async def send_draft(draft_id: int) -> dict:
             """UPDATE campaign_drafts
                SET status = ?, sent_at = datetime('now'), send_result = ?
                WHERE id = ?""",
-            (new_status, send_result, draft_id),
+            (new_status, send_result, draft["id"]),
         )
         if success:
-            # Log activity
             conn.execute(
                 """INSERT INTO campaign_activity
                    (campaign_id, enrollment_id, prospect_id, step_id, action_type, details)
@@ -1366,40 +1516,82 @@ async def send_draft(draft_id: int) -> dict:
                 (
                     draft.get("campaign_id"), draft.get("enrollment_id"),
                     draft.get("prospect_id"), draft.get("step_id"),
-                    json.dumps({"draft_id": draft_id, "to": draft["to_email"],
+                    json.dumps({"draft_id": draft["id"],
                                 "subject": draft.get("subject")}),
                 ),
             )
-            # Update campaign sent_count
             if draft.get("campaign_id"):
                 conn.execute(
                     "UPDATE campaigns SET sent_count = sent_count + 1, updated_at = datetime('now') WHERE id = ?",
                     (draft["campaign_id"],),
                 )
+    return {"draft_id": draft["id"], "status": new_status, "send_result": send_result}
 
-    return {"draft_id": draft_id, "status": new_status, "send_result": send_result}
 
+def _confirmed_send(draft_ids: List[int], confirm_token: Optional[str], confirm: bool) -> dict:
+    from app.services.leadforge.send_guard import (
+        ConfirmSecretMissing, MENSAJE_BAD_TOKEN, MENSAJE_LIMIT, MENSAJE_NEED_CONFIRM,
+        MENSAJE_SEND_DISABLED, real_send_enabled, token_matches, _secret,
+    )
+    wanted = [int(i) for i in draft_ids]
+    if not confirm or not confirm_token:
+        return {"error": MENSAJE_NEED_CONFIRM, "http_status": 409, "sent": 0}
+    try:
+        _secret()
+        matched = token_matches(confirm_token, wanted)
+    except ConfirmSecretMissing as exc:
+        return {"error": str(exc), "http_status": 503, "sent": 0}
+    if not matched:
+        return {"error": MENSAJE_BAD_TOKEN, "http_status": 409, "sent": 0}
+    if not real_send_enabled():
+        return {"ok": False, "sent": 0, "mensaje": MENSAJE_SEND_DISABLED}
 
-async def send_all_reviewed(campaign_id: int) -> dict:
-    """Batch send all drafts with status='reviewed' or 'edited' that have to_email."""
     with _db() as conn:
-        rows = conn.execute(
-            """SELECT id FROM campaign_drafts
-               WHERE campaign_id = ? AND status IN ('reviewed', 'edited')
-                 AND to_email IS NOT NULL AND to_email != ''""",
-            (campaign_id,),
-        ).fetchall()
+        eligible = _eligible_drafts(conn, wanted)
+        capped = _apply_send_caps(eligible, _sends_today(conn))
+    if eligible and not capped:
+        return {"error": MENSAJE_LIMIT, "http_status": 409, "sent": 0}
 
-    results = {"sent": 0, "failed": 0, "details": []}
-    for row in rows:
-        r = await send_draft(row["id"])
+    results = {"sent": 0, "failed": 0, "skipped": 0, "details": []}
+    sendable_ids = {int(d["id"]) for d in capped}
+    for did in wanted:
+        draft = next((d for d in capped if int(d["id"]) == did), None)
+        if not draft:
+            results["skipped"] += 1
+            results["details"].append({"draft_id": did, "status": "skipped"})
+            continue
+        r = _deliver_draft(draft)
         if r.get("status") == "sent":
             results["sent"] += 1
         else:
             results["failed"] += 1
         results["details"].append(r)
-
+    results["ok"] = True
     return results
+
+
+async def send_draft(draft_id: int, confirm_token: Optional[str] = None, confirm: bool = False) -> dict:
+    """Send one draft only after a fresh confirm token and the real-send flag."""
+    if not draft_exists(draft_id):
+        return {"error": "No encuentro ese borrador, manito.", "http_status": 404}
+    result = _confirmed_send([draft_id], confirm_token, confirm)
+    if result.get("details"):
+        one = result["details"][0]
+        result = {**result, **one}
+    return result
+
+
+async def send_all_reviewed(
+    campaign_id: int,
+    confirm_token: Optional[str] = None,
+    confirm: bool = False,
+) -> dict:
+    """Batch send reviewed drafts only after confirm token + flag."""
+    preview = preview_send_campaign(campaign_id)
+    ids = preview.get("draft_ids") or []
+    result = _confirmed_send(ids, confirm_token, confirm)
+    result["campaign_id"] = campaign_id
+    return result
 
 
 # ── Attachments ────────────────────────────────────────────────────────
