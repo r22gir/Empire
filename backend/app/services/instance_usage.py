@@ -57,11 +57,10 @@ The old hard wall is replaced by a Rafael-aware soft cap:
   reserve low, stale/missing signal, or past ``FAMILY_ABSOLUTE_MAX_PCT``)
 - ``blocked`` — only ``total_spend_hit`` (this instance used the whole baseline)
 
-Overage (interactive chat/voice by the owner) is allowed only while
-``family_overage_allowed()`` is true. Background kinds
-(``desk_task``, ``job``, ``generate``, ``social``, scheduler-sourced)
-never run on overage. Missing / stale / malformed founder signal
-fail closed (no overage).
+Overage is allowlisted: only Juan's web chat, voice, and a
+user-initiated Pedir a Cursor request may use extra. Any ``desk=``
+call, empty source, or unknown source is background and never gets
+overage. Missing / stale / malformed founder signal fail closed.
 
 ``GET /api/v1/edition/usage`` is ``public_usage_summary()``: used
 percent of EmpireBox total, remaining percent until the cap, level,
@@ -77,6 +76,9 @@ from typing import Optional
 
 HEAVY_KINDS = frozenset({"job", "generate", "desk_task", "vision", "social", "heavy"})
 BACKGROUND_KINDS = frozenset({"desk_task", "job", "generate", "social"})
+# Overage allowlist: named interactive sources only. Empty / unknown / desk = background.
+INTERACTIVE_SOURCES = frozenset({"web", "web_cc", "voice", "voice_live"})
+INTERACTIVE_CURSOR_SOURCES = frozenset({"", "web", "web_cc", "user", "owner", "cursor_request"})
 DEFAULT_BASELINE_MONTHLY_TOKENS = 10_000_000.0
 MENSAJE_OVERAGE = (
     "Manito, ya pasaste tu 20% del mes. Sigues con tiempo extra "
@@ -86,22 +88,47 @@ MENSAJE_PAUSED = (
     "Manito, ya usaste tu 20% del mes y Rafael está usando Max ahora, "
     "así que lo extra queda en pausa. Vuelve a intentar en un rato."
 )
+MENSAJE_PAUSED_SIGNAL = (
+    "Manito, ya usaste tu 20% del mes y no hay señal de Rafael, "
+    "así que lo extra queda en pausa. Vuelve a intentar en un rato."
+)
+MENSAJE_PAUSED_STALE = (
+    "Manito, ya usaste tu 20% del mes y la señal de Rafael está vieja, "
+    "así que lo extra queda en pausa. Vuelve a intentar en un rato."
+)
+MENSAJE_PAUSED_RESERVE = (
+    "Manito, ya usaste tu 20% del mes y la reserva de Rafael está baja, "
+    "así que lo extra queda en pausa."
+)
 METER_OVERAGE_ES = "Tiempo extra (Rafael no está)"
 METER_PAUSED_ES = "En pausa: Rafael está usando Max"
+METER_PAUSED_SIGNAL_ES = "En pausa: no hay señal de Rafael"
+METER_PAUSED_RESERVE_ES = "En pausa: la reserva de Rafael está baja"
 
 
 def _now() -> datetime:
     return datetime.now(timezone.utc)
 
 
-def absolute_max_percent() -> float:
-    """Safety ceiling above the base 20%. Confirm with Rafael; default 40."""
+def _env_absolute_max_percent() -> float:
     raw = os.getenv("FAMILY_ABSOLUTE_MAX_PCT", "").strip() or "40"
     try:
         value = float(raw)
     except ValueError:
         value = 40.0
     return max(cap_percent(), value)
+
+
+def absolute_max_percent() -> float:
+    """Safety ceiling above the base 20%. Env default 40; signal may lower it."""
+    env_ceiling = _env_absolute_max_percent()
+    from app.services.founder_signal import read_founder_signal
+
+    signal = read_founder_signal()
+    extra = signal.get("brother_ceiling_pct")
+    if isinstance(extra, (int, float)) and not isinstance(extra, bool) and extra > 0:
+        return max(cap_percent(), min(env_ceiling, float(extra)))
+    return env_ceiling
 
 
 def family_overage_allowed(used_percent: Optional[float] = None) -> bool:
@@ -124,12 +151,63 @@ def family_overage_allowed(used_percent: Optional[float] = None) -> bool:
     return float(used_percent) < absolute_max_percent()
 
 
-def is_background_request(*, kind: str = "", source: str = "") -> bool:
+def is_interactive_request(*, kind: str = "", source: str = "", desk: Optional[str] = None) -> bool:
+    """True only for named interactive sources. Desk / empty / unknown are not."""
+    if desk:
+        return False
+    src = (source or "").strip().lower()
+    k = (kind or "").strip().lower()
+    if k == "cursor_request" and src in INTERACTIVE_CURSOR_SOURCES:
+        return True
+    return src in INTERACTIVE_SOURCES
+
+
+def is_background_request(*, kind: str = "", source: str = "", desk: Optional[str] = None) -> bool:
+    if desk:
+        return True
     labels = {(kind or "").strip().lower(), (source or "").strip().lower()}
     if labels & BACKGROUND_KINDS:
         return True
     src = (source or "").strip().lower()
-    return "scheduler" in src
+    if "scheduler" in src or src.startswith("event:"):
+        return True
+    return not is_interactive_request(kind=kind, source=source, desk=desk)
+
+
+def paused_reason_and_message(used_percent: Optional[float] = None) -> tuple[str, str]:
+    """Spanish manito copy that names why extra time is paused."""
+    from app.services.founder_signal import read_founder_signal
+
+    signal = read_founder_signal()
+    ceiling = absolute_max_percent()
+    used = used_percent if used_percent is not None else _used_percent()
+    if used is not None and float(used) >= ceiling:
+        label = f"{ceiling:g}"
+        return (
+            "ceiling",
+            f"Manito, ya llegaste al tope extra del {label}% de este mes. "
+            "Ahí se acaba el tiempo extra.",
+        )
+    reason = str(signal.get("reason") or "")
+    if reason == "stale":
+        return "signal_stale", MENSAJE_PAUSED_STALE
+    if reason in {"missing", "malformed"} or not signal.get("valid"):
+        return "signal_missing", MENSAJE_PAUSED_SIGNAL
+    if reason == "founder_active" or signal.get("founder_active"):
+        return "founder_active", MENSAJE_PAUSED
+    if reason == "reserve_low" or signal.get("reserve_ok") is False:
+        return "reserve_low", MENSAJE_PAUSED_RESERVE
+    return "signal_missing", MENSAJE_PAUSED_SIGNAL
+
+
+def meter_label_for_reason(reason: str) -> str:
+    if reason == "ceiling":
+        return f"En pausa: llegaste al tope extra ({absolute_max_percent():g}%)"
+    if reason in {"signal_missing", "signal_stale"}:
+        return METER_PAUSED_SIGNAL_ES
+    if reason == "reserve_low":
+        return METER_PAUSED_RESERVE_ES
+    return METER_PAUSED_ES
 
 
 def cap_percent() -> float:
@@ -425,6 +503,7 @@ def usage_summary() -> dict:
         "total_spend_hit": False,
         "level": "ok",
         "message": "",
+        "paused_reason": "",
         "limit_note_es": (
             f"Tu uso está limitado al {pct:g}% del uso total de MiniMax."
             if family else ""
@@ -444,6 +523,7 @@ def usage_summary() -> dict:
     used_percent = 0.0 if family else None
     level = "ok"
     message = ""
+    pause_reason = ""
     total_spend_hit = bool(baseline is not None and baseline > 0 and used >= float(baseline))
     if baseline and float(baseline) > 0 and family:
         # Public meter: share of EmpireBox total, not share of the 20% slice.
@@ -465,7 +545,7 @@ def usage_summary() -> dict:
                 message = MENSAJE_OVERAGE
             else:
                 level = "paused"
-                message = MENSAJE_PAUSED
+                pause_reason, message = paused_reason_and_message(used_percent)
         elif used_percent >= warn_at:
             level = "warn"
             message = (
@@ -489,6 +569,7 @@ def usage_summary() -> dict:
         "total_spend_hit": total_spend_hit,
         "level": level,
         "message": message,
+        "paused_reason": pause_reason if level == "paused" else "",
     })
     return empty
 
@@ -519,7 +600,7 @@ def public_usage_summary() -> dict:
     if summary.get("level") == "overage":
         public["meter_label_es"] = METER_OVERAGE_ES
     elif summary.get("level") == "paused":
-        public["meter_label_es"] = METER_PAUSED_ES
+        public["meter_label_es"] = meter_label_for_reason(summary.get("paused_reason") or "")
     else:
         public["meter_label_es"] = ""
     return public
@@ -555,8 +636,8 @@ def enforce_usage_cap(
     pct = summary.get("cap_percent") or cap_percent()
     if used is None or float(used) < float(pct):
         return None
-    # Over the base 20%. Background never uses overage.
-    if is_background_request(kind=kind, source=source):
+    # Over the base 20%. Only named interactive sources may use overage.
+    if is_background_request(kind=kind, source=source, desk=desk):
         return summary["message"]
     if family_overage_allowed(used):
         return None

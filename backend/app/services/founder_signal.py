@@ -98,7 +98,7 @@ def read_founder_signal(*, now: Optional[datetime] = None) -> dict:
         return _closed("stale")
     if not isinstance(data.get("overage_allowed"), bool):
         return _closed("malformed")
-    return {
+    parsed = {
         "schema": SCHEMA,
         "valid": True,
         "overage_allowed": bool(data["overage_allowed"]),
@@ -109,3 +109,14 @@ def read_founder_signal(*, now: Optional[datetime] = None) -> dict:
         "founder_last_active_at": data.get("founder_last_active_at"),
         "age_s": age,
     }
+    ceiling = data.get("brother_ceiling_pct")
+    if isinstance(ceiling, bool):
+        ceiling = None
+    elif isinstance(ceiling, str) and ceiling.strip():
+        try:
+            ceiling = float(ceiling.strip())
+        except ValueError:
+            ceiling = None
+    if isinstance(ceiling, (int, float)) and 0 < float(ceiling) <= 100:
+        parsed["brother_ceiling_pct"] = float(ceiling)
+    return parsed

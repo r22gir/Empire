@@ -8,6 +8,9 @@ from pathlib import Path
 from app.services.instance_usage import (
     MENSAJE_OVERAGE,
     MENSAJE_PAUSED,
+    MENSAJE_PAUSED_RESERVE,
+    MENSAJE_PAUSED_SIGNAL,
+    MENSAJE_PAUSED_STALE,
     enforce_usage_cap,
     family_overage_allowed,
     public_usage_summary,
@@ -76,7 +79,8 @@ def test_overage_allows_chat_refuses_desk_task(monkeypatch, tmp_path):
     assert summary["level"] == "overage"
     assert summary["message"] == MENSAJE_OVERAGE
     assert family_overage_allowed() is True
-    assert enforce_usage_cap(text="hola manito") is None
+    assert enforce_usage_cap(text="hola manito", source="web") is None
+    assert enforce_usage_cap(kind="chat", source="voice") is None
     refused = enforce_usage_cap(kind="desk_task", text="audit", source="scheduler")
     assert refused == MENSAJE_OVERAGE
     public = public_usage_summary()
@@ -95,17 +99,19 @@ def test_paused_when_founder_active_stale_missing_malformed(monkeypatch, tmp_pat
     # missing
     summary = usage_summary()
     assert summary["level"] == "paused"
-    assert summary["message"] == MENSAJE_PAUSED
-    assert enforce_usage_cap(text="hola") == MENSAJE_PAUSED
+    assert summary["message"] == MENSAJE_PAUSED_SIGNAL
+    assert enforce_usage_cap(text="hola", source="web") == MENSAJE_PAUSED_SIGNAL
     assert family_overage_allowed() is False
 
     stale = (datetime.now(timezone.utc) - timedelta(seconds=400)).strftime("%Y-%m-%dT%H:%M:%SZ")
     _write_signal(tmp_path, overage_allowed=True, updated_at=stale)
     assert usage_summary()["level"] == "paused"
-    assert enforce_usage_cap(text="hola") == MENSAJE_PAUSED
+    assert usage_summary()["message"] == MENSAJE_PAUSED_STALE
+    assert enforce_usage_cap(text="hola", source="web") == MENSAJE_PAUSED_STALE
 
     _write_signal(tmp_path, raw="{not json")
     assert usage_summary()["level"] == "paused"
+    assert "señal" in usage_summary()["message"]
 
     _write_signal(tmp_path, overage_allowed=False, founder_active=True, reason="founder_active")
     assert usage_summary()["level"] == "paused"
@@ -122,8 +128,10 @@ def test_absolute_max_refuses_even_if_signal_allows(monkeypatch, tmp_path):
     assert family_overage_allowed() is False
     summary = usage_summary()
     assert summary["level"] == "paused"
-    assert enforce_usage_cap(text="hola") == MENSAJE_PAUSED
-    assert enforce_usage_cap(kind="desk_task", source="scheduler") == MENSAJE_PAUSED
+    assert "40%" in summary["message"]
+    assert "tope extra" in summary["message"]
+    assert enforce_usage_cap(text="hola", source="web") == summary["message"]
+    assert enforce_usage_cap(kind="desk_task", source="scheduler") == summary["message"]
 
 
 def test_minimax_family_text_mirrors_soft_cap(monkeypatch, tmp_path):
@@ -140,9 +148,63 @@ def test_minimax_family_text_mirrors_soft_cap(monkeypatch, tmp_path):
     from app.services.minimax_meter import check, record
 
     record(kind="text", edition="amp", model="MiniMax-M3", input_tokens=250, output_tokens=0)
-    blocked = check(kind="text", edition="amp", input_tokens=1)
+    blocked = check(kind="text", edition="amp", input_tokens=1, source="web")
     assert blocked
     _write_signal(tmp_path, overage_allowed=True, founder_active=False)
-    assert check(kind="text", edition="amp", input_tokens=1) is None
+    assert check(kind="text", edition="amp", input_tokens=1, source="web") is None
+    assert check(kind="text", edition="amp", input_tokens=1, source="scheduler")
     _write_signal(tmp_path, overage_allowed=False, founder_active=True, reason="founder_active")
-    assert check(kind="text", edition="amp", input_tokens=1)
+    assert check(kind="text", edition="amp", input_tokens=1, source="web")
+
+
+def test_desk_chat_never_gets_overage_even_with_allowed_signal(monkeypatch, tmp_path):
+    """ai_router always passes kind='chat'; desk calls have desk= and empty source."""
+    _env(monkeypatch, tmp_path)
+    _set_used(250)
+    _write_signal(tmp_path, overage_allowed=True, founder_active=False)
+    refused = enforce_usage_cap(kind="chat", desk="finance", source="")
+    assert refused is not None
+    assert enforce_usage_cap(kind="chat", source="") is not None
+    assert enforce_usage_cap(kind="chat", source="unknown-job") is not None
+    assert enforce_usage_cap(kind="chat", source="web") is None
+    assert enforce_usage_cap(kind="chat", source="voice") is None
+
+
+def test_paused_names_reserve_low(monkeypatch, tmp_path):
+    _env(monkeypatch, tmp_path)
+    _set_used(250)
+    _write_signal(
+        tmp_path,
+        overage_allowed=False,
+        founder_active=False,
+        reserve_ok=False,
+        reason="reserve_low",
+    )
+    summary = usage_summary()
+    assert summary["level"] == "paused"
+    assert summary["message"] == MENSAJE_PAUSED_RESERVE
+    public = public_usage_summary()
+    assert public["meter_label_es"] == "En pausa: la reserva de Rafael está baja"
+
+
+def test_brother_ceiling_pct_uses_the_lower_value(monkeypatch, tmp_path):
+    _env(monkeypatch, tmp_path)
+    _set_used(350)  # 35%
+    _write_signal(
+        tmp_path,
+        overage_allowed=True,
+        founder_active=False,
+        extra={"brother_ceiling_pct": 30, "ignored_field": "x"},
+    )
+    assert family_overage_allowed() is False
+    summary = usage_summary()
+    assert summary["level"] == "paused"
+    assert "30%" in summary["message"]
+    _write_signal(
+        tmp_path,
+        overage_allowed=True,
+        founder_active=False,
+        extra={"brother_ceiling_pct": 50},
+    )
+    assert family_overage_allowed() is True
+    assert usage_summary()["level"] == "overage"

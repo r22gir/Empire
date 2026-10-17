@@ -1290,7 +1290,13 @@ class AIRouter:
                 return model, refusal
             try:
                 from app.services.minimax_meter import enforce as enforce_minimax
-                meter_refusal = enforce_minimax(kind="text", input_tokens=max(1, len(user_text) // 4))
+                meter_refusal = enforce_minimax(
+                    kind="text",
+                    input_tokens=max(1, len(user_text) // 4),
+                    source=source,
+                    desk=desk,
+                    request_kind="chat",
+                )
                 if meter_refusal:
                     return model, meter_refusal
             except Exception:

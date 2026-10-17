@@ -546,7 +546,16 @@ def active_reservation_id() -> Optional[str]:
     return _active_reservation.get()
 
 
-def _family_text_block(edition: str, add_tokens: int, month: str, rows: list[dict[str, Any]]) -> Optional[str]:
+def _family_text_block(
+    edition: str,
+    add_tokens: int,
+    month: str,
+    rows: list[dict[str, Any]],
+    *,
+    kind: str = "",
+    source: str = "",
+    desk: Optional[str] = None,
+) -> Optional[str]:
     if edition not in FAMILY_EDITIONS:
         return None
     pool = _pool_tokens(month, rows)
@@ -556,7 +565,9 @@ def _family_text_block(edition: str, add_tokens: int, month: str, rows: list[dic
     if mine_pct > per + 1e-9:
         try:
             from app.services.instance_usage import family_overage_allowed, is_background_request
-            if family_overage_allowed(mine_pct) and not is_background_request(kind="text"):
+            if family_overage_allowed(mine_pct) and not is_background_request(
+                kind=kind, source=source, desk=desk,
+            ):
                 return None
         except Exception:
             pass
@@ -616,6 +627,9 @@ def _eval_caps(
     video_clips: int,
     approval_id: Optional[str],
     rows: list[dict[str, Any]],
+    source: str = "",
+    desk: Optional[str] = None,
+    request_kind: str = "",
 ) -> tuple[Optional[str], str]:
     now = _now()
     day = now.strftime("%Y-%m-%d")
@@ -632,10 +646,16 @@ def _eval_caps(
 
     if kind == "text":
         add = max(0, int(input_tokens)) + max(0, int(output_tokens))
-        return _family_text_block(edition, add or 1, month, rows), warning
+        return _family_text_block(
+            edition, add or 1, month, rows,
+            kind=request_kind or kind, source=source, desk=desk,
+        ), warning
     if kind == "image":
         if edition in FAMILY_EDITIONS:
-            text_msg = _family_text_block(edition, 0, month, rows)
+            text_msg = _family_text_block(
+                edition, 0, month, rows,
+                kind=request_kind or kind, source=source, desk=desk,
+            )
             if text_msg:
                 return text_msg, warning
         return _image_block(edition, max(1, int(images) or 1), day, rows), warning
@@ -692,6 +712,9 @@ def check(
     tts_replies: int = 0,
     video_clips: int = 0,
     approval_id: Optional[str] = None,
+    source: str = "",
+    desk: Optional[str] = None,
+    request_kind: str = "",
 ) -> Optional[str]:
     """Read-only cap peek (tests). Production callers use reserve()."""
     ed = normalize_edition(edition or current_edition())
@@ -709,6 +732,9 @@ def check(
             video_clips=video_clips,
             approval_id=approval_id,
             rows=rows,
+            source=source,
+            desk=desk,
+            request_kind=request_kind,
         )
         if warning:
             _plan_warning.set(warning)
@@ -742,6 +768,9 @@ def reserve(
     tts_replies: int = 0,
     video_clips: int = 0,
     approval_id: Optional[str] = None,
+    source: str = "",
+    desk: Optional[str] = None,
+    request_kind: str = "",
 ) -> Reservation:
     """Atomically check caps and append a reserved row under one exclusive lock."""
     ed = normalize_edition(edition or current_edition())
@@ -760,6 +789,9 @@ def reserve(
             video_clips=video_clips,
             approval_id=approval_id,
             rows=rows,
+            source=source,
+            desk=desk,
+            request_kind=request_kind,
         )
         if warning:
             _plan_warning.set(warning)
