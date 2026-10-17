@@ -242,6 +242,9 @@ load_router("app.routers.amp", "/api/v1/amp", ["amp"])
 # Edition manifest, allowlist, and Nueva empresa (no-op routes on Workroom)
 load_router("app.routers.edition", "/api/v1", ["edition"])
 
+# Family "Pedir a Cursor" queue (no auto-launch)
+load_router("app.routers.cursor_requests", "/api/v1/edition/cursor-requests", ["cursor-requests"])
+
 # Family editions → personal Max help inbox (amp / maxine write; founder reads)
 load_router("app.routers.family_help", "/api/v1", ["family-help"])
 

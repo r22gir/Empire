@@ -37,7 +37,9 @@ import sqlite3
 from datetime import datetime, timezone
 from typing import Optional
 
-HEAVY_KINDS = frozenset({"job", "generate", "desk_task", "vision", "social", "heavy"})
+HEAVY_KINDS = frozenset({
+    "job", "generate", "desk_task", "vision", "social", "heavy", "cursor_request",
+})
 # Overage is an allowlist: only Camilo's named interactive sources.
 # Empty, unknown, desk=, scheduler, generate, etc. never get extra.
 INTERACTIVE_OVERAGE_SOURCES = frozenset({
@@ -370,7 +372,13 @@ def record_usage(
         conn.close()
 
 
-def _period_totals(conn, column: str, value: str) -> dict:
+def _period_totals(conn, column: str, value: str, *, provider: str | None = None) -> dict:
+    extra = ""
+    args: list = [value]
+    if provider == "cursor":
+        extra = " AND lower(COALESCE(provider, '')) = 'cursor'"
+    elif provider == "minimax":
+        extra = " AND lower(COALESCE(provider, 'minimax')) != 'cursor'"
     row = conn.execute(
         f"""
         SELECT
@@ -378,9 +386,9 @@ def _period_totals(conn, column: str, value: str) -> dict:
             COALESCE(SUM(output_tokens), 0) AS output_tokens,
             COALESCE(SUM(cost_usd), 0) AS cost_usd
         FROM llm_usage
-        WHERE {column} = ? AND blocked = 0
+        WHERE {column} = ? AND blocked = 0{extra}
         """,
-        (value,),
+        args,
     ).fetchone()
     tokens = int(row["input_tokens"]) + int(row["output_tokens"])
     return {
@@ -469,6 +477,8 @@ def usage_summary() -> dict:
         "allowance": allowance,
         "day": {"tokens": 0, "cost_usd": 0.0, "input_tokens": 0, "output_tokens": 0},
         "month": {"tokens": 0, "cost_usd": 0.0, "input_tokens": 0, "output_tokens": 0},
+        "minimax": {"tokens": 0, "cost_usd": 0.0, "input_tokens": 0, "output_tokens": 0},
+        "cursor": {"tokens": 0, "cost_usd": 0.0, "input_tokens": 0, "output_tokens": 0},
         "used": 0.0,
         "used_percent": 0.0 if family else None,
         "ratio": None,
@@ -479,7 +489,8 @@ def usage_summary() -> dict:
         "level": "ok",
         "message": "",
         "limit_note_es": (
-            f"Tu uso está limitado al {pct:g}% del uso total de MiniMax."
+            f"Tu uso está limitado al {pct:g}% del total "
+            "(chats MiniMax y Pedir a Cursor)."
             if family else ""
         ),
     }
@@ -489,6 +500,8 @@ def usage_summary() -> dict:
     try:
         day = _period_totals(conn, "day", now.strftime("%Y-%m-%d"))
         month = _period_totals(conn, "month", now.strftime("%Y-%m"))
+        month_minimax = _period_totals(conn, "month", now.strftime("%Y-%m"), provider="minimax")
+        month_cursor = _period_totals(conn, "month", now.strftime("%Y-%m"), provider="cursor")
     finally:
         conn.close()
     used = month["cost_usd"] if basis == "usd" else float(month["tokens"])
@@ -541,6 +554,8 @@ def usage_summary() -> dict:
     empty.update({
         "day": day,
         "month": month,
+        "minimax": month_minimax,
+        "cursor": month_cursor,
         "used": used,
         "used_percent": used_percent,
         "ratio": ratio,

@@ -112,7 +112,9 @@ def test_usage_page_is_owner_only_and_states_the_twenty_percent_cap(monkeypatch,
     assert payload["used_percent"] == 1.5
     assert payload["remaining_percent"] == 18.5
     assert payload["used_percent"] + payload["remaining_percent"] == payload["cap_percent"]
-    assert payload["limit_note_es"] == "Tu uso está limitado al 20% del uso total de MiniMax."
+    assert payload["limit_note_es"] == (
+        "Tu uso está limitado al 20% del total (chats MiniMax y Pedir a Cursor)."
+    )
     assert payload["overage_active"] is False
     hidden = {"baseline", "baseline_basis", "allowance", "used", "day", "month", "ratio"}
     assert hidden.isdisjoint(payload)

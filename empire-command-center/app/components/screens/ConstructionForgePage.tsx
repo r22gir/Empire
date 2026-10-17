@@ -9,6 +9,7 @@ import {
 import ProductDocs from '../business/docs/ProductDocs';
 import ViewPdfControl from '../ViewPdfControl';
 import UsageCard from '../UsageCard';
+import PedirCursorCard from '../PedirCursorCard';
 import HelpMenu from '../voice/HelpMenu';
 import ReservationForm from '../voice/ReservationForm';
 import ArchivoCard from '../voice/ArchivoCard';
@@ -377,6 +378,7 @@ export default function ConstructionForgePage({ initialSection }: ConstructionFo
           ) : <span />}
           <div style={{ display: 'flex', gap: 12, alignItems: 'flex-start', flexWrap: 'wrap' }}>
             {maxine ? <UsageCard /> : null}
+            {maxine ? <PedirCursorCard /> : null}
             <ViewPdfControl mode="print" title="Imprime la vista actual del portafolio." />
           </div>
         </div>
