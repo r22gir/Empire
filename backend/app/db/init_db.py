@@ -8,7 +8,7 @@ import os
 import hashlib
 import secrets
 from pathlib import Path
-from .database import get_db, DB_PATH
+from .database import get_db, get_db_path
 
 try:
     import bcrypt
@@ -33,6 +33,9 @@ CREATE TABLE IF NOT EXISTS tasks (
     due_date TEXT,
     tags TEXT,
     metadata TEXT,
+    source TEXT DEFAULT '',
+    follow_up_date TEXT,
+    recurrence TEXT,
     parent_task_id TEXT,
     created_at TEXT DEFAULT (datetime('now')),
     updated_at TEXT DEFAULT (datetime('now')),
@@ -472,15 +475,21 @@ def init_database():
 
 
 def _init_database_locked():
-    # Ensure data directory exists
-    os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
+    # Ensure data directory exists (call-time path so tests can retarget)
+    db_path = get_db_path()
+    parent = os.path.dirname(db_path)
+    if parent:
+        os.makedirs(parent, exist_ok=True)
 
     with get_db() as conn:
         conn.executescript(SCHEMA_SQL)
-        print(f"✓ Task Engine database initialized at {DB_PATH}")
+        print(f"✓ Task Engine database initialized at {db_path}")
 
         # v6.0 Pipeline columns (additive migration — safe to re-run)
         _migrate_pipeline_columns(conn)
+
+        # Columns expected by desk_manager / desk_scheduler / base_desk
+        _migrate_task_columns(conn)
 
         # Access control tables migration
         _migrate_access_control(conn)
@@ -498,6 +507,29 @@ def _init_database_locked():
 
     # Initialize chat_backup tables in SQLAlchemy database (empirebox.db)
     _init_chat_backup_tables()
+
+
+def _migrate_task_columns(conn):
+    """Add task columns the running code writes that a fresh schema lacked.
+
+    Workroom's older empire.db grew `source` (and follow-up fields) from a
+    migration that never ran on the family edition DBs. Safe to re-run:
+    PRAGMA table_info, then ALTER only what's missing.
+    """
+    existing = {row[1] for row in conn.execute("PRAGMA table_info(tasks)")}
+    # Only columns the code actually reads/writes on `tasks`.
+    migrations = [
+        ("source", "TEXT DEFAULT ''"),
+        ("follow_up_date", "TEXT"),
+        ("recurrence", "TEXT"),
+    ]
+    added = 0
+    for col_name, col_type in migrations:
+        if col_name not in existing:
+            conn.execute(f"ALTER TABLE tasks ADD COLUMN {col_name} {col_type}")
+            added += 1
+    if added:
+        print(f"✓ Task columns migration: added {added} column(s) to tasks table")
 
 
 def _migrate_pipeline_columns(conn):
