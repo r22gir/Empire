@@ -6,6 +6,7 @@ import base64
 import subprocess
 import re
 import uuid
+from contextvars import ContextVar
 from enum import Enum
 from dataclasses import dataclass
 from typing import List, Optional, AsyncGenerator, Tuple, Any
@@ -37,6 +38,10 @@ from .routing_state import (
 load_dotenv(Path(__file__).resolve().parents[3] / ".env")
 
 logger = logging.getLogger("max.ai_router")
+
+# chat() / chat_stream() set this in _family_chat_prep so reserve() sees the
+# real source and desk even when MiniMax is reached through selected routing.
+_family_meter_ctx: ContextVar[dict] = ContextVar("family_minimax_meter", default={})
 
 class AIModel(Enum):
     GROK = "grok"
@@ -1280,6 +1285,7 @@ class AIRouter:
             )
             cap_kind = "desk_task" if desk else ("voice" if (source or "").strip().lower() == "voice" else "chat")
             cap_source = (source or "").strip()
+            _family_meter_ctx.set({"source": cap_source, "desk": desk})
             refusal = enforce_usage_cap(
                 kind=cap_kind,
                 text=user_text,
@@ -2295,10 +2301,21 @@ class AIRouter:
                 pass
         return 120.0
 
-    def _reserve_minimax_text(self, messages: List[AIMessage]) -> Any:
+    def _reserve_minimax_text(
+        self,
+        messages: List[AIMessage],
+        *,
+        source: str = "",
+        desk: Optional[str] = None,
+    ) -> Any:
         """Reserve founder + family MiniMax text under the exclusive meter lock."""
         from app.services.minimax_meter import MeterBlocked, pop_plan_warning, reserve
 
+        ctx = _family_meter_ctx.get() or {}
+        if not source:
+            source = ctx.get("source") or ""
+        if desk is None:
+            desk = ctx.get("desk")
         input_text = " ".join((m.content or "") for m in (messages or []) if getattr(m, "content", None))
         estimate = max(1, len(input_text) // 4)
         reservation = reserve(
@@ -2306,6 +2323,8 @@ class AIRouter:
             model=self.minimax_model or "MiniMax-M3",
             input_tokens=estimate,
             output_tokens=0,
+            source=source,
+            desk=desk,
         )
         if reservation.blocked:
             raise MeterBlocked(reservation.message)

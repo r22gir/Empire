@@ -218,6 +218,28 @@ def test_brother_ceiling_pct_lowers_env_ceiling(monkeypatch, tmp_path):
     assert "tope extra" in refused
 
 
+@pytest.mark.parametrize("reason", ["remains_unavailable", "remains_stale"])
+def test_paused_message_names_remains_unread(monkeypatch, tmp_path, reason):
+    _env(monkeypatch, tmp_path)
+    _write_signal(
+        tmp_path,
+        allowed=False,
+        founder_active=False,
+        reserve_ok=False,
+        reason=reason,
+    )
+    from app.services.instance_usage import enforce_usage_cap, record_usage, usage_summary
+
+    record_usage(input_tokens=250, output_tokens=0)
+    summary = usage_summary()
+    assert summary["level"] == "paused"
+    assert "saldo de Max" in summary["message"]
+    assert "reserva de Rafael" not in summary["message"]
+    refused = enforce_usage_cap(text="hola", kind="chat", source="web")
+    assert refused and "saldo de Max" in refused
+    assert "reserva de Rafael" not in refused
+
+
 def test_paused_message_names_reserve_low(monkeypatch, tmp_path):
     _env(monkeypatch, tmp_path)
     _write_signal(
@@ -235,3 +257,79 @@ def test_paused_message_names_reserve_low(monkeypatch, tmp_path):
     assert "reserva de Rafael" in summary["message"]
     refused = enforce_usage_cap(text="hola", kind="chat", source="web")
     assert refused and "reserva de Rafael" in refused
+
+
+def test_dashboard_chat_and_stream_overage_reach_reserve(monkeypatch, tmp_path):
+    """Interactive dashboard chat/stream get overage; desk calls do not."""
+    import asyncio
+
+    _env(monkeypatch, tmp_path)
+    _write_signal(tmp_path, allowed=True, founder_active=False)
+    monkeypatch.setenv("MINIMAX_API_KEY", "sk-test-not-used")
+    monkeypatch.setenv("MINIMAX_METER_DIR", str(tmp_path / "meter"))
+    monkeypatch.setenv("MINIMAX_TEXT_POOL_FLOOR", "1000")
+    monkeypatch.setenv("MINIMAX_EDITION_TEXT_SHARE_PCT", "20")
+    monkeypatch.setenv("MINIMAX_REMAINS_PROBE", "0")
+    monkeypatch.setenv("MINIMAX_REMAINS_STUB", "ok")
+    monkeypatch.setenv("MAX_ALLOW_FALLBACK", "false")
+    (tmp_path / "meter").mkdir(parents=True, exist_ok=True)
+
+    from app.services.instance_usage import record_usage
+    from app.services.max.ai_router import AIMessage, AIRouter
+    from app.services.minimax_meter import record
+    from app.services.minimax_meter import reserve as real_reserve
+
+    record_usage(input_tokens=250, output_tokens=0)
+    record(kind="text", edition="maxine", model="MiniMax-M3", input_tokens=250, output_tokens=0)
+
+    captured = []
+
+    def wrap_reserve(**kwargs):
+        captured.append(dict(kwargs))
+        return real_reserve(**kwargs)
+
+    monkeypatch.setattr("app.services.minimax_meter.reserve", wrap_reserve)
+
+    class _Resp:
+        status_code = 200
+
+        def json(self):
+            return {"choices": [{"message": {"content": "Claro, manito."}}]}
+
+    async def fake_retry(fn, *a, **k):
+        return _Resp()
+
+    monkeypatch.setattr("app.services.max.minimax_retry.request_with_retry", fake_retry)
+
+    router = AIRouter()
+    msg = [AIMessage(role="user", content="Hola manito")]
+
+    chat = asyncio.run(router.chat(msg, source="dashboard"))
+    assert chat.model_used != "usage-cap"
+    assert "automáticas" not in (chat.content or "")
+    assert any(
+        (c.get("source") or "") == "dashboard" and not c.get("desk")
+        for c in captured
+    )
+
+    captured.clear()
+
+    async def _stream():
+        out = []
+        async for chunk, model in router.chat_stream(msg, source="dashboard"):
+            out.append((chunk, model))
+        return out
+
+    stream = asyncio.run(_stream())
+    assert stream and stream[0][1] != "usage-cap"
+    assert "automáticas" not in "".join(c[0] or "" for c in stream)
+    assert any(
+        (c.get("source") or "") == "dashboard" and not c.get("desk")
+        for c in captured
+    )
+
+    captured.clear()
+    desk = asyncio.run(router.chat(msg, desk="finance"))
+    assert desk.model_used == "usage-cap"
+    assert "automáticas" in desk.content
+    assert captured == []

@@ -64,6 +64,10 @@ MSG_PAUSED_RESERVE = (
     "Manito, ya usaste tu 20% del mes y la reserva de Rafael está baja, "
     "así que lo extra queda en pausa. Vuelve a intentar en un rato."
 )
+MSG_PAUSED_REMAINS = (
+    "Manito, ya usaste tu 20% del mes y no puedo leer el saldo de Max ahora, "
+    "así que lo extra queda en pausa. Vuelve a intentar en un rato."
+)
 MSG_BACKGROUND_OVERAGE = (
     "Manito, las tareas automáticas no corren en tiempo extra. "
     "Eso queda para tus chats."
@@ -141,6 +145,8 @@ def paused_message(*, signal: Optional[dict] = None, used_percent: Optional[floa
     if used_percent is not None and float(used_percent) >= ceiling:
         return MSG_ABSOLUTE.format(ceiling=ceiling)
     reason = str((signal or {}).get("reason") or "missing")
+    if reason in {"remains_unavailable", "remains_stale"}:
+        return MSG_PAUSED_REMAINS
     if not (signal or {}).get("ok"):
         return MSG_PAUSED_SIGNAL
     if (signal or {}).get("founder_active") or reason == "founder_active":
