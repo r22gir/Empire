@@ -37,7 +37,7 @@ export default function UsoPage() {
       <p style={{ color: '#b8960c', fontWeight: 700, fontSize: 12 }}>USO</p>
       <h1>Uso de este mes</h1>
       <p>
-        {usage?.limit_note_es || 'Tu uso está limitado al 20% del uso total de MiniMax.'}
+        {usage?.limit_note_es || 'Tu uso está limitado al 20% del total (chats MiniMax y Pedir a Cursor).'}
       </p>
       {denied ? <p>Esta página es solo para el dueño de esta edición.</p> : null}
       {usage ? (

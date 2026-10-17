@@ -34,7 +34,7 @@ export default function UsageCard() {
   }, [family]);
 
   if (!family) return null;
-  const note = usage?.limit_note_es || `Tu uso está limitado al ${usage?.cap_percent ?? 20}% del uso total de MiniMax.`;
+  const note = usage?.limit_note_es || `Tu uso está limitado al ${usage?.cap_percent ?? 20}% del total (chats MiniMax y Pedir a Cursor).`;
 
   const warn = usage?.level === 'warn' || usage?.level === 'paused' || usage?.level === 'overage' || usage?.level === 'blocked';
   const extraLabel =

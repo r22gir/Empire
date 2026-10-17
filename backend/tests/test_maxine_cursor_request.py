@@ -23,7 +23,7 @@ def _env(monkeypatch, tmp_path: Path, edition="maxine"):
     monkeypatch.setenv("FAMILY_ABSOLUTE_MAX_PCT", "40")
     monkeypatch.setenv("AMP_OWNER_EMAIL", "camilo.owner@example.com")
     monkeypatch.setenv("AMP_JWT_SECRET", "test-secret")
-    monkeypatch.setenv("CURSOR_REQUEST_EST_TOKENS", "150000")
+    monkeypatch.setenv("CURSOR_REQUEST_EST_TOKENS", "60000")
     monkeypatch.setattr("app.services.instance_usage._usage_data_roots", lambda: [tmp_path])
     monkeypatch.delenv("FOUNDER_EMAIL", raising=False)
 
@@ -72,7 +72,7 @@ def test_store_create_list_show_forces_edition(monkeypatch, tmp_path):
     assert row["edition"] == "maxine"
     assert row["status"] == "queued"
     assert row["cap_state"] == "base"
-    assert row["est_tokens"] == 150000
+    assert row["est_tokens"] == 60000
     listed = list_requests()
     assert listed[0]["id"] == row["id"]
     assert get_request(row["id"])["title"] == "Arreglar el resumen"
@@ -156,7 +156,7 @@ def test_soft_cap_accept_and_reject(monkeypatch, tmp_path):
     assert cap_gate(title="hola") is None
     create_request(title="Bajo el tope", body="Un arreglo chiquito.")
 
-    record_usage(input_tokens=60000, output_tokens=0)
+    record_usage(input_tokens=150000, output_tokens=0, provider="minimax")
     refused = cap_gate(title="hola")
     assert refused == MSG_CURSOR_PAUSED
 
@@ -185,9 +185,18 @@ def test_soft_cap_accept_and_reject(monkeypatch, tmp_path):
     from app.services.instance_usage import _connect
 
     conn = _connect()
-    kinds = [r["kind"] for r in conn.execute("SELECT kind FROM llm_usage").fetchall()]
+    rows = conn.execute("SELECT kind, provider, input_tokens FROM llm_usage").fetchall()
     conn.close()
-    assert "cursor_request" in kinds
+    cursor_rows = [r for r in rows if r["kind"] == "cursor_request"]
+    assert cursor_rows
+    assert all(r["provider"] == "cursor" for r in cursor_rows)
+    from app.services.instance_usage import usage_summary as _summary
+    split = _summary()
+    assert split["cursor"]["tokens"] >= 60000
+    assert split["minimax"]["tokens"] == split["month"]["tokens"] - split["cursor"]["tokens"]
+    assert split["month"]["tokens"] == split["minimax"]["tokens"] + split["cursor"]["tokens"]
+    assert "MiniMax" in (split.get("limit_note_es") or "")
+    assert "Pedir a Cursor" in (split.get("limit_note_es") or "")
 
 
 def test_cli_round_trip_and_guards(monkeypatch, tmp_path):
@@ -234,6 +243,45 @@ def test_cli_round_trip_and_guards(monkeypatch, tmp_path):
 
     with pytest.raises(CursorRequestError):
         assert_edition_data_dir(allow_tmp=False)
+
+
+def test_assert_data_dir_rejects_folder_named_maxine(monkeypatch, tmp_path):
+    _env(monkeypatch, tmp_path)
+    from app.services.cursor_requests import CursorRequestError, assert_edition_data_dir
+
+    decoy = tmp_path / "maxine"
+    decoy.mkdir()
+    monkeypatch.setenv("EMPIRE_DATA_DIR", str(decoy))
+    with pytest.raises(CursorRequestError, match="/data/maxine"):
+        assert_edition_data_dir(allow_tmp=False)
+    monkeypatch.setenv("EMPIRE_DATA_DIR", "/data/maxine")
+    assert assert_edition_data_dir(allow_tmp=False) == Path("/data/maxine").resolve()
+
+
+def test_default_estimate_is_60000(monkeypatch, tmp_path):
+    _env(monkeypatch, tmp_path)
+    monkeypatch.delenv("CURSOR_REQUEST_EST_TOKENS", raising=False)
+    from app.services.cursor_requests import estimated_tokens
+
+    assert estimated_tokens() == 60000
+
+
+def test_decline_refunds_cursor_estimate(monkeypatch, tmp_path):
+    _env(monkeypatch, tmp_path)
+    from app.services.cursor_requests import create_request, set_status
+    from app.services.instance_usage import usage_summary
+
+    row = create_request(title="No se hará", body="Chief e lo va a rechazar.")
+    before = usage_summary()
+    assert before["cursor"]["tokens"] == 60000
+    assert before["month"]["tokens"] == 60000
+    assert before["minimax"]["tokens"] == 0
+    declined = set_status(row["id"], status="declined")
+    assert declined["status"] == "declined"
+    after = usage_summary()
+    assert after["cursor"]["tokens"] == 0
+    assert after["month"]["tokens"] == 0
+    assert after["minimax"]["tokens"] == 0
 
 
 def test_frontend_spanish_strings_present():

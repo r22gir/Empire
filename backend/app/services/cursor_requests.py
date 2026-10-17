@@ -42,7 +42,10 @@ MAX_TITLE = 120
 MAX_BODY = 4000
 MAX_FILES = 5
 MAX_FILE_BYTES = 5 * 1024 * 1024
-DEFAULT_EST_TOKENS = 150_000
+DEFAULT_EST_TOKENS = 60_000
+CANONICAL_DATA_DIR = {
+    "maxine": Path("/data/maxine"),
+}
 _PNG = b"\x89PNG\r\n\x1a\n"
 _JPEG = b"\xff\xd8\xff"
 _WEBP = b"WEBP"
@@ -75,7 +78,12 @@ def require_family_edition() -> str:
 
 
 def assert_edition_data_dir(*, allow_tmp: bool | None = None) -> Path:
-    """Refuse a mismatched EMPIRE_DATA_DIR / EMPIRE_EDITION pair."""
+    """Refuse anything other than this edition's real data dir.
+
+    Maxine's live path is ``/data/maxine``. A folder that merely happens
+    to be named ``maxine`` (for example ``/tmp/foo/maxine``) is not enough.
+    Tests may opt in with *allow_tmp* or ``PYTEST_CURRENT_TEST``.
+    """
     from app.edition import data_root_or_none, edition_name, is_family_edition
 
     if not is_family_edition():
@@ -84,14 +92,14 @@ def assert_edition_data_dir(*, allow_tmp: bool | None = None) -> Path:
     root = data_root_or_none()
     if root is None:
         raise CursorRequestError("EMPIRE_DATA_DIR is required")
-    live = Path(f"/data/{edition}").resolve()
-    if root == live or root.name.lower() == edition:
+    expected = CANONICAL_DATA_DIR.get(edition, Path(f"/data/{edition}")).resolve()
+    if root.resolve() == expected:
         return root
     if allow_tmp is None:
         allow_tmp = bool(os.environ.get("PYTEST_CURRENT_TEST"))
     if allow_tmp:
         return root
-    raise CursorRequestError(f"EMPIRE_DATA_DIR must be /data/{edition} (got {root})")
+    raise CursorRequestError(f"EMPIRE_DATA_DIR must be {expected} (got {root})")
 
 
 def _connect() -> sqlite3.Connection:
@@ -331,16 +339,37 @@ def create_request(
         conn.commit()
     finally:
         conn.close()
+    _record_cursor_estimate(est)
+    return get_request(req_id)
+
+
+def _record_cursor_estimate(est: int) -> None:
     from app.services.instance_usage import record_usage
 
     record_usage(
-        input_tokens=est,
+        input_tokens=max(0, int(est)),
         output_tokens=0,
         kind="cursor_request",
         provider="cursor",
         model="cloud-agent",
     )
-    return get_request(req_id)
+
+
+def _refund_cursor_estimate(est: int) -> None:
+    """Drop the create-time estimate so a declined request does not keep the share."""
+    tokens = int(est or 0)
+    if tokens <= 0:
+        return
+    from app.services.instance_usage import record_usage
+
+    record_usage(
+        input_tokens=-tokens,
+        output_tokens=0,
+        kind="cursor_request",
+        provider="cursor",
+        model="cloud-agent",
+        cost_usd=0.0,
+    )
 
 
 def list_requests(*, status: Optional[str] = None) -> list[dict[str, Any]]:
@@ -443,6 +472,8 @@ def _set_status(
         conn.commit()
     finally:
         conn.close()
+    if status == "declined" and row.get("status") != "declined":
+        _refund_cursor_estimate(row.get("est_tokens") or 0)
     return get_request(req_id)
 
 
