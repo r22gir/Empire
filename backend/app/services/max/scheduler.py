@@ -158,22 +158,26 @@ def email_daily_brief(brief: str, now: datetime | None = None) -> dict:
 
     _refuse_live_brief_send()
 
-    from app.services.max.email_service import EmailService
+    from app.services.max.email_service import EmailService, smtp_failure_log_es
     svc = EmailService()
     if not svc.is_configured:
         logger.info("Morning brief not emailed: email is not configured")
         return {"sent": False, "skipped": True, "to": to, "cc": None}
     email_body = brief.replace("\n", "<br>")
-    sent = svc.send(
-        to=to,
-        subject=subject,
-        body_html=email_body,
-        cc=None,
-    )
+    try:
+        sent = svc.send(
+            to=to,
+            subject=subject,
+            body_html=email_body,
+            cc=None,
+        )
+    except Exception as exc:
+        logger.error("%s %s", smtp_failure_log_es(exc), exc)
+        return {"sent": False, "skipped": False, "to": to, "cc": None}
     if sent:
         logger.info("Morning brief emailed to owner")
         return {"sent": True, "skipped": False, "to": to, "cc": None}
-    logger.warning("Morning brief email was not accepted")
+    logger.error("El correo no se entrego: el resumen de la manana no fue aceptado.")
     return {"sent": False, "skipped": False, "to": to, "cc": None}
 
 
@@ -275,7 +279,8 @@ class MaxScheduler:
             try:
                 email_daily_brief(brief)
             except Exception as e:
-                logger.warning(f"Morning brief email failed: {e}")
+                from app.services.max.email_service import smtp_failure_log_es
+                logger.error("%s %s", smtp_failure_log_es(e), e)
             logger.info("Daily brief generated and dispatched")
         except Exception as e:
             logger.error(f"Daily brief failed: {e}")
