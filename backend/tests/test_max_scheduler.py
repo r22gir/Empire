@@ -1,6 +1,40 @@
 import asyncio
 
 
+def test_family_max_scheduler_still_registers_morning_brief(monkeypatch, tmp_path):
+    monkeypatch.setenv("EMPIRE_EDITION", "amp")
+    monkeypatch.setenv("EMPIRE_DATA_DIR", str(tmp_path))
+    from app.services.max.scheduler import MaxScheduler
+
+    scheduler = MaxScheduler()
+
+    async def _noop():
+        return None
+
+    for name in [
+        "send_daily_brief",
+        "check_overdue_tasks",
+        "run_sales_followup",
+        "send_weekly_report",
+        "brain_sync",
+        "expire_crypto_payments",
+        "nightly_drive_export",
+    ]:
+        monkeypatch.setattr(scheduler, name, _noop)
+
+    async def _run():
+        await scheduler.start()
+        try:
+            ids = {job.id for job in scheduler.scheduler.get_jobs()}
+            assert "daily_brief" in ids
+            names = {job.name for job in scheduler.scheduler.get_jobs()}
+            assert "Daily Morning Brief" in names
+        finally:
+            scheduler.scheduler.shutdown(wait=False)
+
+    asyncio.run(_run())
+
+
 def test_max_scheduler_starts_and_registers_jobs(monkeypatch):
     from app.services.max.scheduler import MaxScheduler
 
@@ -16,6 +50,7 @@ def test_max_scheduler_starts_and_registers_jobs(monkeypatch):
         "send_weekly_report",
         "brain_sync",
         "expire_crypto_payments",
+        "nightly_drive_export",
     ]:
         monkeypatch.setattr(scheduler, name, _noop)
 

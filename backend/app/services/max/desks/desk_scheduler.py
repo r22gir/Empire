@@ -3,9 +3,15 @@ Desk Scheduler — Autonomous daily tasks for AI desks.
 Fires real tasks at scheduled times, executes them with AI,
 stores results, and sends Telegram summaries to the founder.
 Also handles event-driven triggers (new quotes, stale projects, service down).
+
+Family editions (Max-e / Maxine) use an empty schedule by default so the
+Workroom desk jobs do not burn the brother's 20% MiniMax share. Opt a
+known task back in with FAMILY_DESK_SCHEDULE (comma-separated
+``desk_id:title`` keys; unknown keys are ignored).
 """
 import asyncio
 import logging
+import os
 import socket
 from datetime import datetime
 from .base_desk import TaskState
@@ -67,6 +73,51 @@ EMPIRE_SERVICES = {
     "Ollama": 11434,
 }
 
+WORKROOM_HEALTH_PORTS = frozenset(EMPIRE_SERVICES.values())
+
+
+def _family_mode() -> bool:
+    try:
+        from app.edition import is_family_edition
+        return bool(is_family_edition())
+    except Exception:
+        return False
+
+
+def desk_task_key(desk_id: str, title: str) -> str:
+    return f"{desk_id}:{title}"
+
+
+def active_desk_schedule():
+    """Workroom keeps DAILY_SCHEDULE. Family is empty unless opted in."""
+    if not _family_mode():
+        return list(DAILY_SCHEDULE)
+    from app.services.family_background import family_desk_schedule_keys
+
+    allowed = set(family_desk_schedule_keys())
+    if not allowed:
+        return []
+    known = {desk_task_key(row[2], row[3]): row for row in DAILY_SCHEDULE}
+    return [known[key] for key in allowed if key in known]
+
+
+def family_own_health_ports() -> dict[str, int]:
+    """Edition ports only. Never fall back to Workroom 8000/3000 defaults."""
+    ports: dict[str, int] = {}
+    raw_b = (os.getenv("EMPIRE_BACKEND_PORT") or "").strip()
+    raw_f = (os.getenv("EMPIRE_FRONTEND_EXPECTED_PORT") or "").strip()
+    if raw_b:
+        try:
+            ports["Edition backend"] = int(raw_b)
+        except ValueError:
+            pass
+    if raw_f:
+        try:
+            ports["Edition frontend"] = int(raw_f)
+        except ValueError:
+            pass
+    return ports
+
 
 class DeskScheduler:
     """Runs proactive scheduled tasks and event-driven triggers for AI desks."""
@@ -92,61 +143,68 @@ class DeskScheduler:
 
         while self._running:
             try:
-                now = datetime.now()
-                today = now.strftime("%Y-%m-%d")
-
-                # Check scheduled tasks
-                for hour, minute, desk_id, title, description in DAILY_SCHEDULE:
-                    task_key = f"{desk_id}:{title}"
-                    if (
-                        now.hour == hour
-                        and now.minute == minute
-                        and self._last_run.get(task_key) != today
-                    ):
-                        self._last_run[task_key] = today
-                        asyncio.create_task(
-                            self._execute_desk_task(desk_id, title, description, source="scheduler")
-                        )
-
-                # Event check: service health (every 5 min)
-                if now.minute % 5 == 0:
-                    task_key = f"health_monitor:{now.hour}:{now.minute}"
-                    if self._last_run.get("health_monitor_tick") != f"{today}:{now.hour}:{now.minute}":
-                        self._last_run["health_monitor_tick"] = f"{today}:{now.hour}:{now.minute}"
-                        asyncio.create_task(self._check_service_health())
-
-                # v6.0 Morning brief: 7:30 AM daily
-                if now.hour == 7 and now.minute == 30:
-                    brief_key = f"morning_brief:{today}"
-                    if self._last_run.get("morning_brief") != brief_key:
-                        self._last_run["morning_brief"] = brief_key
-                        asyncio.create_task(self._generate_morning_brief())
-
-                # v6.0 Weekly report: Monday 8:00 AM
-                if now.weekday() == 0 and now.hour == 8 and now.minute == 0:
-                    week_key = f"weekly_report:{today}"
-                    if self._last_run.get("weekly_report") != week_key:
-                        self._last_run["weekly_report"] = week_key
-                        asyncio.create_task(self._generate_weekly_report())
-
-                # Accuracy digest: 10:00 PM daily
-                if now.hour == 22 and now.minute == 0:
-                    digest_key = f"accuracy_digest:{today}"
-                    if self._last_run.get("accuracy_digest") != digest_key:
-                        self._last_run["accuracy_digest"] = digest_key
-                        asyncio.create_task(self._send_accuracy_digest())
-
-                # v6.0 Pipeline executor: process pending subtasks (every 2 min)
-                if now.minute % 2 == 0:
-                    pl_tick = f"{today}:{now.hour}:{now.minute}"
-                    if self._last_run.get("pipeline_tick") != pl_tick:
-                        self._last_run["pipeline_tick"] = pl_tick
-                        asyncio.create_task(self._run_pipeline_executor())
-
+                await self._tick(datetime.now())
             except Exception as e:
                 logger.warning(f"Scheduler tick error: {e}")
 
             await asyncio.sleep(60)  # Check every minute
+
+    async def _tick(self, now: datetime) -> list:
+        """One scheduler minute. Tests pass a frozen clock."""
+        today = now.strftime("%Y-%m-%d")
+        spawned: list = []
+        family = _family_mode()
+
+        def spawn(coro):
+            task = asyncio.create_task(coro)
+            spawned.append(task)
+            return task
+
+        for hour, minute, desk_id, title, description in active_desk_schedule():
+            task_key = desk_task_key(desk_id, title)
+            if (
+                now.hour == hour
+                and now.minute == minute
+                and self._last_run.get(task_key) != today
+            ):
+                self._last_run[task_key] = today
+                spawn(self._execute_desk_task(desk_id, title, description, source="scheduler"))
+
+        # Event check: service health (every 5 min). Family never probes Workroom.
+        if now.minute % 5 == 0:
+            health_tick = f"{today}:{now.hour}:{now.minute}"
+            if self._last_run.get("health_monitor_tick") != health_tick:
+                self._last_run["health_monitor_tick"] = health_tick
+                spawn(self._check_service_health())
+
+        # Workroom-only: Telegram / LLM / port-probe jobs. The edition's
+        # 8:00 AM owner brief lives in max/scheduler.py (do not skip that).
+        if not family:
+            if now.hour == 7 and now.minute == 30:
+                brief_key = f"morning_brief:{today}"
+                if self._last_run.get("morning_brief") != brief_key:
+                    self._last_run["morning_brief"] = brief_key
+                    spawn(self._generate_morning_brief())
+
+            if now.weekday() == 0 and now.hour == 8 and now.minute == 0:
+                week_key = f"weekly_report:{today}"
+                if self._last_run.get("weekly_report") != week_key:
+                    self._last_run["weekly_report"] = week_key
+                    spawn(self._generate_weekly_report())
+
+            if now.hour == 22 and now.minute == 0:
+                digest_key = f"accuracy_digest:{today}"
+                if self._last_run.get("accuracy_digest") != digest_key:
+                    self._last_run["accuracy_digest"] = digest_key
+                    spawn(self._send_accuracy_digest())
+
+            if now.minute % 2 == 0:
+                pl_tick = f"{today}:{now.hour}:{now.minute}"
+                if self._last_run.get("pipeline_tick") != pl_tick:
+                    self._last_run["pipeline_tick"] = pl_tick
+                    spawn(self._run_pipeline_executor())
+
+        return spawned
 
     def stop(self):
         self._running = False
@@ -155,6 +213,30 @@ class DeskScheduler:
     async def _execute_desk_task(self, desk_id: str, title: str, description: str, source: str = "scheduler"):
         """Execute a task directly through the desk manager — no HTTP roundtrip."""
         logger.info(f"[Scheduler] Executing: {desk_id} → {title}")
+
+        if _family_mode() and source != "manual":
+            allowed = {desk_task_key(row[2], row[3]) for row in active_desk_schedule()}
+            if desk_task_key(desk_id, title) not in allowed:
+                logger.info(
+                    "Family edition: skip Workroom desk task %s",
+                    desk_task_key(desk_id, title),
+                )
+                return
+            from app.services.family_background import (
+                family_background_cap_message,
+                skip_if_unchanged,
+            )
+            refused = family_background_cap_message(kind="desk_task", source=source)
+            if refused:
+                logger.info("Family edition: desk_task refused by usage cap")
+                return
+            context = f"{desk_id}\n{title}\n{description or ''}"
+            job_id = f"desk-{desk_id}-{title}"
+            if skip_if_unchanged(job_id, context):
+                return
+        else:
+            context = None
+            job_id = None
 
         try:
             task = await self.manager.submit_task(
@@ -202,6 +284,10 @@ class DeskScheduler:
 
             # Send Telegram summary
             await self._notify_telegram(desk_id, title, task)
+
+            if job_id and context and getattr(task.state, "value", "") == "completed":
+                from app.services.family_background import mark_unchanged
+                mark_unchanged(job_id, context)
 
             logger.info(f"[Scheduler] Completed: {desk_id} → {title} ({task.state.value})")
 
@@ -281,10 +367,22 @@ class DeskScheduler:
             pass
 
     async def _check_service_health(self):
-        """Check all Empire services — alert on status changes."""
+        """Check Empire services — alert on status changes.
+
+        Family editions never probe Workroom ports (8000/3000/…). They
+        may probe only explicitly set EMPIRE_BACKEND_PORT /
+        EMPIRE_FRONTEND_EXPECTED_PORT.
+        """
+        if _family_mode():
+            services = family_own_health_ports()
+            if not services:
+                return
+        else:
+            services = EMPIRE_SERVICES
+
         changes = []
 
-        for name, port in EMPIRE_SERVICES.items():
+        for name, port in services.items():
             is_up = self._port_open(port)
             was_up = self._service_status.get(name)
 
@@ -318,6 +416,9 @@ class DeskScheduler:
 
     async def _run_pipeline_executor(self):
         """Execute next ready subtasks from all active pipelines."""
+        if _family_mode():
+            logger.info("Family edition: skip Workroom pipeline executor")
+            return
         try:
             from app.services.max.pipeline import pipeline_engine
             results = await pipeline_engine.execute_next_subtasks()
@@ -332,6 +433,9 @@ class DeskScheduler:
     async def _generate_morning_brief(self):
         """Generate and send morning briefing — all desk statuses, pipeline summary,
         key metrics, and priority actions. Sent to Telegram + stored for CC dashboard."""
+        if _family_mode():
+            logger.info("Family edition: skip Workroom desk morning brief (owner brief is max/scheduler)")
+            return
         logger.info("[Scheduler] Generating morning brief")
         try:
             from app.services.max.telegram_bot import telegram_bot
@@ -425,6 +529,9 @@ class DeskScheduler:
     async def _generate_weekly_report(self):
         """Generate weekly business intelligence report with monetization suggestions.
         Sent every Monday at 8AM."""
+        if _family_mode():
+            logger.info("Family edition: skip Workroom desk weekly report")
+            return
         logger.info("[Scheduler] Generating weekly report")
         try:
             from app.services.max.telegram_bot import telegram_bot
@@ -520,6 +627,9 @@ class DeskScheduler:
 
     async def _send_accuracy_digest(self):
         """Send daily MAX accuracy report via Telegram."""
+        if _family_mode():
+            logger.info("Family edition: skip Workroom accuracy digest")
+            return
         logger.info("[Scheduler] Generating accuracy digest")
         try:
             from app.services.max.accuracy_monitor import accuracy_monitor
