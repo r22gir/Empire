@@ -26,6 +26,18 @@ MSG_NOTHING_DUE = (
     "preparó nada. Activa una campaña e inscribe prospectos."
 )
 MSG_DRAFTED = "Preparé {n} borradores para que los revises. No se envió nada."
+MSG_MANUAL = "Preparé {n} tareas manuales para que las revises. No se envió nada."
+MSG_DRAFTED_AND_MANUAL = (
+    "Preparé {d} borradores y {m} tareas manuales para que los revises. No se envió nada."
+)
+_SKIP_WHY = {
+    "not_reviewed": "no está revisado",
+    "no_email": "le falta el correo",
+    "opted_out": "el prospecto se dio de baja",
+    "bounced": "el correo rebotó",
+    "deny_list": "está en la lista de no enviar",
+    "limit": "llegaste al tope de envíos",
+}
 MSG_CONFIRM_REQUIRED = (
     "Manito, falta confirmar el envío. Mira la lista y confirma."
 )
@@ -801,12 +813,20 @@ async def execute_next_steps() -> dict:
                     "enrollment_id": e["id"], "error": str(exc),
                 })
 
-    drafted = int(results["drafted"]) + int(results["manual_tasks"])
-    if drafted == 0:
-        results["mensaje"] = MSG_NOTHING_DUE
-    else:
-        results["mensaje"] = MSG_DRAFTED.format(n=drafted)
+    results["mensaje"] = _execute_mensaje(
+        int(results["drafted"]), int(results["manual_tasks"])
+    )
     return results
+
+
+def _execute_mensaje(drafted: int, manuals: int) -> str:
+    if drafted and manuals:
+        return MSG_DRAFTED_AND_MANUAL.format(d=drafted, m=manuals)
+    if drafted:
+        return MSG_DRAFTED.format(n=drafted)
+    if manuals:
+        return MSG_MANUAL.format(n=manuals)
+    return MSG_NOTHING_DUE
 
 
 # ── Outcomes ────────────────────────────────────────────────────────────
@@ -1424,7 +1444,7 @@ def _denied_recipient(email: str | None) -> bool:
         from app.services.max.send_me_link import is_denied_email
         return bool(is_denied_email(email))
     except Exception:
-        return False
+        return True
 
 
 def _sent_today_count(conn) -> int:
@@ -1505,11 +1525,32 @@ def preview_send(*, campaign_id: int | None = None, draft_id: int | None = None)
         "recipients": [mask_email(d.get("to_email")) for d in eligible],
         "confirm_token": make_confirm_token(token_ids) if token_ids else "",
         "skipped": skipped,
-        "mensaje": (
-            f"Manito, vas a enviar {len(eligible)} correos a prospectos reales."
-            if eligible else MSG_NOTHING_DUE
-        ),
+        "mensaje": _preview_mensaje(eligible, skipped),
     }
+
+
+def _skip_why(skipped: List[dict]) -> str:
+    reasons = []
+    seen = set()
+    for s in skipped:
+        r = s.get("reason") or "bloqueado"
+        if r in seen:
+            continue
+        seen.add(r)
+        reasons.append(_SKIP_WHY.get(r, r))
+    return "; ".join(reasons) if reasons else "no se puede enviar"
+
+
+def _preview_mensaje(eligible: List[dict], skipped: List[dict]) -> str:
+    if eligible:
+        return f"Manito, vas a enviar {len(eligible)} correos a prospectos reales."
+    if skipped:
+        n = len(skipped)
+        why = _skip_why(skipped)
+        if n == 1:
+            return f"Manito, este borrador no se puede enviar: {why}."
+        return f"Manito, estos borradores no se pueden enviar: {why}."
+    return MSG_NOTHING_DUE
 
 
 def _confirm_or_error(confirm_token: str | None, confirm: bool, draft_ids: List[int]) -> dict | None:

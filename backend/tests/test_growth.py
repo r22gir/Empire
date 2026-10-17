@@ -26,7 +26,7 @@ def g(monkeypatch, tmp_path):
     for m in (prospect_engine, campaign_service, prospect_ops, acquisition, growth, place_details, improvements,
               socialforge, leadforge, growth_router):
         importlib.reload(m)
-    monkeypatch.setattr(socialforge, "POSTS_DIR", str(tmp_path / "posts"))
+    monkeypatch.setattr(socialforge, "POSTS_DIR", str(tmp_path / "posts"), raising=False)
     (tmp_path / "posts").mkdir()
     # LeadForge + campaign tables
     with prospect_engine._db() as conn:
@@ -123,12 +123,18 @@ def test_approval_queue_email_needs_tap_and_uses_campaign_send_path(g, monkeypat
     assert sent == []
     assert c.post(f"/api/v1/growth/approvals/{qid}/approve", json={"confirm": True}).status_code == 400  # no address yet
     r = c.post(f"/api/v1/growth/approvals/{qid}/approve",
-               json={"confirm": True, "to_address": "owner@designpro.test", "body": "Hi there,\n\nLine two."})
-    assert r.status_code == 200 and r.json()["sent"] is True
-    assert sent[0][0] == "owner@designpro.test" and "<p>Hi there,</p>" in sent[0][2]
-    cd = _one("SELECT status FROM campaign_drafts WHERE id=?", (r.json()["campaign_draft_id"],))
-    assert cd["status"] == "sent"
-    assert c.post(f"/api/v1/growth/approvals/{qid}/approve", json={"confirm": True}).status_code == 400  # not pending
+               json={"confirm": True, "to_address": "owner@example.com", "body": "Hi there,\n\nLine two."})
+    body = r.json()
+    assert r.status_code == 200 and body["sent"] is False
+    assert body["status"] == "pending"
+    assert "confirma el envío en LeadForge" in body["mensaje"]
+    assert sent == []
+    assert g["growth"].get_item(qid)["status"] == "pending"
+    cd = _one("SELECT status FROM campaign_drafts WHERE id=?", (body["campaign_draft_id"],))
+    assert cd["status"] == "reviewed"
+    again = c.post(f"/api/v1/growth/approvals/{qid}/approve", json={"confirm": True})
+    assert again.status_code == 200 and again.json()["sent"] is False
+    assert g["growth"].get_item(qid)["status"] == "pending"
 
 
 def test_approval_queue_ig_and_social_are_copy_only(g, monkeypatch):

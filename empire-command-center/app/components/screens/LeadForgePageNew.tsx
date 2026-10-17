@@ -896,7 +896,12 @@ function DraftReviewPanel({ campaignId }: { campaignId: number }) {
         body: JSON.stringify({ confirm_token: confirmSend.token, confirm: true }),
       });
       const data = await res.json();
-      if (res.ok && (data.success || data.status === 'sent' || data.sent > 0 || data.mensaje)) {
+      const actuallySent = res.ok && (
+        data.status === 'sent'
+        || (typeof data.sent === 'number' && data.sent > 0)
+        || data.success === true
+      );
+      if (actuallySent) {
         if (confirmSend.mode === 'one' && confirmSend.draftId) {
           setDrafts(prev => prev.map(d => d.id === confirmSend.draftId ? { ...d, status: 'sent' } : d));
           setSelectedDraft(null);

@@ -229,6 +229,98 @@ def test_flag_true_valid_token_sends_and_enforces_limits(lf, monkeypatch):
     assert len(lf["sent"]) == 1
 
 
+def test_growth_approve_stays_pending_and_does_not_send(lf):
+    from app.services.leadforge import growth
+    importlib.reload(growth)
+    item = growth.enqueue(
+        channel="email",
+        body="Hola manito",
+        source="test",
+        to_address=FAKE_PROSPECT,
+        subject="Hola",
+        to_name="Prospect Example",
+    )
+    result = asyncio.run(growth.approve(item["id"], confirm=True))
+    assert result["sent"] is False
+    assert result["status"] == "pending"
+    assert "confirma el envío en LeadForge" in result["mensaje"]
+    assert growth.get_item(item["id"])["status"] == "pending"
+    with lf["cs"]._db() as conn:
+        row = conn.execute(
+            "SELECT status FROM campaign_drafts WHERE id = ?",
+            (result["campaign_draft_id"],),
+        ).fetchone()
+        assert row["status"] == "reviewed"
+    assert lf["sent"] == []
+
+
+def test_preview_blocked_draft_names_reason(lf):
+    cs = lf["cs"]
+    _cid, denied_id = _reviewed_draft(cs, email=FAKE_DENIED)
+    prev = cs.preview_send(draft_id=denied_id)
+    assert prev["count"] == 0
+    assert "no hay campañas" not in prev["mensaje"].lower()
+    assert "lista de no enviar" in prev["mensaje"]
+    assert any(s["reason"] == "deny_list" for s in prev["skipped"])
+
+
+def test_denied_recipient_fail_closed(lf, monkeypatch):
+    def _boom(*_a, **_k):
+        raise RuntimeError("deny list unavailable")
+
+    monkeypatch.setattr(
+        "app.services.max.send_me_link.is_denied_email",
+        _boom,
+    )
+    cs = lf["cs"]
+    _cid, draft_id = _reviewed_draft(cs)
+    prev = cs.preview_send(draft_id=draft_id)
+    assert prev["count"] == 0
+    assert any(s["reason"] == "deny_list" for s in prev["skipped"])
+    assert lf["sent"] == []
+
+
+def test_execute_counts_drafts_and_manual_tasks_separately(lf):
+    cs = lf["cs"]
+    camp = cs.create_campaign({
+        "name": "Maxine mixed steps",
+        "status": "active",
+        "skip_weekends": False,
+        "send_window_start": "00:00",
+        "send_window_end": "23:59",
+        "business_unit": "workroom",
+    })
+    cs.add_step(camp["id"], {
+        "step_type": "email",
+        "subject": "Hola {name}",
+        "body_template": "Hola manito",
+        "delay_days": 0,
+        "is_manual": False,
+    })
+    cs.add_step(camp["id"], {
+        "step_type": "phone_script",
+        "subject": "Llamar",
+        "body_template": "Guion",
+        "delay_days": 0,
+        "is_manual": True,
+    })
+    pid_a = _insert_prospect(cs, "prospect-a@example.com", "Prospect A")
+    pid_b = _insert_prospect(cs, "prospect-b@example.com", "Prospect B")
+    cs.enroll_prospects(camp["id"], [pid_a, pid_b])
+    first = asyncio.run(cs.execute_next_steps())
+    assert first["drafted"] == 2
+    assert first["manual_tasks"] == 0
+    assert "2 borradores" in first["mensaje"]
+    assert "tareas manuales" not in first["mensaje"]
+    second = asyncio.run(cs.execute_next_steps())
+    assert second["drafted"] == 0
+    assert second["manual_tasks"] == 2
+    assert "2 tareas manuales" in second["mensaje"]
+    assert "borradores" not in second["mensaje"]
+    assert "No se envió nada" in second["mensaje"]
+    assert lf["sent"] == []
+
+
 def test_opted_out_and_deny_list_skipped(lf, monkeypatch):
     monkeypatch.setenv("LEADFORGE_REAL_SEND_ENABLED", "true")
     cs = lf["cs"]
@@ -258,3 +350,5 @@ def test_frontend_has_spanish_confirm_copy():
     assert "send-preview" in text
     assert "confirm_token" in text
     assert "No se envió nada" in text
+    assert "data.sent > 0 || data.mensaje" not in text
+    assert "actuallySent" in text
