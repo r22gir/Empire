@@ -16,6 +16,7 @@ def test_max_scheduler_starts_and_registers_jobs(monkeypatch):
         "send_weekly_report",
         "brain_sync",
         "expire_crypto_payments",
+        "nightly_drive_export",
     ]:
         monkeypatch.setattr(scheduler, name, _noop)
 
