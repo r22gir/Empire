@@ -8,14 +8,22 @@ const ARTICLES = [
   { href: '/ayuda/whatsapp', title: 'Cómo configurar WhatsApp', note: 'Tu cuenta de Meta, número de prueba y webhook. Sin secretos en la página.' },
 ];
 
+const PEDIR_CURSOR = {
+  href: '/pedir-cursor',
+  title: 'Pedir a Cursor',
+  note: 'Esto no lanza nada solo: Chief e lo revisa y Rafael da el sí final.',
+};
+
 export default function AyudaMenu() {
+  const edition = (process.env.NEXT_PUBLIC_EMPIRE_EDITION || '').trim().toLowerCase();
+  const articles = edition === 'amp' ? [...ARTICLES, PEDIR_CURSOR] : ARTICLES
   return (
     <main style={{ maxWidth: 720, margin: '0 auto', padding: '32px 20px', fontFamily: 'Inter, sans-serif', color: '#1a1a1a' }}>
       <p style={{ fontSize: 12, letterSpacing: 0.4, color: '#b8960c', fontWeight: 700, margin: 0 }}>CENTRO DE MANDO</p>
       <h1 style={{ fontSize: 32, margin: '8px 0' }}>Ayuda</h1>
       <p data-ayuda-opener="1" style={{ fontFamily: "'Playfair Display', Georgia, serif", fontSize: 26, margin: '8px 0 16px', color: '#1a1a1a' }}>{AYUDA_OPENER}</p>
       <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
-        {ARTICLES.map((article) => (
+        {articles.map((article) => (
           <li key={article.href} style={{ borderTop: '1px solid #e5e2dc', padding: '14px 0' }}>
             <Link href={article.href} style={{ color: '#1a1a1a', fontWeight: 700, fontSize: 18 }}>
               {article.title}
