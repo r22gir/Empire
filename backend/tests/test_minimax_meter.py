@@ -57,7 +57,7 @@ def test_existing_20_percent_instance_cap_still_works(monkeypatch, tmp_path):
     record_usage(input_tokens=2_000_001, output_tokens=0)
     summary = usage_summary()
     assert summary["cap_percent"] == 20.0
-    assert summary["level"] == "blocked"
+    assert summary["level"] == "paused"
     assert enforce_usage_cap(text="x" * 500)
 
 
@@ -66,7 +66,7 @@ def test_each_family_edition_capped_at_20_percent(monkeypatch, tmp_path):
     _seed(monkeypatch, tmp_path, "amp", tokens=200)
     from app.services.minimax_meter import check
 
-    blocked = check(kind="text", edition="amp", input_tokens=1)
+    blocked = check(kind="text", edition="amp", input_tokens=1, source="web")
     assert blocked
     assert "20%" in blocked
     assert "Edition cap" in blocked
@@ -83,7 +83,7 @@ def test_no_combined_family_text_cap(monkeypatch, tmp_path):
     assert check(kind="text", edition="amp", input_tokens=10) is None
     assert check(kind="text", edition="maxine", input_tokens=10) is None
     _seed(monkeypatch, tmp_path, "amp", tokens=50)
-    blocked = check(kind="text", edition="amp", input_tokens=1)
+    blocked = check(kind="text", edition="amp", input_tokens=1, source="web")
     assert blocked
     assert "Edition cap" in blocked
     assert "Family cap" not in blocked

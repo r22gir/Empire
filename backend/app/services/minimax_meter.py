@@ -546,23 +546,44 @@ def active_reservation_id() -> Optional[str]:
     return _active_reservation.get()
 
 
-def _family_text_block(edition: str, add_tokens: int, month: str, rows: list[dict[str, Any]]) -> Optional[str]:
+def _family_text_block(
+    edition: str,
+    add_tokens: int,
+    month: str,
+    rows: list[dict[str, Any]],
+    *,
+    source: str = "",
+    desk: Optional[str] = None,
+    kind: str = "text",
+) -> Optional[str]:
     if edition not in FAMILY_EDITIONS:
         return None
     pool = _pool_tokens(month, rows)
     mine = int(totals(edition=edition, month=month, rows=rows)["text_tokens"]) + max(0, add_tokens)
     per = edition_text_share_pct()
     mine_pct = (mine / pool) * 100.0 if pool else 0.0
-    if mine_pct > per + 1e-9:
-        return bilingual(
-            f"Tope de esta edición: Max-e y Maxine pueden usar cada una el {per:g}% "
-            f"del cupo de texto MiniMax (el mismo 20% que INSTANCE_USAGE_CAP_PCT). "
-            f"Esta edición ya iría al {mine_pct:.1f}%. No hay tope combinado.",
-            f"Edition cap: Max-e and Maxine may each use {per:g}% of the MiniMax "
-            f"text pool (the same 20% as INSTANCE_USAGE_CAP_PCT). "
-            f"This edition would be at {mine_pct:.1f}%. There is no combined family cap.",
-        )
-    return None
+    if mine_pct <= per + 1e-9:
+        return None
+    from app.services.instance_usage import (
+        MSG_BACKGROUND_OVERAGE,
+        family_overage_allowed,
+        is_background_request,
+        paused_message,
+    )
+
+    background = is_background_request(kind=kind or "text", source=source, desk=desk)
+    if (not background) and family_overage_allowed(used_percent=mine_pct):
+        return None
+    if background:
+        return bilingual(MSG_BACKGROUND_OVERAGE, MSG_BACKGROUND_OVERAGE)
+    paused = paused_message(used_percent=mine_pct)
+    return bilingual(
+        paused + " No hay tope combinado.",
+        f"Edition cap: Max-e and Maxine may each use {per:g}% of the MiniMax "
+        f"text pool (the same 20% as INSTANCE_USAGE_CAP_PCT). "
+        f"This edition would be at {mine_pct:.1f}%. There is no combined family cap. "
+        f"Extra use is paused.",
+    )
 
 
 def _image_block(edition: str, add_images: int, day: str, rows: list[dict[str, Any]]) -> Optional[str]:
@@ -610,6 +631,8 @@ def _eval_caps(
     video_clips: int,
     approval_id: Optional[str],
     rows: list[dict[str, Any]],
+    source: str = "",
+    desk: Optional[str] = None,
 ) -> tuple[Optional[str], str]:
     now = _now()
     day = now.strftime("%Y-%m-%d")
@@ -626,10 +649,10 @@ def _eval_caps(
 
     if kind == "text":
         add = max(0, int(input_tokens)) + max(0, int(output_tokens))
-        return _family_text_block(edition, add or 1, month, rows), warning
+        return _family_text_block(edition, add or 1, month, rows, source=source, desk=desk, kind=kind), warning
     if kind == "image":
         if edition in FAMILY_EDITIONS:
-            text_msg = _family_text_block(edition, 0, month, rows)
+            text_msg = _family_text_block(edition, 0, month, rows, source=source, desk=desk, kind=kind)
             if text_msg:
                 return text_msg, warning
         return _image_block(edition, max(1, int(images) or 1), day, rows), warning
@@ -686,6 +709,8 @@ def check(
     tts_replies: int = 0,
     video_clips: int = 0,
     approval_id: Optional[str] = None,
+    source: str = "",
+    desk: Optional[str] = None,
 ) -> Optional[str]:
     """Read-only cap peek (tests). Production callers use reserve()."""
     ed = normalize_edition(edition or current_edition())
@@ -703,6 +728,8 @@ def check(
             video_clips=video_clips,
             approval_id=approval_id,
             rows=rows,
+            source=source,
+            desk=desk,
         )
         if warning:
             _plan_warning.set(warning)
@@ -736,6 +763,8 @@ def reserve(
     tts_replies: int = 0,
     video_clips: int = 0,
     approval_id: Optional[str] = None,
+    source: str = "",
+    desk: Optional[str] = None,
 ) -> Reservation:
     """Atomically check caps and append a reserved row under one exclusive lock."""
     ed = normalize_edition(edition or current_edition())
@@ -754,6 +783,8 @@ def reserve(
             video_clips=video_clips,
             approval_id=approval_id,
             rows=rows,
+            source=source,
+            desk=desk,
         )
         if warning:
             _plan_warning.set(warning)
