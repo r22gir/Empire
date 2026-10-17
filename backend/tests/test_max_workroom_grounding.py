@@ -327,6 +327,16 @@ def test_workroom_tools_routes_model_first_uses_module_grounding(monkeypatch):
     _assert_module_grounding_available(captured, module_hit)
     ctx = _captured_model_context(captured)
     assert "/api/v1/quotes" in ctx or "/api/v1/finance" in ctx or "/quotes" in ctx
+    # Resolver-only: FastAPI introspection / registry fallback phrasing.
+    # Model-first does not inject the module doc into the prompt, so this
+    # fact is intentionally absent from the model context.
+    resolver_only = "from live FastAPI mount"
+    if resolver_only not in (module_hit.get("response") or ""):
+        resolver_only = "from registry/main.py fallback"
+    assert resolver_only in (module_hit.get("response") or ""), (
+        "resolver must publish live-route source that the standing prompt does not"
+    )
+    assert resolver_only not in ctx
     _assert_no_internal_leakage(response.response)
 
 
@@ -459,8 +469,8 @@ def test_archiveforge_question_still_routes_to_module_knowledge(monkeypatch):
 
 
 def test_archiveforge_question_model_first_uses_module_grounding(monkeypatch):
-    """Default MAX_MODEL_FIRST=1: ArchiveForge 'what is' reaches the model,
-    with the standing system prompt plus the still-working resolver."""
+    """Default MAX_MODEL_FIRST=1: two-word 'Archive Forge' hits the kept
+    archiveforge-status shortcut (not demoted module_knowledge, not the model)."""
     _set_model_first(monkeypatch, True)
     _block_live_sends(monkeypatch)
     question = "max whats going on with Archive Forge?"
@@ -479,7 +489,11 @@ def test_archiveforge_question_model_first_uses_module_grounding(monkeypatch):
         max_router.chat_with_max(request, BackgroundTasks(), Response())
     )
 
+    assert response.model_used == "archiveforge-status"
     assert response.model_used != "empire-module-knowledge"
-    assert captured["count"] >= 1
-    _assert_module_grounding_available(captured, module_hit)
+    assert captured["count"] == 0
+    assert module_hit is not None
+    assert module_hit.get("module") == "ArchiveForge"
+    assert "ArchiveForge is the Empire module" in (module_hit.get("response") or "")
+    assert "ArchiveForge is Empire's LIFE-magazine intake" in response.response
     _assert_no_internal_leakage(response.response)
