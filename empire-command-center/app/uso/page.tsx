@@ -10,6 +10,7 @@ type Usage = {
   limit_note_es?: string;
   used_percent?: number | null;
   remaining_percent?: number | null;
+  overage_active?: boolean;
 };
 
 export default function UsoPage() {
@@ -46,6 +47,8 @@ export default function UsoPage() {
             {typeof usage.used_percent === 'number' ? ` · ${usage.used_percent}% del total usado` : ''}
             {typeof usage.remaining_percent === 'number' ? ` · queda ${usage.remaining_percent}% hasta el tope` : ''}
             {usage.level ? ` · ${usage.level}` : ''}
+            {usage.level === 'overage' || usage.overage_active ? ' · Tiempo extra (Rafael no está)' : ''}
+            {usage.level === 'paused' ? ' · En pausa: Rafael está usando Max' : ''}
           </p>
           {usage.message ? <p>{usage.message}</p> : null}
         </>

@@ -54,14 +54,14 @@ def test_usage_cap_warns_then_soft_blocks_heavy_only(monkeypatch, tmp_path):
     assert enforce_usage_cap(text="hola") is None
 
     record_usage(input_tokens=50, output_tokens=0, model="MiniMax-M3")
-    blocked = usage_summary()
-    assert blocked["level"] == "blocked"
-    assert blocked["month"]["tokens"] == 210
-    assert enforce_usage_cap(text="un mensaje corto") is None
-    heavy = enforce_usage_cap(text="x" * 500)
-    assert heavy and "tope" in heavy
+    paused = usage_summary()
+    assert paused["level"] == "paused"
+    assert paused["month"]["tokens"] == 210
+    assert paused["overage_active"] is False
+    refused = enforce_usage_cap(text="un mensaje corto")
+    assert refused and "pausa" in refused
     generated = enforce_usage_cap(text="hola", source="generate")
-    assert generated and "mensajes cortos" in generated
+    assert generated
 
 
 def test_family_forces_minimax_m3(monkeypatch, tmp_path):
@@ -113,6 +113,7 @@ def test_usage_page_is_owner_only_and_states_the_twenty_percent_cap(monkeypatch,
     assert payload["remaining_percent"] == 18.5
     assert payload["used_percent"] + payload["remaining_percent"] == payload["cap_percent"]
     assert payload["limit_note_es"] == "Tu uso está limitado al 20% del uso total de MiniMax."
+    assert payload["overage_active"] is False
     hidden = {"baseline", "baseline_basis", "allowance", "used", "day", "month", "ratio"}
     assert hidden.isdisjoint(payload)
     card = (Path(__file__).resolve().parents[2] / "empire-command-center" / "app" / "components" / "UsageCard.tsx").read_text(encoding="utf-8")
@@ -130,6 +131,9 @@ def test_usage_page_is_owner_only_and_states_the_twenty_percent_cap(monkeypatch,
     assert "del total" in page
     assert "cupo" not in page
     assert "solo para el dueño" in page
+    assert "Tiempo extra (Rafael no está)" in card
+    assert "En pausa: Rafael está usando Max" in card
+    assert "Tiempo extra (Rafael no está)" in page
 
 
 def test_confidential_facts_stay_out_of_generated_notes(monkeypatch, tmp_path):
