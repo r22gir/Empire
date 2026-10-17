@@ -33,6 +33,87 @@ def _assert_no_internal_leakage(text: str) -> None:
     assert "delegation check required" not in lowered
 
 
+def _set_model_first(monkeypatch, enabled: bool) -> None:
+    """answer_policy.model_first() reads env at call time; reload in case a
+    future cache lands. Patch the router binding too."""
+    monkeypatch.setenv("MAX_MODEL_FIRST", "1" if enabled else "0")
+    ap = importlib.reload(importlib.import_module("app.services.max.answer_policy"))
+    monkeypatch.setattr(max_router, "answer_policy", ap)
+
+
+def _block_live_sends(monkeypatch) -> None:
+    def _boom(*_a, **_k):
+        raise AssertionError("tests must not send live email, WhatsApp, or SMS")
+
+    monkeypatch.setattr(
+        "app.services.max.email_service.EmailService.send", _boom, raising=False
+    )
+    monkeypatch.setattr(
+        "app.services.max.whatsapp_channel.send_template", _boom, raising=False
+    )
+
+
+def _message_content(message) -> str:
+    if message is None:
+        return ""
+    if isinstance(message, dict):
+        return str(message.get("content") or "")
+    return str(getattr(message, "content", "") or "")
+
+
+def _captured_model_context(captured: dict) -> str:
+    parts = [captured.get("system_prompt") or ""]
+    for message in captured.get("messages") or []:
+        parts.append(_message_content(message))
+    if captured.get("tools"):
+        parts.append(str(captured["tools"]))
+    return "\n".join(parts)
+
+
+def _capture_ai_chat(monkeypatch, canned: str) -> dict:
+    captured = {
+        "count": 0,
+        "messages": [],
+        "system_prompt": "",
+        "tools": None,
+        "kwargs": {},
+    }
+
+    async def fake_ai_router(messages, *args, **kwargs):
+        captured["count"] += 1
+        captured["messages"] = list(messages)
+        captured["system_prompt"] = kwargs.get("system_prompt") or ""
+        captured["tools"] = kwargs.get("tools")
+        captured["kwargs"] = dict(kwargs)
+        from app.services.max.ai_router import AIResponse
+
+        return AIResponse(content=canned, model_used="test-model")
+
+    monkeypatch.setattr(max_router.ai_router, "chat", fake_ai_router)
+    return captured
+
+
+def _assert_module_grounding_available(captured: dict, module_hit: dict) -> None:
+    """Model-first path: grounding is whatever the live code actually puts
+    on the model (system prompt / tools), plus the still-working resolver."""
+    assert captured["count"] >= 1, "model-first must call ai_router.chat"
+    ctx = _captured_model_context(captured)
+    assert ctx.strip(), "model-first must pass a system prompt or messages"
+    assert module_hit is not None
+    module = module_hit.get("module")
+    body = (module_hit.get("response") or "")
+    assert body, f"resolver must still return {module} facts"
+    if module == "Workroom":
+        _assert_workroom_empirebox_context(ctx)
+        _assert_workroom_empirebox_context(body)
+        assert "/api/v1/quotes" in ctx or "/api/v1/finance" in ctx or "workroom" in ctx.lower()
+    if module == "ArchiveForge":
+        assert "ArchiveForge" in body
+        # Oct 6 model-first does not inject the module doc into the prompt.
+        # The standing system prompt is what the model actually receives.
+        assert "empire workroom" in ctx.lower() or "empirebox" in ctx.lower()
+
+
 def _assert_workroom_empirebox_context(text: str) -> None:
     """Every Workroom response must include EmpireBox-specific facts so
     MAX never falls back to a foreign/generic example."""
@@ -146,6 +227,9 @@ def test_openclaw_question_resolves_with_skills():
 
 
 def test_workroom_what_is_routes_to_module_knowledge(monkeypatch):
+    _set_model_first(monkeypatch, False)
+    _block_live_sends(monkeypatch)
+
     async def fail_ai_router(*args, **kwargs):
         raise AssertionError(
             "Workroom 'what is' question should not reach generic AI chat"
@@ -167,7 +251,34 @@ def test_workroom_what_is_routes_to_module_knowledge(monkeypatch):
     _assert_no_internal_leakage(response.response)
 
 
+def test_workroom_what_is_model_first_uses_module_grounding(monkeypatch):
+    _set_model_first(monkeypatch, True)
+    _block_live_sends(monkeypatch)
+    captured = _capture_ai_chat(
+        monkeypatch,
+        "Empire Workroom is the drapery and upholstery shop in Hyattsville.",
+    )
+    module_hit = ek.resolve_empire_module_question("What is Empire Workroom?")
+
+    request = max_router.ChatRequest(
+        message="What is Empire Workroom?",
+        history=[],
+        channel="web",
+    )
+    response = asyncio.run(
+        max_router.chat_with_max(request, BackgroundTasks(), Response())
+    )
+
+    assert response.model_used != "empire-module-knowledge"
+    assert captured["count"] >= 1
+    _assert_module_grounding_available(captured, module_hit)
+    _assert_no_internal_leakage(response.response)
+
+
 def test_workroom_tools_routes_routes_to_module_knowledge(monkeypatch):
+    _set_model_first(monkeypatch, False)
+    _block_live_sends(monkeypatch)
+
     async def fail_ai_router(*args, **kwargs):
         raise AssertionError(
             "Workroom 'what tools/routes' question should not reach generic AI chat"
@@ -189,6 +300,33 @@ def test_workroom_tools_routes_routes_to_module_knowledge(monkeypatch):
         "/api/v1/quotes" in response.response or "/api/v1/finance" in response.response
     )
     _assert_workroom_empirebox_context(response.response)
+    _assert_no_internal_leakage(response.response)
+
+
+def test_workroom_tools_routes_model_first_uses_module_grounding(monkeypatch):
+    _set_model_first(monkeypatch, True)
+    _block_live_sends(monkeypatch)
+    question = "What tools/routes can you access for Workroom right now?"
+    captured = _capture_ai_chat(
+        monkeypatch,
+        "Workroom quotes live at /api/v1/quotes on EmpireBox in Hyattsville.",
+    )
+    module_hit = ek.resolve_empire_module_question(question)
+
+    request = max_router.ChatRequest(
+        message=question,
+        history=[],
+        channel="web",
+    )
+    response = asyncio.run(
+        max_router.chat_with_max(request, BackgroundTasks(), Response())
+    )
+
+    assert response.model_used != "empire-module-knowledge"
+    assert captured["count"] >= 1
+    _assert_module_grounding_available(captured, module_hit)
+    ctx = _captured_model_context(captured)
+    assert "/api/v1/quotes" in ctx or "/api/v1/finance" in ctx or "/quotes" in ctx
     _assert_no_internal_leakage(response.response)
 
 
@@ -296,8 +434,10 @@ def test_workroom_generate_estimate_does_not_invoke_foreign_examples(monkeypatch
 
 
 def test_archiveforge_question_still_routes_to_module_knowledge(monkeypatch):
-    """Regression: ArchiveForge question path must still answer from module
+    """Legacy MAX_MODEL_FIRST=0 path: ArchiveForge still answers from module
     knowledge (not the AI model)."""
+    _set_model_first(monkeypatch, False)
+    _block_live_sends(monkeypatch)
 
     async def fail_ai_router(*args, **kwargs):
         raise AssertionError("ArchiveForge question should not reach generic AI chat")
@@ -315,4 +455,31 @@ def test_archiveforge_question_still_routes_to_module_knowledge(monkeypatch):
 
     assert response.model_used == "empire-module-knowledge"
     assert "ArchiveForge is the Empire module" in response.response
+    _assert_no_internal_leakage(response.response)
+
+
+def test_archiveforge_question_model_first_uses_module_grounding(monkeypatch):
+    """Default MAX_MODEL_FIRST=1: ArchiveForge 'what is' reaches the model,
+    with the standing system prompt plus the still-working resolver."""
+    _set_model_first(monkeypatch, True)
+    _block_live_sends(monkeypatch)
+    question = "max whats going on with Archive Forge?"
+    captured = _capture_ai_chat(
+        monkeypatch,
+        "ArchiveForge is the LIFE magazine intake module. No internal notes.",
+    )
+    module_hit = ek.resolve_empire_module_question(question)
+
+    request = max_router.ChatRequest(
+        message=question,
+        history=[],
+        channel="web",
+    )
+    response = asyncio.run(
+        max_router.chat_with_max(request, BackgroundTasks(), Response())
+    )
+
+    assert response.model_used != "empire-module-knowledge"
+    assert captured["count"] >= 1
+    _assert_module_grounding_available(captured, module_hit)
     _assert_no_internal_leakage(response.response)
