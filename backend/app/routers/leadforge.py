@@ -13,7 +13,7 @@ from pathlib import Path
 from contextlib import contextmanager
 from typing import Optional, List
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Body, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from app.services.workroom_lead_intake import WorkroomIntake
@@ -1712,6 +1712,11 @@ class NoteRequest(BaseModel):
     text: str
 
 
+class SendConfirm(BaseModel):
+    confirm_token: Optional[str] = None
+    confirm: bool = False
+
+
 @router.post("/leadforge/campaigns")
 def create_campaign(body: CampaignCreate):
     """Create a new campaign."""
@@ -1759,11 +1764,23 @@ def update_draft(draft_id: int, body: DraftUpdate):
     return {"draft": result}
 
 
+@router.post("/leadforge/campaigns/drafts/{draft_id}/send-preview")
+def send_draft_preview(draft_id: int):
+    """Masked recipients + confirm token. Does not send."""
+    return cs.preview_send(draft_id=draft_id)
+
+
 @router.post("/leadforge/campaigns/drafts/{draft_id}/send")
-async def send_draft(draft_id: int):
-    """Send a single draft via email service."""
-    result = await cs.send_draft(draft_id)
-    if "error" in result:
+async def send_draft(draft_id: int, body: SendConfirm = Body(default_factory=SendConfirm)):
+    """Send a single draft. Requires confirm_token from send-preview."""
+    result = await cs.send_draft(
+        draft_id, confirm_token=body.confirm_token, confirm=body.confirm
+    )
+    if result.get("http") == 409:
+        raise HTTPException(409, result.get("error") or result.get("mensaje"))
+    if result.get("http") == 403:
+        raise HTTPException(403, result.get("error") or result.get("mensaje"))
+    if "error" in result and result.get("status") not in ("sent", "failed"):
         raise HTTPException(400, result["error"])
     return result
 
@@ -1819,10 +1836,21 @@ def get_campaign(campaign_id: int):
     return {"campaign": result}
 
 
+@router.post("/leadforge/campaigns/{campaign_id}/send-preview")
+def send_reviewed_preview(campaign_id: int):
+    """Masked recipients + confirm token for reviewed drafts. Does not send."""
+    return cs.preview_send(campaign_id=campaign_id)
+
+
 @router.post("/leadforge/campaigns/{campaign_id}/send-reviewed")
-async def send_reviewed(campaign_id: int):
-    """Batch send all reviewed/edited drafts for a campaign."""
-    result = await cs.send_all_reviewed(campaign_id)
+async def send_reviewed(campaign_id: int, body: SendConfirm = Body(default_factory=SendConfirm)):
+    result = await cs.send_all_reviewed(
+        campaign_id, confirm_token=body.confirm_token, confirm=body.confirm
+    )
+    if result.get("http") == 409:
+        raise HTTPException(409, result.get("error") or result.get("mensaje"))
+    if result.get("http") == 403:
+        raise HTTPException(403, result.get("error") or result.get("mensaje"))
     return result
 
 

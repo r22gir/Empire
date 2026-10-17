@@ -8,10 +8,9 @@ Growth layer on top of LeadForge (Oct 2026, approved by Rafael):
   5. Morning brief / weekly search   morning_brief_text() (sending lives in scripts/growth_jobs.py)
 
 Hard rules:
-  * Nothing here sends on its own. The only send path is approve() on an email item,
-    which is called by Rafael's tap in the studio (POST /api/v1/growth/approvals/{id}/approve
-    with confirm=true) and goes through the existing LeadForge campaign send path
-    (campaign_service.send_draft -> EmailService, Gmail SMTP).
+  * Nothing here sends on its own. approve() on an email item prepares a reviewed
+    LeadForge draft and tells Rafael to confirm the send in LeadForge. It never
+    mints a confirm token or calls send_draft.
   * Instagram / Facebook / SMS / social posts never send: approve() returns the text and a
     link to open; the studio copies it to the clipboard.
   * Max tools may enqueue drafts and read the queue. They can never approve.
@@ -357,8 +356,13 @@ def _to_html(text: str) -> str:
     return "".join(f"<p>{html.escape(p).replace(chr(10), '<br>')}</p>" for p in paras)
 
 
+MSG_CONFIRM_IN_LEADFORGE = (
+    "Manito, confirma el envío en LeadForge. El borrador quedó listo; nada se envió desde aquí."
+)
+
+
 async def approve(item_id: int, *, confirm: bool, approved_by: str = "rafael", **edits) -> dict:
-    """Rafael's tap. Email -> existing campaign send path. Everything else -> copy-and-open."""
+    """Rafael's tap. Email -> reviewed LeadForge draft (send is confirmed there). Else copy-and-open."""
     if not confirm:
         raise PermissionError("confirm=true is required (Rafael's tap). Nothing was sent.")
     if edits:
@@ -397,19 +401,14 @@ async def approve(item_id: int, *, confirm: bool, approved_by: str = "rafael", *
                 (item.get("prospect_id"), to, item.get("to_name") or "", item.get("subject") or "(no subject)",
                  _to_html(item["body"])))
             draft_id = cur.lastrowid
-    result = await cs.send_draft(draft_id)
-    ok = result.get("status") == "sent"
-    with _db() as conn:
-        conn.execute("UPDATE approval_queue SET status=?, decided_at=?, sent_at=?, result=? WHERE id=?",
-                     ("sent" if ok else "failed", _now(), _now() if ok else None,
-                      json.dumps({"campaign_draft_id": draft_id, **result})[:2000], item_id))
-        if ok and item["source"] == "prospect_draft" and item.get("source_ref") and _has_table(conn, "prospect_outreach_drafts"):
-            conn.execute("UPDATE prospect_outreach_drafts SET status='sent' WHERE id=?", (item["source_ref"],))
-        if ok and item.get("lead_id") and _has_table(conn, "lf_leads"):
-            conn.execute("UPDATE lf_leads SET last_contacted=?, status=CASE WHEN status='new' THEN 'contacted' ELSE status END WHERE id=?",
-                         (_now(), item["lead_id"]))
-    return {"id": item_id, "status": "sent" if ok else "failed", "sent": ok, "campaign_draft_id": draft_id,
-            "detail": result.get("error") or result.get("send_result")}
+    # Stay pending. Sending happens only after the masked-list confirm in LeadForge.
+    return {
+        "id": item_id,
+        "status": "pending",
+        "sent": False,
+        "campaign_draft_id": draft_id,
+        "mensaje": MSG_CONFIRM_IN_LEADFORGE,
+    }
 
 
 # ═══════════════════════════════════════════════════════════════════════════
