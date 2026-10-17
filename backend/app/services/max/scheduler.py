@@ -306,6 +306,9 @@ class MaxScheduler:
 
     async def run_sales_followup(self):
         """Check for quotes needing followup (older than N days without response)."""
+        if _family_mode():
+            logger.info("Family edition: skip Workroom sales followup")
+            return
         try:
             from app.services.max.telegram_bot import telegram_bot
             if not telegram_bot.is_configured:
@@ -357,6 +360,9 @@ class MaxScheduler:
 
     async def send_weekly_report(self):
         """Send end-of-week summary via Telegram."""
+        if _family_mode():
+            logger.info("Family edition: skip Workroom weekly report")
+            return
         try:
             from app.services.max.telegram_bot import telegram_bot
             if not telegram_bot.is_configured:
