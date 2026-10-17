@@ -147,8 +147,12 @@ class DeskScheduler:
 
             await asyncio.sleep(60)  # Check every minute
 
-    async def tick(self, now: datetime | None = None) -> None:
-        """One scheduler pass. Tests freeze *now*; production uses local time."""
+    async def tick(self, now: datetime | None = None, *, wait: bool = False) -> None:
+        """One scheduler pass. Tests freeze *now* and pass wait=True.
+
+        Production start() leaves wait=False so work is scheduled with
+        create_task and the 60s loop is not blocked on gather().
+        """
         now = now or datetime.now()
         today = now.strftime("%Y-%m-%d")
         family = _family_mode()
@@ -200,7 +204,11 @@ class DeskScheduler:
                     pending.append(self._run_pipeline_executor())
 
         if pending:
-            await asyncio.gather(*pending, return_exceptions=True)
+            if wait:
+                await asyncio.gather(*pending, return_exceptions=True)
+            else:
+                for coro in pending:
+                    asyncio.create_task(coro)
 
     def stop(self):
         self._running = False
@@ -209,7 +217,7 @@ class DeskScheduler:
     def _family_desk_task_allowed(
         self, desk_id: str, title: str, description: str, source: str
     ) -> bool:
-        """Background desk work never uses overage; skip when context is unchanged."""
+        """Background desk work never uses overage."""
         try:
             from app.services.instance_usage import enforce_usage_cap
 
@@ -225,22 +233,29 @@ class DeskScheduler:
         except Exception:
             logger.warning("[Scheduler] usage cap check failed; skipping family desk task")
             return False
-        try:
-            from app.services.family_job_skip import skip_if_unchanged
-
-            context = f"{desk_id}\n{title}\n{description or ''}\n{source or ''}"
-            if skip_if_unchanged(f"desk:{desk_id}:{title}", context):
-                logger.info("[Scheduler] skip desk task (unchanged): %s → %s", desk_id, title)
-                return False
-        except Exception:
-            logger.warning("[Scheduler] skip-if-unchanged failed; skipping family desk task")
-            return False
         return True
+
+    def _family_job_context(self, desk_id: str, title: str, description: str, source: str, today: str) -> str:
+        # Date is part of the hash so a daily job still runs tomorrow.
+        return f"{today}\n{desk_id}\n{title}\n{description or ''}\n{source or ''}"
 
     async def _execute_desk_task(self, desk_id: str, title: str, description: str, source: str = "scheduler"):
         """Execute a task directly through the desk manager — no HTTP roundtrip."""
-        if _family_mode() and not self._family_desk_task_allowed(desk_id, title, description, source):
-            return
+        today = datetime.now().strftime("%Y-%m-%d")
+        job_key = f"desk:{desk_id}:{title}"
+        context = self._family_job_context(desk_id, title, description, source, today)
+        if _family_mode():
+            if not self._family_desk_task_allowed(desk_id, title, description, source):
+                return
+            try:
+                from app.services.family_job_skip import skip_if_unchanged
+
+                if skip_if_unchanged(job_key, context):
+                    logger.info("[Scheduler] skip desk task (unchanged): %s → %s", desk_id, title)
+                    return
+            except Exception:
+                logger.warning("[Scheduler] skip-if-unchanged failed; skipping family desk task")
+                return
         logger.info(f"[Scheduler] Executing: {desk_id} → {title}")
 
         try:
@@ -290,6 +305,17 @@ class DeskScheduler:
 
             if not _family_mode():
                 await self._notify_telegram(desk_id, title, task)
+
+            if (
+                _family_mode()
+                and getattr(getattr(task, "state", None), "value", None) == "completed"
+            ):
+                try:
+                    from app.services.family_job_skip import mark_success
+
+                    mark_success(job_key, context)
+                except Exception:
+                    logger.warning("[Scheduler] could not store skip hash for %s → %s", desk_id, title)
 
             logger.info(f"[Scheduler] Completed: {desk_id} → {title} ({task.state.value})")
 

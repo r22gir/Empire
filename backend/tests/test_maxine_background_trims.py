@@ -76,7 +76,7 @@ def test_family_empty_schedule_skips_workroom_ticks(monkeypatch, tmp_path):
 
     async def _run():
         for hour, minute in ((8, 0), (8, 30), (10, 0)):
-            await scheduler.tick(datetime(2026, 10, 16, hour, minute))
+            await scheduler.tick(datetime(2026, 10, 16, hour, minute), wait=True)
 
     asyncio.run(_run())
     assert fired == []
@@ -113,9 +113,9 @@ def test_family_opt_in_schedule_fires_only_that_task(monkeypatch, tmp_path):
     scheduler._manager = _Manager()
 
     async def _run():
-        await scheduler.tick(datetime(2026, 10, 16, 8, 0))
-        await scheduler.tick(datetime(2026, 10, 16, 8, 30))
-        await scheduler.tick(datetime(2026, 10, 16, 10, 0))
+        await scheduler.tick(datetime(2026, 10, 16, 8, 0), wait=True)
+        await scheduler.tick(datetime(2026, 10, 16, 8, 30), wait=True)
+        await scheduler.tick(datetime(2026, 10, 16, 10, 0), wait=True)
 
     asyncio.run(_run())
     assert len(fired) == 1
@@ -135,7 +135,7 @@ def test_workroom_eight_am_still_schedules_finance(monkeypatch, tmp_path):
     monkeypatch.setattr(scheduler, "_check_service_health", lambda: asyncio.sleep(0))
     monkeypatch.setattr(scheduler, "_run_pipeline_executor", lambda: asyncio.sleep(0))
 
-    asyncio.run(scheduler.tick(datetime(2026, 10, 16, 8, 0)))
+    asyncio.run(scheduler.tick(datetime(2026, 10, 16, 8, 0), wait=True))
     assert ("finance", "Morning Invoice Audit") in fired
 
 
@@ -149,7 +149,7 @@ def test_family_health_tick_does_not_probe_workroom_ports(monkeypatch, tmp_path)
 
     monkeypatch.setattr("socket.create_connection", _fake_connect)
     scheduler = DeskScheduler()
-    asyncio.run(scheduler.tick(datetime(2026, 10, 16, 8, 0)))
+    asyncio.run(scheduler.tick(datetime(2026, 10, 16, 8, 0), wait=True))
     asyncio.run(scheduler._check_service_health())
     workroom = {8000, 3000, 3001, 3002, 3005, 3009, 7878, 11434}
     assert all(addr[1] not in workroom for addr in probed)
@@ -187,11 +187,18 @@ def test_family_max_scheduler_still_registers_morning_brief(monkeypatch, tmp_pat
 
 def test_skip_if_unchanged_stores_hash_under_run(monkeypatch, tmp_path):
     _maxine_env(monkeypatch, tmp_path)
-    from app.services.family_job_skip import skip_if_unchanged
+    from app.services.family_job_skip import mark_success, skip_if_unchanged
 
-    assert skip_if_unchanged("desk:finance:Morning Invoice Audit", "ctx-a") is False
-    assert skip_if_unchanged("desk:finance:Morning Invoice Audit", "ctx-a") is True
-    assert skip_if_unchanged("desk:finance:Morning Invoice Audit", "ctx-b") is False
+    key = "desk:finance:Morning Invoice Audit"
+    day_a = "2026-10-16\nctx-a"
+    day_b = "2026-10-17\nctx-a"
+    assert skip_if_unchanged(key, day_a) is False
+    assert list((tmp_path / "run").glob("*.hash")) == []
+    # Failed run: hash is not stored, so the same input retries.
+    assert skip_if_unchanged(key, day_a) is False
+    mark_success(key, day_a)
+    assert skip_if_unchanged(key, day_a) is True
+    assert skip_if_unchanged(key, day_b) is False
     hashes = list((tmp_path / "run").glob("*.hash"))
     assert len(hashes) == 1
 
@@ -226,5 +233,35 @@ def test_family_opt_in_refuses_overage(monkeypatch, tmp_path):
             raise AssertionError("background must not run on overage")
 
     scheduler._manager = _Manager()
-    asyncio.run(scheduler.tick(datetime(2026, 10, 16, 8, 0)))
+    asyncio.run(scheduler.tick(datetime(2026, 10, 16, 8, 0), wait=True))
     assert "model" not in fired
+
+
+def test_tick_create_task_without_wait(monkeypatch, tmp_path):
+    _workroom_env(monkeypatch, tmp_path)
+    scheduler = DeskScheduler()
+    created = []
+    real_create = asyncio.create_task
+
+    def _spy(coro, *args, **kwargs):
+        created.append(True)
+        coro.close()
+
+        async def _noop():
+            return None
+
+        return real_create(_noop())
+
+    monkeypatch.setattr(
+        "app.services.max.desks.desk_scheduler.asyncio.create_task",
+        _spy,
+    )
+    monkeypatch.setattr(scheduler, "_check_service_health", lambda: asyncio.sleep(0))
+    monkeypatch.setattr(scheduler, "_run_pipeline_executor", lambda: asyncio.sleep(0))
+
+    async def _record(desk_id, title, description, source="scheduler"):
+        return None
+
+    monkeypatch.setattr(scheduler, "_execute_desk_task", _record)
+    asyncio.run(scheduler.tick(datetime(2026, 10, 16, 8, 0)))
+    assert created, "production tick must background tasks with create_task"
