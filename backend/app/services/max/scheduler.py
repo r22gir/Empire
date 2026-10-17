@@ -230,13 +230,15 @@ class MaxScheduler:
             name="Nightly Brain Sync",
         )
 
-        # Every 15 minutes — expire stale pending crypto payments
-        self.scheduler.add_job(
-            self.expire_crypto_payments,
-            CronTrigger(minute="*/15"),
-            id="expire_crypto_payments",
-            name="Expire Stale Crypto Payments",
-        )
+        # Family editions have no crypto feature and no crypto_payments
+        # table. Do not register the expiry job there.
+        if not _family_mode():
+            self.scheduler.add_job(
+                self.expire_crypto_payments,
+                CronTrigger(minute="*/15"),
+                id="expire_crypto_payments",
+                name="Expire Stale Crypto Payments",
+            )
 
         self.scheduler.add_job(
             self.nightly_drive_export,
@@ -291,7 +293,7 @@ class MaxScheduler:
                     "ORDER BY due_date LIMIT 10",
                     (now,)
                 )
-                overdue = cursor.fetchall()
+                overdue = [tuple(r) for r in cursor.fetchall()]
             if not overdue:
                 return
 
@@ -588,10 +590,17 @@ class MaxScheduler:
     async def expire_crypto_payments(self):
         """Run every 15 minutes to expire stale pending crypto payments."""
         try:
+            from sqlalchemy import inspect
             from app.database import SessionLocal
             from app.services.crypto_payment_service import CryptoPaymentService
             db = SessionLocal()
             try:
+                bind = db.get_bind()
+                if not inspect(bind).has_table("crypto_payments"):
+                    if not getattr(self, "_crypto_table_missing_logged", False):
+                        logger.info("crypto_payments table absent; expiry job skipped")
+                        self._crypto_table_missing_logged = True
+                    return
                 count = CryptoPaymentService.expire_stale_payments(db)
                 if count > 0:
                     logger.info(f"Crypto expiry job: {count} stale payment(s) marked expired")

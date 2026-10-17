@@ -37,6 +37,9 @@ CREATE TABLE IF NOT EXISTS tasks (
     created_at TEXT DEFAULT (datetime('now')),
     updated_at TEXT DEFAULT (datetime('now')),
     completed_at TEXT,
+    source TEXT DEFAULT '',
+    follow_up_date TEXT,
+    recurrence TEXT,
     FOREIGN KEY (parent_task_id) REFERENCES tasks(id)
 );
 
@@ -482,6 +485,10 @@ def _init_database_locked():
         # v6.0 Pipeline columns (additive migration — safe to re-run)
         _migrate_pipeline_columns(conn)
 
+        # Columns expected by desk sync / persist that a fresh SCHEMA_SQL
+        # historically omitted (source, follow_up_date, recurrence).
+        _migrate_task_columns(conn)
+
         # Access control tables migration
         _migrate_access_control(conn)
 
@@ -520,6 +527,31 @@ def _migrate_pipeline_columns(conn):
     if added:
         conn.execute("CREATE INDEX IF NOT EXISTS idx_tasks_pipeline ON tasks(pipeline_id)")
         print(f"✓ Pipeline migration: added {added} column(s) to tasks table")
+
+
+def _migrate_task_columns(conn):
+    """Add task columns the code reads/writes that a fresh schema lacked.
+
+    Workroom's older DBs gained these via a historical migration that
+    never ran against a freshly seeded family edition. Safe to re-run:
+    only missing columns are added (PRAGMA table_info).
+    """
+    # Only columns actually referenced on the tasks table.
+    # retry_count / next_retry_at / max_retries / conversation_id live on
+    # other tables (openclaw_tasks, unified_messages, …), not tasks.
+    wanted = (
+        ("source", "TEXT DEFAULT ''"),
+        ("follow_up_date", "TEXT"),
+        ("recurrence", "TEXT"),
+    )
+    existing = {row[1] for row in conn.execute("PRAGMA table_info(tasks)")}
+    added = 0
+    for name, coltype in wanted:
+        if name not in existing:
+            conn.execute(f"ALTER TABLE tasks ADD COLUMN {name} {coltype}")
+            added += 1
+    if added:
+        print(f"✓ Task columns migration: added {added} column(s) to tasks table")
 
 
 def _hash_pin(pin):
