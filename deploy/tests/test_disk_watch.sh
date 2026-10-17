@@ -228,6 +228,24 @@ expect_eq "$rc" "0" "BACKUP1 opt-in scan exits 0"
 expect_file_contains "$ROOT/backup-scan.log" "top 5 space users under $BACKUP_FAKE" \
   "DISK_WATCH_SCAN_BACKUP=1 dus BACKUP1"
 
+echo "== disk_watch: unit ExecStart/Documentation stay on empire-ops =="
+UNIT="$REPO_ROOT/deploy/systemd/user/empire-disk-watch.service"
+TIMER="$REPO_ROOT/deploy/systemd/user/empire-disk-watch.timer"
+expect_file_contains "$UNIT" 'ExecStart=%h/empire-ops/deploy/disk_watch.sh' \
+  "unit ExecStart is ~/empire-ops/deploy/disk_watch.sh"
+expect_file_contains "$UNIT" 'Documentation=file://%h/empire-ops/deploy/README.md' \
+  "unit Documentation points at the ops README copy"
+expect_file_contains "$UNIT" \
+  'Documentation=file://%h/empire-ops/docs/runbooks/empiredell-family-data.md' \
+  "unit Documentation points at the ops runbook copy"
+expect_file_contains "$TIMER" 'Documentation=file://%h/empire-ops/deploy/README.md' \
+  "timer Documentation points at the ops README copy"
+if grep -q 'empire-repo' "$UNIT"; then
+  fail "disk-watch unit must not point at ~/empire-repo"
+else
+  pass "disk-watch unit does not mention empire-repo"
+fi
+
 echo "== disk_watch: test mode refuses live scan / live df =="
 set +e
 SCAN_ROOTS=/ DATA_ROOT=/ \

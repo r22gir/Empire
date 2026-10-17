@@ -158,7 +158,16 @@ archive, failed restore-test, failed rclone).
 
 ## Install (disk watch)
 
+On the Dell, `~/empire-repo` is a holding checkout without `deploy/`. The
+live script stays at `~/empire-ops/deploy/disk_watch.sh`. Copy the README
+and family-data runbook next to that ops tree so `Documentation=` resolves.
+
 ```bash
+mkdir -p ~/empire-ops/deploy ~/empire-ops/docs/runbooks
+cp deploy/disk_watch.sh ~/empire-ops/deploy/disk_watch.sh
+cp deploy/README.md ~/empire-ops/deploy/README.md
+cp docs/runbooks/empiredell-family-data.md \
+   ~/empire-ops/docs/runbooks/empiredell-family-data.md
 cp deploy/systemd/user/empire-disk-watch.service \
    deploy/systemd/user/empire-disk-watch.timer \
    ~/.config/systemd/user/
@@ -175,21 +184,18 @@ an `awk` reader that consumes the whole ranking so systemd's
 `IgnoreSIGPIPE=yes` cannot turn a closed pipe into exit 2 (reserved for
 real critical usage).
 
-The repo unit's `Documentation=` lines point at this README and
-[`docs/runbooks/empiredell-family-data.md`](../docs/runbooks/empiredell-family-data.md):
+The unit keeps `ExecStart` on the ops copy and points `Documentation=`
+at the README/runbook copies there (not `~/empire-repo`, which has no
+`deploy/` on this host):
 
 ```
-Documentation=file://%h/empire-repo/deploy/README.md
-Documentation=file://%h/empire-repo/docs/runbooks/empiredell-family-data.md
-ExecStart=%h/empire-repo/deploy/disk_watch.sh
+Documentation=file://%h/empire-ops/deploy/README.md
+Documentation=file://%h/empire-ops/docs/runbooks/empiredell-family-data.md
+ExecStart=%h/empire-ops/deploy/disk_watch.sh
 ```
 
-A live copy under `~/empire-ops/deploy/` is **not** a git checkout and
-has no README. If the installed unit still says
-`file://%h/empire-ops/deploy/README.md`, point `Documentation=` (and
-preferably `ExecStart=`) at the repo paths above. After Rafael's yes,
-copy the merged script to `~/empire-ops/deploy/disk_watch.sh` **or**
-repoint the unit at the repo path, then
+After Rafael's yes, copy the merged script, this README, and the runbook
+into `~/empire-ops` as above, then
 `systemctl --user start empire-disk-watch.service` once and read the
 journal.
 
