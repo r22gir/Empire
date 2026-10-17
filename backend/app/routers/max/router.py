@@ -1578,6 +1578,7 @@ def _hermes_channel_status_response(request: ChatRequest) -> ChatResponse:
 ARCHIVEFORGE_ROUTE_MARKERS = (
     "life magazine",
     "archiveforge",
+    "archive forge",
     "cover search",
     "cover lookup",
     "issue lookup",
@@ -1763,8 +1764,11 @@ def _is_archiveforge_info_request(message: str | None) -> bool:
     if any(marker in text for marker in ARCHIVEFORGE_INFO_MARKERS):
         return True
     # Route general question-style ArchiveForge asks to a truthful status/workflow response.
-    return ("archiveforge" in text or "life magazine" in text) and any(
-        token in text for token in ("what", "how", "help", "can", "publish", "workflow", "working", "features")
+    return (
+        "archiveforge" in text or "archive forge" in text or "life magazine" in text
+    ) and any(
+        token in text
+        for token in ("what", "how", "help", "can", "publish", "workflow", "working", "features")
     )
 
 
