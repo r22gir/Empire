@@ -11,10 +11,11 @@ SMTP env vars (fallback):
   SMTP_PORT       — SMTP port (default: 587 for STARTTLS)
   SMTP_USER       — login email address (authenticated Gmail account)
   SMTP_PASSWORD   — app password (NOT regular password)
-  SMTP_FROM       — sender address for From/Reply-To headers and envelope
-                    (only needed if different from SMTP_USER, e.g. max@empirebox.store alias)
+  SMTP_FROM       — optional From override on non-Gmail SMTP. On smtp.gmail.com
+                    From/envelope are always SMTP_USER so Gmail DKIM aligns.
+                    A different SMTP_FROM is kept as Reply-To only.
   SMTP_FROM_NAME  — sender display name (default: "MAX — Empire AI")
-  SMTP_REPLY_TO   — Reply-To header address (default: same as SMTP_FROM if set)
+  SMTP_REPLY_TO   — Reply-To header address (default: SMTP_FROM or SMTP_USER)
 """
 import os
 import smtplib
@@ -23,7 +24,7 @@ from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from email.mime.base import MIMEBase
 from email import encoders
-from email.utils import formataddr, make_msgid
+from email.utils import formataddr, make_msgid, parseaddr
 from pathlib import Path
 
 from app.services.max.email_template import html_to_text, render_house_email
@@ -31,6 +32,73 @@ from app.services.max.email_template import html_to_text, render_house_email
 import httpx
 
 logger = logging.getLogger("max.email_service")
+
+# Gmail SMTP DKIM-signs as gmail.com. A From on another domain (for example
+# empirebox.store) fails DMARC alignment and Gmail rejects with 550 5.7.30.
+GMAIL_SMTP_HOSTS = frozenset({"smtp.gmail.com", "smtp.googlemail.com"})
+
+# Spanish-safe operator logs (UTF-8). No secrets, no recipient dump.
+ALIGN_FROM_LOG_ES = (
+    "From no coincidia con el remitente autenticado de Gmail; "
+    "se envia como SMTP_USER para que DKIM pase."
+)
+DKIM_FAIL_LOG_ES = (
+    "El correo no se entrego: Gmail bloqueo el mensaje porque DKIM no paso "
+    "(550 5.7.30). From debe coincidir con SMTP_USER cuando se envia por smtp.gmail.com."
+)
+SMTP_FAIL_LOG_ES = "El correo no se entrego: fallo el envio SMTP."
+
+
+def normalize_email_address(value: str) -> str:
+    """Bare address from `user@host` or `Name <user@host>`."""
+    return parseaddr((value or "").strip())[1].strip()
+
+
+def is_gmail_smtp_host(host: str) -> bool:
+    return (host or "").strip().lower() in GMAIL_SMTP_HOSTS
+
+
+def gmail_smtp_from_is_aligned(from_addr: str, smtp_user: str, smtp_host: str) -> bool:
+    """True when Gmail SMTP can DKIM-align From, or the host is not Gmail."""
+    if not is_gmail_smtp_host(smtp_host):
+        return True
+    user = normalize_email_address(smtp_user)
+    frm = normalize_email_address(from_addr)
+    return bool(user and frm and user.lower() == frm.lower())
+
+
+def resolve_smtp_from_identities(
+    smtp_user: str,
+    smtp_from: str,
+    smtp_reply_to: str,
+    smtp_host: str,
+) -> tuple[str, str, bool]:
+    """Return (from_addr, reply_to, realigned).
+
+    On Gmail SMTP the From header and envelope must be the authenticated
+    SMTP_USER. A configured SMTP_FROM on another domain is kept as Reply-To
+    only, so replies can still land on a custom address.
+    """
+    user = normalize_email_address(smtp_user)
+    configured = normalize_email_address(smtp_from)
+    reply = normalize_email_address(smtp_reply_to)
+
+    if is_gmail_smtp_host(smtp_host):
+        from_addr = user
+        realigned = bool(configured and configured.lower() != user.lower())
+        reply_to = reply or (configured if realigned else "") or user
+        return from_addr, reply_to, realigned
+
+    from_addr = configured or user
+    return from_addr, reply or from_addr, False
+
+
+def smtp_failure_log_es(exc: BaseException) -> str:
+    """Spanish-safe bounce/failure line. Safe to log; no addresses or secrets."""
+    text = str(exc).lower()
+    if "5.7.30" in text or "dkim" in text:
+        return DKIM_FAIL_LOG_ES
+    return SMTP_FAIL_LOG_ES
 
 
 class EmailService:
@@ -42,12 +110,18 @@ class EmailService:
         # SMTP config (fallback)
         self.host = os.environ.get("SMTP_HOST", "smtp.gmail.com")
         self.port = int(os.environ.get("SMTP_PORT", "587"))
-        self.user = os.environ.get("SMTP_USER", "")
+        self.user = normalize_email_address(os.environ.get("SMTP_USER", ""))
         self.password = os.environ.get("SMTP_PASSWORD", "")
         self.from_name = os.environ.get("SMTP_FROM_NAME", "MAX — Empire AI")
-        # Explicit sender address (allows Gmail send-as alias, e.g. max@empirebox.store)
-        self.from_addr = os.environ.get("SMTP_FROM", "") or self.user
-        self.reply_to = os.environ.get("SMTP_REPLY_TO", "") or self.from_addr
+        from_addr, reply_to, realigned = resolve_smtp_from_identities(
+            self.user,
+            os.environ.get("SMTP_FROM", ""),
+            os.environ.get("SMTP_REPLY_TO", ""),
+            self.host,
+        )
+        self.from_addr = from_addr
+        self.reply_to = reply_to
+        self._gmail_from_realigned = realigned
         self.last_message_id: str | None = None
 
     @property
@@ -279,6 +353,8 @@ class EmailService:
             recipients.append(cc)
 
         try:
+            if self._gmail_from_realigned:
+                logger.warning(ALIGN_FROM_LOG_ES)
             with smtplib.SMTP(self.host, self.port, timeout=15) as server:
                 server.ehlo()
                 server.starttls()
@@ -288,7 +364,7 @@ class EmailService:
             logger.info("Email sent via SMTP to %s — subject: %s", to, subject)
             return True
         except Exception as exc:
-            logger.error("SMTP send failed: %s", exc)
+            logger.error("%s %s", smtp_failure_log_es(exc), exc)
             raise
 
 

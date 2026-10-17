@@ -167,6 +167,44 @@ def test_live_send_is_blocked_under_pytest(maxine):
         sched.email_daily_brief("hola")
 
 
+def test_maxine_env_example_documents_gmail_from_alignment():
+    text = Path(__file__).resolve().parents[2].joinpath(
+        "deploy", "empire-maxine.env.example"
+    ).read_text(encoding="utf-8")
+    assert "SMTP_HOST=smtp.gmail.com" in text
+    assert "SMTP_FROM=" in text
+    assert "550 5.7.30" in text
+    for line in text.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("SMTP_FROM=") and not stripped.startswith("#"):
+            raise AssertionError("SMTP_FROM must stay commented in the Maxine example")
+
+
+def test_brief_failure_logs_spanish_safe_dkim_line(maxine, monkeypatch, caplog):
+    import logging
+    from smtplib import SMTPDataError
+    from app.services.max.email_service import DKIM_FAIL_LOG_ES
+
+    class _Svc:
+        is_configured = True
+
+        def send(self, **kwargs):
+            raise SMTPDataError(
+                550,
+                "5.7.30 Your email has been blocked because DKIM authentication didn't pass",
+            )
+
+    monkeypatch.setattr(sched, "_refuse_live_brief_send", lambda: None)
+    monkeypatch.setattr("app.services.max.email_service.EmailService", _Svc)
+    with caplog.at_level(logging.ERROR, logger="max.scheduler"):
+        out = sched.email_daily_brief("hola manito")
+    assert out["sent"] is False
+    assert out["skipped"] is False
+    assert out["to"] == FAKE_OWNER_EMAIL
+    assert DKIM_FAIL_LOG_ES in caplog.text
+    assert FAKE_OWNER_EMAIL not in DKIM_FAIL_LOG_ES
+
+
 def _seed_overdue_task(data_dir) -> Path:
     db_path = Path(data_dir) / "empire.db"
     conn = sqlite3.connect(db_path)
