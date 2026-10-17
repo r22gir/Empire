@@ -127,22 +127,20 @@ class MaxMonitor:
         try:
             from app.db.database import get_db
             now = datetime.now().strftime("%Y-%m-%d")
-            db = get_db()
-            cursor = db.execute(
-                "SELECT title, due_date, desk_id FROM tasks "
-                "WHERE status IN ('todo','in_progress') "
-                "AND due_date IS NOT NULL AND due_date < ? "
-                "ORDER BY due_date LIMIT 5",
-                (now,)
-            )
-            rows = cursor.fetchall()
+            with get_db() as db:
+                cursor = db.execute(
+                    "SELECT title, due_date, desk FROM tasks "
+                    "WHERE status IN ('todo','in_progress') "
+                    "AND due_date IS NOT NULL AND due_date < ? "
+                    "ORDER BY due_date LIMIT 5",
+                    (now,)
+                )
+                rows = cursor.fetchall()
             if not rows:
                 return None
             lines = []
             for row in rows:
-                title = row[0] if isinstance(row, (list, tuple)) else row["title"]
-                due = row[1] if isinstance(row, (list, tuple)) else row["due_date"]
-                desk = row[2] if isinstance(row, (list, tuple)) else row.get("desk_id", "")
+                title, due, desk = row[0], row[1], row[2]
                 desk_tag = f" [{desk}]" if desk else ""
                 lines.append(f"  • {title}{desk_tag} (due {due})")
             extra = f"\n  + {len(rows)}+ more" if len(rows) == 5 else ""
@@ -204,23 +202,21 @@ class MaxMonitor:
         # Tasks
         try:
             from app.db.database import get_db
-            db = get_db()
             now = datetime.now().strftime("%Y-%m-%d")
-            overdue = db.execute(
-                "SELECT title, due_date, desk_id FROM tasks "
-                "WHERE status IN ('todo','in_progress') AND due_date IS NOT NULL AND due_date < ? "
-                "ORDER BY due_date LIMIT 10", (now,)
-            ).fetchall()
-            active = db.execute(
-                "SELECT COUNT(*) FROM tasks WHERE status IN ('todo','in_progress')"
-            ).fetchone()[0]
+            with get_db() as db:
+                overdue = db.execute(
+                    "SELECT title, due_date, desk FROM tasks "
+                    "WHERE status IN ('todo','in_progress') AND due_date IS NOT NULL AND due_date < ? "
+                    "ORDER BY due_date LIMIT 10", (now,)
+                ).fetchall()
+                active = db.execute(
+                    "SELECT COUNT(*) FROM tasks WHERE status IN ('todo','in_progress')"
+                ).fetchone()[0]
             lines.append(f"\n<b>Tasks:</b> {active} active")
             if overdue:
                 lines.append(f"  ⏰ {len(overdue)} overdue:")
                 for row in overdue:
-                    t = row[0] if isinstance(row, (list, tuple)) else row["title"]
-                    d = row[1] if isinstance(row, (list, tuple)) else row["due_date"]
-                    desk = row[2] if isinstance(row, (list, tuple)) else row.get("desk_id", "")
+                    t, d, desk = row[0], row[1], row[2]
                     lines.append(f"    • {t} (due {d}){f' [{desk}]' if desk else ''}")
             else:
                 lines.append("  ✅ No overdue tasks")

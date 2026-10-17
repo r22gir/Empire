@@ -230,13 +230,14 @@ class MaxScheduler:
             name="Nightly Brain Sync",
         )
 
-        # Every 15 minutes — expire stale pending crypto payments
-        self.scheduler.add_job(
-            self.expire_crypto_payments,
-            CronTrigger(minute="*/15"),
-            id="expire_crypto_payments",
-            name="Expire Stale Crypto Payments",
-        )
+        # Family editions have no crypto feature — don't register the job.
+        if not _family_mode():
+            self.scheduler.add_job(
+                self.expire_crypto_payments,
+                CronTrigger(minute="*/15"),
+                id="expire_crypto_payments",
+                name="Expire Stale Crypto Payments",
+            )
 
         self.scheduler.add_job(
             self.nightly_drive_export,
@@ -585,10 +586,24 @@ class MaxScheduler:
         except Exception as e:
             logger.error(f"Brain sync failed: {e}")
 
+    _crypto_table_absent_logged = False
+
     async def expire_crypto_payments(self):
-        """Run every 15 minutes to expire stale pending crypto payments."""
+        """Run every 15 minutes to expire stale pending crypto payments.
+
+        Family editions never create crypto tables. If the table is missing,
+        return quietly (log once at INFO) — do not create it.
+        """
         try:
-            from app.database import SessionLocal
+            from sqlalchemy import inspect as sa_inspect
+            from app.database import engine, SessionLocal
+            if not sa_inspect(engine).has_table("crypto_payments"):
+                if not MaxScheduler._crypto_table_absent_logged:
+                    logger.info(
+                        "crypto_payments table absent; skipping expiry job"
+                    )
+                    MaxScheduler._crypto_table_absent_logged = True
+                return
             from app.services.crypto_payment_service import CryptoPaymentService
             db = SessionLocal()
             try:
