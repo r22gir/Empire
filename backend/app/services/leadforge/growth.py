@@ -397,19 +397,16 @@ async def approve(item_id: int, *, confirm: bool, approved_by: str = "rafael", *
                 (item.get("prospect_id"), to, item.get("to_name") or "", item.get("subject") or "(no subject)",
                  _to_html(item["body"])))
             draft_id = cur.lastrowid
-    result = await cs.send_draft(draft_id)
-    ok = result.get("status") == "sent"
-    with _db() as conn:
-        conn.execute("UPDATE approval_queue SET status=?, decided_at=?, sent_at=?, result=? WHERE id=?",
-                     ("sent" if ok else "failed", _now(), _now() if ok else None,
-                      json.dumps({"campaign_draft_id": draft_id, **result})[:2000], item_id))
-        if ok and item["source"] == "prospect_draft" and item.get("source_ref") and _has_table(conn, "prospect_outreach_drafts"):
-            conn.execute("UPDATE prospect_outreach_drafts SET status='sent' WHERE id=?", (item["source_ref"],))
-        if ok and item.get("lead_id") and _has_table(conn, "lf_leads"):
-            conn.execute("UPDATE lf_leads SET last_contacted=?, status=CASE WHEN status='new' THEN 'contacted' ELSE status END WHERE id=?",
-                         (_now(), item["lead_id"]))
-    return {"id": item_id, "status": "sent" if ok else "failed", "sent": ok, "campaign_draft_id": draft_id,
-            "detail": result.get("error") or result.get("send_result")}
+    # Confirmed send lives in LeadForge. This tap only marks the draft reviewed
+    # and leaves the queue item pending — never send_draft without a token.
+    return {
+        "id": item_id,
+        "status": "pending",
+        "sent": False,
+        "campaign_draft_id": draft_id,
+        "mensaje": "Manito, confirma el envío en LeadForge. Aquí no se manda solo.",
+        "detail": "confirma el envío en LeadForge",
+    }
 
 
 # ═══════════════════════════════════════════════════════════════════════════

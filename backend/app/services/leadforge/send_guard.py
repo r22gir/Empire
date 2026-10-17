@@ -54,19 +54,21 @@ def confirm_ttl_s() -> int:
         return CONFIRM_TTL_S
 
 
+class ConfirmSecretMissing(RuntimeError):
+    """No confirm-token secret configured. Fail closed — no hardcoded fallback."""
+
+
+MENSAJE_NO_SECRET = (
+    "Manito, no puedo confirmar envíos: falta la llave de confirmación."
+)
+
+
 def _secret() -> bytes:
     for key in ("LEADFORGE_CONFIRM_SECRET", "AMP_JWT_SECRET"):
         val = (os.getenv(key) or "").strip()
         if val:
             return val.encode("utf-8")
-    try:
-        from app.core.config import settings
-        val = str(getattr(settings, "SECRET_KEY", "") or "").strip()
-        if val:
-            return val.encode("utf-8")
-    except Exception:
-        pass
-    return b"leadforge-confirm-unconfigured"
+    raise ConfirmSecretMissing(MENSAJE_NO_SECRET)
 
 
 def mask_email(email: str | None) -> str:
@@ -108,6 +110,8 @@ def read_confirm_token(token: str | None, now: Optional[int] = None) -> Optional
         if not ids_part:
             return []
         return _normalize_ids(int(x) for x in ids_part.split(",") if x)
+    except ConfirmSecretMissing:
+        raise
     except Exception:
         return None
 

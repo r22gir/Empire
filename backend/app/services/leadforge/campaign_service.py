@@ -576,7 +576,7 @@ async def execute_next_steps() -> dict:
     """Find and execute all due enrollment steps. Async for non-blocking use."""
     now = datetime.utcnow()
     now_iso = now.isoformat()
-    results = {"executed": 0, "skipped": 0, "errors": 0, "manual_tasks": 0, "details": []}
+    results = {"executed": 0, "skipped": 0, "errors": 0, "manual_tasks": 0, "drafted": 0, "details": []}
 
     # Send window check
     current_time = now.strftime("%H:%M")
@@ -669,6 +669,14 @@ async def execute_next_steps() -> dict:
                         (cid, e["id"], e["prospect_id"], e["step_id"],
                          json.dumps({"step_type": step_type, "subject": rendered_subject,
                                      "body": rendered_body[:500], "reason": f"missing {step_type} contact"})))
+                    conn.execute(
+                        """UPDATE campaigns
+                           SET drafted_count = COALESCE(drafted_count, 0) + 1,
+                               updated_at = datetime('now')
+                           WHERE id = ?""",
+                        (cid,),
+                    )
+                    results["drafted"] += 1
                     _advance_enrollment(conn, e)
                 except Exception:
                     pass
@@ -718,6 +726,14 @@ async def execute_next_steps() -> dict:
                         ),
                     )
                     results["manual_tasks"] += 1
+                    results["drafted"] += 1
+                    conn.execute(
+                        """UPDATE campaigns
+                           SET drafted_count = COALESCE(drafted_count, 0) + 1,
+                               updated_at = datetime('now')
+                           WHERE id = ?""",
+                        (cid,),
+                    )
                     results["details"].append({
                         "enrollment_id": e["id"], "action": "manual_task_created",
                         "step_type": step_type,
@@ -747,6 +763,7 @@ async def execute_next_steps() -> dict:
                         (cid,),
                     )
                     results["executed"] += 1
+                    results["drafted"] += 1
                     results["details"].append({
                         "enrollment_id": e["id"], "action": "drafted",
                         "step_type": step_type, "prospect_id": e["prospect_id"],
@@ -787,8 +804,7 @@ async def execute_next_steps() -> dict:
                     "enrollment_id": e["id"], "error": str(exc),
                 })
 
-    drafted = results["executed"]
-    results["drafted"] = drafted
+    drafted = results["drafted"]
     if drafted == 0:
         results["mensaje"] = (
             "Manito, no hay campañas activas ni prospectos inscritos, "
@@ -1423,7 +1439,8 @@ def _apply_send_caps(drafts: List[dict], already_today: int) -> List[dict]:
 def preview_send_drafts(draft_ids: List[int]) -> dict:
     """Build a confirm-token preview. Never sends."""
     from app.services.leadforge.send_guard import (
-        make_confirm_token, mask_email, real_send_enabled, MENSAJE_SEND_DISABLED,
+        ConfirmSecretMissing, make_confirm_token, mask_email, real_send_enabled,
+        MENSAJE_SEND_DISABLED,
     )
     with _db() as conn:
         eligible = _apply_send_caps(
@@ -1431,7 +1448,10 @@ def preview_send_drafts(draft_ids: List[int]) -> dict:
             _sends_today(conn),
         )
     ids = [int(d["id"]) for d in eligible]
-    token, exp = make_confirm_token(ids) if ids else make_confirm_token([])
+    try:
+        token, exp = make_confirm_token(ids) if ids else make_confirm_token([])
+    except ConfirmSecretMissing as exc:
+        return {"error": str(exc), "http_status": 503, "count": 0, "draft_ids": []}
     payload = {
         "count": len(ids),
         "draft_ids": ids,
@@ -1510,13 +1530,18 @@ def _deliver_draft(draft: dict) -> dict:
 
 def _confirmed_send(draft_ids: List[int], confirm_token: Optional[str], confirm: bool) -> dict:
     from app.services.leadforge.send_guard import (
-        MENSAJE_BAD_TOKEN, MENSAJE_LIMIT, MENSAJE_NEED_CONFIRM, MENSAJE_SEND_DISABLED,
-        real_send_enabled, token_matches,
+        ConfirmSecretMissing, MENSAJE_BAD_TOKEN, MENSAJE_LIMIT, MENSAJE_NEED_CONFIRM,
+        MENSAJE_SEND_DISABLED, real_send_enabled, token_matches, _secret,
     )
     wanted = [int(i) for i in draft_ids]
     if not confirm or not confirm_token:
         return {"error": MENSAJE_NEED_CONFIRM, "http_status": 409, "sent": 0}
-    if not token_matches(confirm_token, wanted):
+    try:
+        _secret()
+        matched = token_matches(confirm_token, wanted)
+    except ConfirmSecretMissing as exc:
+        return {"error": str(exc), "http_status": 503, "sent": 0}
+    if not matched:
         return {"error": MENSAJE_BAD_TOKEN, "http_status": 409, "sent": 0}
     if not real_send_enabled():
         return {"ok": False, "sent": 0, "mensaje": MENSAJE_SEND_DISABLED}
@@ -1548,7 +1573,7 @@ def _confirmed_send(draft_ids: List[int], confirm_token: Optional[str], confirm:
 async def send_draft(draft_id: int, confirm_token: Optional[str] = None, confirm: bool = False) -> dict:
     """Send one draft only after a fresh confirm token and the real-send flag."""
     if not draft_exists(draft_id):
-        return {"error": "Draft not found", "http_status": 404}
+        return {"error": "No encuentro ese borrador, manito.", "http_status": 404}
     result = _confirmed_send([draft_id], confirm_token, confirm)
     if result.get("details"):
         one = result["details"][0]

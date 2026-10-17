@@ -287,3 +287,95 @@ def test_flag_true_sends_confirmed_only_and_skips(monkeypatch, tmp_path):
         # Token ids are deny/opted — preview/send of those ids sends 0
         assert blocked.json().get("sent", 0) == 0
         assert len(_RecordingEmail.sent) == 1
+
+
+def test_execute_counts_manual_and_no_channel_drafts(lf):
+    cs = lf["cs"]
+    camp = cs.create_campaign({
+        "name": "Manual y sin canal",
+        "status": "active",
+        "send_window_start": "00:00",
+        "send_window_end": "23:59",
+        "skip_weekends": False,
+    })
+    cs.add_step(camp["id"], {
+        "step_type": "email",
+        "subject": "Hola {first_name}",
+        "body_template": "Hola {name}",
+        "is_manual": True,
+        "delay_days": 0,
+    })
+    pid_manual = _insert_prospect(cs, FAKE_OK, "Manual Example")
+    pid_empty = _insert_prospect(cs, "", "Sin Canal")
+    cs.enroll_prospects(camp["id"], [pid_manual, pid_empty])
+
+    data = asyncio.run(cs.execute_next_steps())
+    assert data["drafted"] == 2
+    assert data["manual_tasks"] == 1
+    assert "no se preparó nada" not in data["mensaje"]
+    assert "Preparé 2 borradores" in data["mensaje"]
+    with cs._db() as conn:
+        n = conn.execute("SELECT COUNT(*) FROM campaign_drafts").fetchone()[0]
+        assert n == 2
+        drafted = conn.execute(
+            "SELECT drafted_count FROM campaigns WHERE id = ?", (camp["id"],)
+        ).fetchone()[0]
+        assert drafted == 2
+
+
+def test_growth_approve_stays_pending_without_send(lf, monkeypatch):
+    monkeypatch.setattr("app.services.max.email_service.EmailService", _RaisingEmail)
+    from app.services.leadforge import growth
+    growth._SCHEMA_DONE.clear()
+    item = growth.enqueue(
+        channel="email",
+        body="Hola manito",
+        source="test",
+        source_ref="amp-6a-approve",
+        to_address="owner@example.com",
+        subject="Prueba",
+        created_by="test",
+    )
+    res = asyncio.run(growth.approve(item["id"], confirm=True))
+    assert res["sent"] is False
+    assert res["status"] == "pending"
+    assert "confirma el envío en LeadForge" in res["mensaje"]
+    assert growth.get_item(item["id"])["status"] == "pending"
+    with lf["cs"]._db() as conn:
+        row = conn.execute(
+            "SELECT status FROM campaign_drafts WHERE id = ?",
+            (res["campaign_draft_id"],),
+        ).fetchone()
+        assert row[0] == "reviewed"
+
+
+def test_confirm_secret_missing_fails_closed(lf, monkeypatch):
+    monkeypatch.delenv("AMP_JWT_SECRET", raising=False)
+    monkeypatch.delenv("LEADFORGE_CONFIRM_SECRET", raising=False)
+    from app.services.leadforge.send_guard import ConfirmSecretMissing, make_confirm_token
+    with pytest.raises(ConfirmSecretMissing):
+        make_confirm_token([1])
+
+    _seed_active_campaign(lf["cs"], [FAKE_OK])
+    asyncio.run(lf["cs"].execute_next_steps())
+    with lf["cs"]._db() as conn:
+        did = conn.execute("SELECT id FROM campaign_drafts").fetchone()[0]
+        conn.execute("UPDATE campaign_drafts SET status = 'reviewed' WHERE id = ?", (did,))
+    preview = lf["client"].post(f"/api/v1/leads/leadforge/campaigns/drafts/{did}/send-preview")
+    assert preview.status_code == 503
+    assert "llave de confirmación" in preview.json()["detail"]
+    send = lf["client"].post(
+        f"/api/v1/leads/leadforge/campaigns/drafts/{did}/send",
+        json={"confirm_token": "x", "confirm": True},
+    )
+    assert send.status_code == 503
+    assert "llave de confirmación" in send.json()["detail"]
+
+
+def test_missing_draft_404_is_spanish(lf):
+    res = lf["client"].post("/api/v1/leads/leadforge/campaigns/drafts/999999/send-preview")
+    assert res.status_code == 404
+    assert res.json()["detail"] == "No encuentro ese borrador, manito."
+    res2 = lf["client"].post("/api/v1/leads/leadforge/campaigns/drafts/999999/send")
+    assert res2.status_code == 404
+    assert res2.json()["detail"] == "No encuentro ese borrador, manito."
