@@ -5,6 +5,8 @@ import json
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+import pytest
+
 from app.services.instance_usage import (
     MENSAJE_OVERAGE,
     MENSAJE_PAUSED,
@@ -359,9 +361,19 @@ def test_concurrent_desk_during_web_chat_does_not_race(monkeypatch, tmp_path):
     (tmp_path / "meter").mkdir(parents=True, exist_ok=True)
 
     from app.services.max.ai_router import AIMessage, _meter_ctx, ai_router, current_meter_context
+    from app.services.minimax_meter import MeterBlocked
 
     seen: list[tuple[str, object]] = []
     barrier = asyncio.Barrier(2)
+
+    def _try_reserve(text: str) -> tuple[bool, str]:
+        try:
+            reservation = ai_router._reserve_minimax_text(
+                [AIMessage(role="user", content=text)]
+            )
+            return (not reservation.blocked, reservation.message or "")
+        except MeterBlocked as exc:
+            return (False, exc.message)
 
     async def web_chat():
         token = _meter_ctx.set(("web", None))
@@ -369,10 +381,8 @@ def test_concurrent_desk_during_web_chat_does_not_race(monkeypatch, tmp_path):
             await barrier.wait()
             await asyncio.sleep(0)
             seen.append(("web", current_meter_context()))
-            reservation = ai_router._reserve_minimax_text(
-                [AIMessage(role="user", content="hola manito")]
-            )
-            seen.append(("web-reserve", (not reservation.blocked, reservation.message)))
+            allowed, message = _try_reserve("hola manito")
+            seen.append(("web-reserve", (allowed, message)))
         finally:
             _meter_ctx.reset(token)
 
@@ -382,10 +392,8 @@ def test_concurrent_desk_during_web_chat_does_not_race(monkeypatch, tmp_path):
             await barrier.wait()
             await asyncio.sleep(0)
             seen.append(("desk", current_meter_context()))
-            reservation = ai_router._reserve_minimax_text(
-                [AIMessage(role="user", content="audit books")]
-            )
-            seen.append(("desk-reserve", (reservation.blocked, reservation.message)))
+            allowed, message = _try_reserve("audit books")
+            seen.append(("desk-reserve", (not allowed, message)))
         finally:
             _meter_ctx.reset(token)
 
@@ -394,7 +402,10 @@ def test_concurrent_desk_during_web_chat_does_not_race(monkeypatch, tmp_path):
     from app.services.minimax_meter import record
     record(kind="text", edition="amp", model="MiniMax-M3", input_tokens=250, output_tokens=0)
 
-    asyncio.run(asyncio.gather(web_chat(), desk_call()))
+    async def _run():
+        await asyncio.gather(web_chat(), desk_call())
+
+    asyncio.run(_run())
     ctxs = {label: value for label, value in seen if label in {"web", "desk"}}
     assert ctxs["web"] == ("web", None)
     assert ctxs["desk"] == ("", "finance")
@@ -427,10 +438,10 @@ def test_minimax_chat_bypass_inside_chat_context_is_refused(monkeypatch, tmp_pat
     ai_router._meter_desk = None
     assert current_meter_context() == ("", None)
 
-    reservation = ai_router._reserve_minimax_text(
-        [AIMessage(role="user", content="bypass spend")]
-    )
-    assert reservation.blocked is True
+    with pytest.raises(MeterBlocked):
+        ai_router._reserve_minimax_text(
+            [AIMessage(role="user", content="bypass spend")]
+        )
 
     # Inside a real chat() context the same leftover attrs are ignored; ContextVar wins.
     token = _meter_ctx.set(("web", None))
@@ -443,10 +454,10 @@ def test_minimax_chat_bypass_inside_chat_context_is_refused(monkeypatch, tmp_pat
         # A nested bypass that clears the ContextVar is refused again.
         _meter_ctx.reset(token)
         token = None
-        bypass = ai_router._reserve_minimax_text(
-            [AIMessage(role="user", content="bypass after reset")]
-        )
-        assert bypass.blocked is True
+        with pytest.raises(MeterBlocked):
+            ai_router._reserve_minimax_text(
+                [AIMessage(role="user", content="bypass after reset")]
+            )
     finally:
         if token is not None:
             _meter_ctx.reset(token)
