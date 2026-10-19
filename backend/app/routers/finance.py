@@ -1315,6 +1315,68 @@ def finance_dashboard(request: Request):
         }
 
 
+@limiter.limit("30/minute")
+@router.get("/studio-money")
+def studio_money_snapshot(request: Request):
+    """Read-only Money tab figures: to collect, deposits due, paid MTD.
+
+    Computed from existing invoices, payments, and quotes_v2 rows.
+    No writes and no Stripe or other external calls.
+    """
+    from app.services.studio_money import compute_studio_money
+
+    today = date.today()
+    invoices: list = []
+    payments: list = []
+    quotes: list = []
+    invoices_connected = False
+    payments_connected = False
+    quotes_connected = False
+
+    with get_db() as conn:
+        _ensure_finance_extensions(conn)
+        try:
+            invoices = dict_rows(conn.execute(
+                """SELECT id, status, due_date, balance_due, amount_paid,
+                          invoice_stage, quote_id, source_id,
+                          deposit_required, deposit_received
+                   FROM invoices"""
+            ))
+            invoices_connected = True
+        except sqlite3.OperationalError:
+            try:
+                invoices = dict_rows(conn.execute(
+                    "SELECT id, status, due_date, balance_due, amount_paid FROM invoices"
+                ))
+                invoices_connected = True
+            except sqlite3.OperationalError:
+                invoices = []
+        try:
+            payments = dict_rows(conn.execute(
+                "SELECT id, amount, payment_date, created_at FROM payments"
+            ))
+            payments_connected = True
+        except sqlite3.OperationalError:
+            payments = []
+        try:
+            quotes = dict_rows(conn.execute(
+                "SELECT id, status, deposit_required, deposit_paid FROM quotes_v2"
+            ))
+            quotes_connected = True
+        except sqlite3.OperationalError:
+            quotes = []
+
+    return compute_studio_money(
+        invoices,
+        payments,
+        quotes,
+        today=today,
+        invoices_connected=invoices_connected,
+        payments_connected=payments_connected,
+        quotes_connected=quotes_connected,
+    )
+
+
 # ── Profit & Loss ────────────────────────────────────────────────────
 
 @limiter.limit("30/minute")

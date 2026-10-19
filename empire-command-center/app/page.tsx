@@ -1,23 +1,14 @@
-// Command Center home.
-// - "/" with no query: the Max personal center (components/home3/MaxHome, design
-//   system v3). The previous module ring stays at /preview/ring.
-// - "/?product=…", "/?screen=…", "/?section=…", "/?ask=…" (any app query
-//   param): the Command Center app, so every existing deep link, chat
-//   link and bookmark keeps working. Hash links (/#presentation, …) are
-//   forwarded to /classic by MaxHome on mount.
-// - The classic app is also reachable directly at /classic.
+// Command Center home — one Studio shell for "/" and "/?product=…".
+// Tab / product / screen changes stay in-app (no remount). The previous
+// two-shell split (MaxHome vs CommandCenterApp) is gone. Classic chrome
+// remains at /classic. Preview ring/cockpit are gated separately.
 import CommandCenterApp from './CommandCenterApp';
-import MaxHome from './components/home3/MaxHome';
 import StudioAuthGate from './components/auth/StudioAuthGate';
 
-type SP = Record<string, string | string[] | undefined>;
-
-export default async function Home({ searchParams }: { searchParams: Promise<SP> }) {
-  const sp = await searchParams;
-  const deepLink = Object.keys(sp).some(k => !k.startsWith('utm_') && k !== '_v' && k !== 'theme' && k !== 'fbclid' && k !== 'gclid');
+export default function Home() {
   return (
     <StudioAuthGate>
-      {deepLink ? <CommandCenterApp /> : <MaxHome />}
+      <CommandCenterApp variant="studio" />
     </StudioAuthGate>
   );
 }

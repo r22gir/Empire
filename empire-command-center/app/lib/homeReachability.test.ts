@@ -1,5 +1,5 @@
 /**
- * Rafael's rule: every feature is reachable from Command Center home / left nav.
+ * Rafael's rule: every feature is reachable from the Studio shell.
  * Run: node --experimental-strip-types --test app/lib/homeReachability.test.ts
  */
 import assert from 'node:assert/strict';
@@ -7,46 +7,56 @@ import test from 'node:test';
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { STUDIO_MODULES } from '../studio/moduleHome.ts';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const read = (rel: string) => readFileSync(join(root, rel), 'utf8');
 
-function hrefs(src: string): string[] {
-  return [...src.matchAll(/href=["'`]([^"'`]+)["'`]/g)].map(m => m[1]);
-}
-
-test('hero exposes Talk (LiveVoiceCall) and Presentation mode', () => {
-  const home = read('components/home3/MaxHome.tsx');
-  assert.match(home, /<HomeFace/);
-  assert.match(home, /variant="hero"/);
-  assert.match(home, /label="Talk"/);
-  assert.match(home, /data-testid="mh-presentation"/);
-  assert.match(home, /\/\?screen=presentation&mode=presentation/);
-  assert.match(home, /data-testid="mh-quick-actions"/);
+test('Studio voice home is the single talk entry; composer keeps a mic', () => {
+  const voice = read('studio/VoiceHome.tsx');
+  const chat = read('components/screens/ChatScreen.tsx');
+  const app = read('CommandCenterApp.tsx');
+  assert.match(voice, /studio-talk/);
+  assert.match(voice, /useLiveVoice/);
+  assert.match(voice, /studio-keyboard/);
+  assert.match(chat, /aria-label=\{recording \? 'Stop recording' : 'Start recording'\}/);
+  assert.match(app, /variant === 'studio'/);
+  assert.match(app, /<VoiceHome/);
+  assert.match(app, /<JobContextPane/);
+  const studioBlock = app.slice(app.indexOf("if (variant === 'studio')"), app.indexOf("if (variant === 'studio')") + 900);
+  assert.doesNotMatch(studioBlock, /<LiveVoiceCall/);
 });
 
-test('home quick actions and left nav cover URL/hotkey-only features', () => {
-  const home = read('components/home3/MaxHome.tsx');
-  const nav = read('components/layout/LeftNav.tsx');
-  const combined = home + '\n' + nav;
+test('four tabs and three intents are in the daily path', () => {
+  const tabs = read('studio/StudioTabs.tsx');
+  const voice = read('studio/VoiceHome.tsx');
+  assert.match(tabs, /k: 'max'/);
+  assert.match(tabs, /k: 'today'/);
+  assert.match(tabs, /k: 'work'/);
+  assert.match(tabs, /k: 'money'/);
+  assert.match(tabs, /studio-tab-\$\{t\.k\}/);
+  assert.match(voice, /studio-intent-\$\{it\.id\}/);
+  const intents = read('studio/studioIntents.ts');
+  assert.match(intents, /What's on today/);
+  assert.match(intents, /Quote from photo/);
+  assert.match(intents, /Send me a link/);
+});
+
+test('presentation, video, telegram, memory, tasks, research stay reachable', () => {
   const need = [
     '/?screen=presentation',
     '/?screen=video',
     '/?screen=telegram',
     '/?screen=memory-bank',
-    '/?screen=tasks',
+    '/?tab=today',
     '/?screen=research',
   ];
+  const map = STUDIO_MODULES.map((m) => m.path).join('\n');
   for (const href of need) {
-    assert.ok(combined.includes(href), `missing visible entry ${href}`);
+    assert.ok(map.includes(href) || map.includes(href.replace('/?tab=today', '/?tab=today')), `missing ${href}`);
   }
-  assert.match(nav, /name: 'MAX Avatar'/);
-  assert.match(nav, /screen: 'presentation'/);
-  assert.match(nav, /name: 'Video Call'/);
-  assert.match(nav, /name: 'Telegram'/);
-  assert.match(nav, /name: 'Memory Bank'/);
-  const listed = hrefs(home);
-  assert.ok(listed.some(h => h.includes('screen=presentation')), 'home links to presentation');
+  assert.ok(STUDIO_MODULES.some((m) => m.id === 'max-avatar'));
+  assert.ok(STUDIO_MODULES.some((m) => m.id === 'tasks'));
 });
 
 test('PresentationScreen and MaxAvatarFrame pass current edition, not a hard-coded workroom', () => {
@@ -65,4 +75,17 @@ test('deep links for presentation and video are registered', () => {
   const app = read('CommandCenterApp.tsx');
   assert.match(app, /'presentation'/);
   assert.match(app, /'video'/);
+});
+
+test('preview cockpit and ring use StudioAuthGate', () => {
+  const cockpit = read('preview/cockpit/layout.tsx');
+  const ring = read('preview/ring/layout.tsx');
+  assert.match(cockpit, /StudioAuthGate/);
+  assert.match(ring, /StudioAuthGate/);
+});
+
+test('one shell: page.tsx always renders CommandCenterApp studio variant', () => {
+  const page = read('page.tsx');
+  assert.match(page, /<CommandCenterApp variant="studio" \/>/);
+  assert.doesNotMatch(page, /deepLink \? <CommandCenterApp/);
 });

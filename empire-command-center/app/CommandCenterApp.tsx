@@ -90,6 +90,15 @@ const TicketsPage = lazy(() => import('./components/business/support/TicketsPage
 const ShippingPage = lazy(() => import('./components/business/shipping/ShippingPage'));
 const CostTracker = lazy(() => import('./components/business/costs/CostTracker'));
 
+import StudioShell from './studio/StudioShell';
+import VoiceHome from './studio/VoiceHome';
+import TodayCards from './studio/TodayCards';
+import WorkPipeline from './studio/WorkPipeline';
+import MoneyHome from './studio/MoneyHome';
+import JobContextPane from './studio/JobContextPane';
+import { tabForRoute, type StudioTab } from './studio/moduleHome';
+import type { PipelineStage } from './studio/pipeline';
+
 const Loading = () => (
   <div className="flex-1 flex items-center justify-center">
     <div className="text-sm text-[var(--muted)]">Loading...</div>
@@ -165,10 +174,13 @@ function defaultScreenForProduct(product: EcosystemProduct): ScreenMode {
   return 'dashboard';
 }
 
-export default function CommandCenter() {
+export default function CommandCenter({ variant = 'studio' }: { variant?: 'studio' | 'classic' }) {
   const [activeProduct, setActiveProduct] = useState<EcosystemProduct>('owner');
   const [activeScreen, setActiveScreen] = useState<ScreenMode>('chat');
   const [activeSection, setActiveSection] = useState<string | null>(null);
+  const [studioTab, setStudioTab] = useState<StudioTab>('max');
+  const [studioHome, setStudioHome] = useState(variant === 'studio');
+  const [jobDrawer, setJobDrawer] = useState(true);
   const [showQuickSwitch, setShowQuickSwitch] = useState(false);
   const [activeConvId, setActiveConvId] = useState<string | null>(null);
   const [clientView, setClientView] = useState(false);
@@ -247,10 +259,22 @@ export default function CommandCenter() {
   }, []);
 
   useEffect(() => {
+    const h = window.location.hash;
+    if (h && h.length > 1 && window.location.pathname === '/') {
+      window.location.replace(`/classic${h}`);
+      return;
+    }
     const applyDeepLink = () => {
       const params = new URLSearchParams(window.location.search);
       const productParam = params.get('product');
       const sectionParam = params.get('section');
+      const tabParam = params.get('tab');
+      const screenParam = params.get('screen');
+      if (variant === 'studio') {
+        setStudioTab(tabForRoute(productParam, screenParam, tabParam));
+        const hasModule = !!(productParam || (screenParam && screenParam !== ''));
+        setStudioHome(!hasModule && !params.get('ask'));
+      }
       // Tailscale / on-box Command Center. Do not depend on studio.empirebox.store.
       if (productParam === 'workroom' || productParam === 'woodcraft') {
         pendingDeepLinkScreen.current = null;
@@ -627,6 +651,57 @@ export default function CommandCenter() {
     }
   }, []);
 
+  const pushStudioUrl = useCallback((href: string) => {
+    const url = new URL(href, window.location.origin);
+    window.history.pushState({}, '', `${url.pathname}${url.search}${url.hash}`);
+  }, []);
+
+  const applyStudioHref = useCallback((href: string) => {
+    if (!href) return;
+    if (href.startsWith('tel:') || href.startsWith('http') || href.startsWith('/classic') || href.startsWith('/workroom/')) {
+      window.location.assign(href);
+      return;
+    }
+    const url = new URL(href, window.location.origin);
+    const params = url.searchParams;
+    const productParam = params.get('product');
+    const screenParam = params.get('screen');
+    const sectionParam = params.get('section');
+    const tabParam = params.get('tab');
+    const ask = (params.get('ask') || '').trim();
+    pushHistory({ product: activeProduct, screen: activeScreen, section: activeSection });
+    setStudioTab(tabForRoute(productParam, screenParam, tabParam));
+    if (productParam && NAV_PRODUCT_IDS.has(productParam)) {
+      const p = productParam as EcosystemProduct;
+      setActiveProduct(p);
+      setActiveScreen(screenParam && NAV_SCREEN_IDS.has(screenParam) ? (screenParam as ScreenMode) : defaultScreenForProduct(p));
+      setActiveSection(sectionParam);
+      setStudioHome(false);
+    } else if (screenParam && (NAV_SCREEN_IDS.has(screenParam) || screenParam === 'settings' || screenParam === 'family-help' || screenParam === 'minimax-usage')) {
+      setActiveScreen(screenParam as ScreenMode);
+      setActiveSection(sectionParam);
+      setStudioHome(false);
+    } else {
+      setStudioHome(true);
+      setActiveSection(sectionParam);
+    }
+    pushStudioUrl(href);
+    if (ask) {
+      setActiveProduct('owner');
+      setActiveScreen('chat');
+      setStudioHome(false);
+      handleSendMessage(ask.slice(0, 2000));
+    }
+  }, [activeProduct, activeScreen, activeSection, handleSendMessage, pushHistory, pushStudioUrl]);
+
+  const handleStudioTab = useCallback((tab: StudioTab) => {
+    pushHistory({ product: activeProduct, screen: activeScreen, section: activeSection });
+    setStudioTab(tab);
+    setStudioHome(true);
+    setActiveSection(null);
+    pushStudioUrl(tab === 'max' ? '/' : `/?tab=${tab}`);
+  }, [activeProduct, activeScreen, activeSection, pushHistory, pushStudioUrl]);
+
   const renderCenterContent = () => {
     const founderScreen = renderFounderScreen(activeScreen);
     if (founderScreen) return founderScreen;
@@ -758,24 +833,75 @@ export default function CommandCenter() {
     return null;
   };
 
+  const clientBanner = clientView && (
+    <div className="bg-[#16a34a] text-white text-center py-2 text-xs font-bold tracking-widest flex items-center justify-center gap-3 shadow-[0_2px_8px_rgba(22,163,74,0.3)]">
+      <span className="w-2 h-2 rounded-full bg-white animate-pulse" />
+      CLIENT VIEW — Internal data hidden
+      <button onClick={() => setClientView(false)}
+        className="ml-2 px-3 py-1 rounded-md bg-white/20 hover:bg-white/30 cursor-pointer border border-white/30 text-white text-[10px] font-bold transition-all">
+        EXIT
+      </button>
+    </div>
+  );
+
+  const studioBody = () => {
+    if (studioHome && studioTab === 'max') {
+      return (
+        <div className="studio-max">
+          <VoiceHome
+            onKeyboard={() => applyStudioHref('/?tab=max&screen=chat')}
+            onIntent={(id) => {
+              if (id === 'today') handleStudioTab('today');
+              else if (id === 'photo') applyStudioHref('/?product=vision');
+              else applyStudioHref('/?tab=max&screen=chat&ask=' + encodeURIComponent('Send me a link'));
+            }}
+          />
+          <TodayCards compact onOpen={applyStudioHref} />
+        </div>
+      );
+    }
+    if (studioHome && studioTab === 'today') return <TodayCards onOpen={applyStudioHref} />;
+    if (studioHome && studioTab === 'work') {
+      const stage = (typeof window !== 'undefined' ? new URLSearchParams(window.location.search).get('stage') : null) as PipelineStage | null;
+      return <WorkPipeline onOpen={applyStudioHref} initialStage={stage || undefined} />;
+    }
+    if (studioHome && studioTab === 'money') return <MoneyHome onOpen={applyStudioHref} />;
+    if (activeScreen === 'chat') {
+      return (
+        <div style={{ display: 'flex', flexDirection: 'column', minHeight: '70vh', height: '100%' }}>
+          <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>{renderCenterContent()}</div>
+          <JobContextPane open={jobDrawer} onToggle={() => setJobDrawer((v) => !v)} onOpen={applyStudioHref} />
+        </div>
+      );
+    }
+    return renderCenterContent();
+  };
+
+  if (variant === 'studio') {
+    return (
+      <div className="cy-shell v3 h-screen flex flex-col">
+        {clientBanner}
+        <StudioShell
+          tab={studioTab}
+          onTab={handleStudioTab}
+          onNavigate={(next) => applyStudioHref(typeof next === 'string' ? next : `/?tab=${next.tab || studioTab}`)}
+          onSearchOpen={handleSearchOpen}
+        >
+          {studioBody()}
+        </StudioShell>
+        <DocViewerHost />
+      </div>
+    );
+  }
+
   return (
     <div className="cy-shell v3 h-screen flex flex-col">
-      {clientView && (
-        <div className="bg-[#16a34a] text-white text-center py-2 text-xs font-bold tracking-widest flex items-center justify-center gap-3 shadow-[0_2px_8px_rgba(22,163,74,0.3)]">
-          <span className="w-2 h-2 rounded-full bg-white animate-pulse" />
-          CLIENT VIEW — Internal data hidden
-          <button onClick={() => setClientView(false)}
-            className="ml-2 px-3 py-1 rounded-md bg-white/20 hover:bg-white/30 cursor-pointer border border-white/30 text-white text-[10px] font-bold transition-all">
-            EXIT
-          </button>
-        </div>
-      )}
+      {clientBanner}
 
       <TopBar
         onQuickSwitch={() => setShowQuickSwitch(true)}
         onClientView={() => setClientView(!clientView)}
         onNavigate={(product, screen) => {
-          // N2: capture current state before navigation.
           pushHistory({ product: activeProduct, screen: activeScreen, section: activeSection });
           setActiveProduct(product as EcosystemProduct);
           setActiveScreen(screen as ScreenMode);
@@ -809,11 +935,7 @@ export default function CommandCenter() {
           {renderCenterContent()}
         </div>
 
-        {/* MAX live voice (xAI realtime) — floating mic on the main chat/dashboard screens.
-            PresentationScreen renders its own. */}
         {(activeScreen === 'chat' || activeScreen === 'dashboard') && <LiveVoiceCall />}
-
-        {/* Right panel moved into left nav as Dashboard tab */}
       </div>
 
       <div className="hidden md:block">

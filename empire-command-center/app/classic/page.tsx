@@ -7,7 +7,7 @@ import StudioAuthGate from '../components/auth/StudioAuthGate';
 export default function ClassicHome() {
   return (
     <StudioAuthGate>
-      <CommandCenterApp />
+      <CommandCenterApp variant="classic" />
     </StudioAuthGate>
   );
 }

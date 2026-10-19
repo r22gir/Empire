@@ -44,13 +44,12 @@ test('does not force height:auto on every main-pane child (keeps inner scroll)',
   );
 });
 
-test('Max home is a sibling of the CC shell and marks data-max-home', () => {
+test('Studio shell marks data-max-home so body scroll unlocks on Max', () => {
   const page = read('page.tsx');
-  assert.match(page, /deepLink \? <CommandCenterApp \/> : <MaxHome \/>/);
-  const home = read('components/home3/MaxHome.tsx');
-  assert.match(home, /data-max-home/);
-  assert.doesNotMatch(home, /cy-shell/);
-  const homeCss = read('components/home3/home3.css');
+  assert.match(page, /<CommandCenterApp variant="studio" \/>/);
+  const shell = read('studio/StudioShell.tsx');
+  assert.match(shell, /data-max-home/);
+  const homeCss = read('studio/studio.css');
   assert.match(homeCss, /min-height:\s*100dvh/);
 });
 
