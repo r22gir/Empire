@@ -49,5 +49,11 @@ export function familyHelpLabels(locale: string) {
     noApply: es
       ? 'Los arreglos de código van por un PR de cloud-agent. Este ticket no escribe en la edición familiar.'
       : 'Code fixes go through a cloud-agent PR. This ticket does not write to the family edition.',
+    passToRafael: es
+      ? '¿Quieres que le pase esto a Rafael como solicitud?'
+      : 'Want me to pass this to Rafael as a request?',
+    yesPass: es ? 'Sí' : 'Yes',
+    requestFiled: es ? 'Listo. Se lo pasé a Rafael.' : 'Done. I passed it to Rafael.',
+    requestType: es ? 'Tipo' : 'Type',
   };
 }
