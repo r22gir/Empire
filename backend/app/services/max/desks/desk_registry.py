@@ -10,7 +10,7 @@ from typing import Any
 # Agent + scope for each registered desk. Order matches AIDeskManager.initialize().
 DESK_ROSTER: list[dict[str, str]] = [
     {"id": "forge", "name": "ForgeDesk", "agent": "Kai",
-     "scope": "Workroom operations: quotes, scheduling, fabric, production, measurements"},
+     "scope": "Workroom operations + Drawing Studio: shop drawings, layout revisions, quotes, scheduling, fabric, production"},
     {"id": "market", "name": "MarketDesk", "agent": "Sofia",
      "scope": "Marketplace ops: eBay/Facebook listings, inventory, shipping, relist"},
     {"id": "marketing", "name": "MarketingDesk", "agent": "Nova",

@@ -192,7 +192,11 @@ class AIDeskManager:
             ))
         elif verdict == "failed":
             task.state = TaskState.FAILED
-            task.result = f"FAILED (review): {review.get('reason')}\n{task.result or ''}"
+            try:
+                from .desk_chat_report import brief_review_failure
+                task.result = brief_review_failure(review.get("reason"), desk_id=desk_id)
+            except Exception:
+                task.result = f"FAILED (review): {review.get('reason')}"
         return task
 
     def _persist_inbox(self, task: DeskTask, reason: str) -> None:

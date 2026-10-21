@@ -56,6 +56,22 @@ class SalesDesk(BaseDesk):
         combined = f"{task.title} {task.description}".lower()
 
         try:
+            try:
+                from app.services.max.job_drawing_intent import should_route_to_drawing_desk
+                if should_route_to_drawing_desk(f"{task.title}\n{task.description}"):
+                    from app.services.drawing.job_drawing import (
+                        generate_job_drawing,
+                        founder_drawing_reply,
+                    )
+                    drawn = generate_job_drawing(
+                        message=task.description or task.title,
+                        job_hint=task.customer_name,
+                    )
+                    if drawn.get("success"):
+                        return await self.complete_task(task, founder_drawing_reply(drawn))
+                    return await self.fail_task(task, founder_drawing_reply(drawn))
+            except Exception:
+                pass
             if any(w in combined for w in ["lead", "prospect", "inquiry", "new customer"]):
                 return await self._handle_lead(task)
             elif any(w in combined for w in ["follow up", "followup", "follow-up", "check in"]):

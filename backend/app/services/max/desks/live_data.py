@@ -22,7 +22,9 @@ from app.services.max.brief_filters import (
     format_et,
     founder_todo_sort_key,
     is_bank_notice,
+    is_flagged_test,
     is_founder_todo,
+    is_noise_client,
     is_promotional_mail,
     is_self_sent_mail,
     is_test_family_ticket,
@@ -277,23 +279,33 @@ def query_stale_quotes(conn: sqlite3.Connection, min_age_days: int = 0, now: dat
 def query_open_quotes(conn: sqlite3.Connection) -> list[dict]:
     if not _table_exists(conn, "quotes_v2"):
         return []
+    cols = _cols(conn, "quotes_v2")
+    test_sel = "is_test" if "is_test" in cols else "0 AS is_test"
     rows = conn.execute(
         f"""
-        SELECT id, quote_number, customer_name, status, total, created_at
+        SELECT id, quote_number, customer_name, status, total, created_at, {test_sel}
         FROM quotes_v2
         WHERE status IN ({",".join("?" * len(OPEN_QUOTE_STATUSES))})
         ORDER BY created_at DESC
         """,
         OPEN_QUOTE_STATUSES,
     ).fetchall()
-    return [{
-        "kind": "quote",
-        "id": r["id"] if isinstance(r, sqlite3.Row) else r[0],
-        "name": (r["quote_number"] if isinstance(r, sqlite3.Row) else r[1]) or (r["id"] if isinstance(r, sqlite3.Row) else r[0]),
-        "customer": _customer_name(_row_dict(r)),
-        "amount": _money(r["total"] if isinstance(r, sqlite3.Row) else r[4]),
-        "status": r["status"] if isinstance(r, sqlite3.Row) else r[3],
-    } for r in rows]
+    findings = []
+    for r in rows:
+        row = _row_dict(r)
+        item = {
+            "kind": "quote",
+            "id": row.get("id"),
+            "name": row.get("quote_number") or row.get("id"),
+            "customer": _customer_name(row),
+            "amount": _money(row.get("total")),
+            "status": row.get("status"),
+            "is_test": row.get("is_test"),
+        }
+        if is_flagged_test(item) or is_noise_client(item.get("customer")):
+            continue
+        findings.append(item)
+    return findings
 
 
 # ── Jobs / schedule / organizer ───────────────────────────────────

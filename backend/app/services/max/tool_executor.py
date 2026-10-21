@@ -5548,6 +5548,13 @@ def _run_desk_task(params: dict, desk: Optional[str] = None) -> ToolResult:
         import concurrent.futures
 
         chosen_desk = (params.get("desk") or desk or "").strip() or None
+        try:
+            from app.services.max.job_drawing_intent import force_drawing_desk
+            forced = force_drawing_desk(title, params.get("description"), chosen_desk)
+            if forced:
+                chosen_desk = forced
+        except Exception:
+            pass
 
         async def _submit():
             from app.services.max.desks.desk_manager import desk_manager
@@ -5600,8 +5607,21 @@ def _run_desk_task(params: dict, desk: Optional[str] = None) -> ToolResult:
             return ToolResult(tool="run_desk_task", success=True, result=data)
         else:
             data["openclaw_queued"] = False
+            try:
+                from app.services.max.desks.desk_chat_report import (
+                    founder_facing_desk_result,
+                    sanitize_desk_tool_payload,
+                )
+                data = sanitize_desk_tool_payload(data, desk_id=data.get("desk"))
+                brief = founder_facing_desk_result(
+                    str(data.get("result") or ""),
+                    state=str(data.get("state") or ""),
+                    desk_id=data.get("desk"),
+                )
+            except Exception:
+                brief = "Desk review failed. I did not dump the raw desk output."
             return ToolResult(tool="run_desk_task", success=False,
-                            result=data, error=data.get("result", "Task did not complete — OpenClaw is not a delegation target"))
+                            result=data, error=brief)
     except Exception as e:
         return ToolResult(tool="run_desk_task", success=False, error=f"Desk task failed: {e}")
 
@@ -6669,7 +6689,7 @@ State machine: `draft → founder_review → sent → accepted → in_production
 
 IMPORTANT: Always use tools for factual data. NEVER fabricate task lists, weather, system stats, quotes, or customer info. If a tool returns empty results, say so honestly.
 When asked to send a quote PDF to Telegram, use send_quote_telegram with the quote_id.
-When Rafael asks for mockups, diagrams, drawings, or visual reference on a job (Marley's, banquette, basketweave, site photos, comparison boards): call find_files first (jobs/marleys-hyattsville, marleys-hyattsville, site-photos, correct-preview, comparison-*). Share those local PDFs/PNGs. Do NOT call search_images / Unsplash for job visuals, and do not lecture about textile yarn weave (warp/weft) when the job uses Empire's constructed padded-bar basketweave (2 pieces = 1 square, V-set / H-set). Use search_images only when he explicitly asks for public/stock inspiration.
+When Rafael asks to generate or revise a drawing / layout for a job ("give me a drawing of the X job", "this layout was the older one", "you change it"): that is Drawing Studio (Kai / forge), not a file search and not the sales pipeline. Produce a new internal shop PDF. When he only wants to see an existing mockup or photo, call find_files first (jobs folder, site-photos, correct-preview, comparison-*). Do NOT call search_images / Unsplash for job visuals, and do not lecture about textile yarn weave (warp/weft) when the job uses Empire's constructed padded-bar basketweave (2 pieces = 1 square, V-set / H-set). Use search_images only when he explicitly asks for public/stock inspiration.
 When you need current info, pricing, or research — use web_search. Do NOT say "I can't access the web."
 When analyzing a photo of windows or furniture, use photo_to_quote to create and deliver the estimate automatically.
 

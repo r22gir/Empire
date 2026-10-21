@@ -17,6 +17,7 @@ DESK_ALIASES = {
     "operations": "forge",   # job tracking → ForgeDesk
     "design": "forge",       # treatment selection → ForgeDesk
     "estimating": "forge",   # quote building → ForgeDesk
+    "drawing": "forge",      # Drawing Studio → Kai / ForgeDesk
 }
 
 # Keyword → desk_id mapping for fallback routing
@@ -41,6 +42,8 @@ KEYWORD_MAP = {
             "valance", "bedding", "upholstery", "fabric", "window treatment",
             "workroom", "measurement", "install", "customer follow",
             "production", "job queue", "job status", "yardage", "design consult",
+            "shop drawing", "job drawing", "drawing of", "channel back",
+            "revise the drawing", "revise the layout", "seat backs",
         ],
     },
     "sales": {
@@ -277,6 +280,14 @@ Respond in JSON only:
     def _route_with_keywords(self, task: DeskTask) -> tuple[str | None, str]:
         """Keyword-based fallback routing."""
         combined = f"{task.title} {task.description}".lower()
+
+        try:
+            from app.services.max.job_drawing_intent import should_route_to_drawing_desk
+            if should_route_to_drawing_desk(f"{task.title}\n{task.description}"):
+                if "forge" in self._desks:
+                    return "forge", "Drawing Studio / layout revision → forge (Kai)"
+        except Exception:
+            pass
 
         best_desk = None
         best_score = 0

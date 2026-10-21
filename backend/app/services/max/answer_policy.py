@@ -508,6 +508,13 @@ def prelookup_calls(message: Optional[str], history: Any = None, channel: Option
     for n in nums[:3]:
         calls.append({"tool": "get_quote", "quote_id": n})
     clients = _clients_in(t)
+    try:
+        from app.services.max.job_drawing_intent import should_route_to_drawing_desk
+        generate_new_drawing = should_route_to_drawing_desk(t, history)
+    except Exception:
+        generate_new_drawing = False
+    if generate_new_drawing:
+        return calls
     if is_job_visual_request(t, history):
         ctx_clients = clients or _clients_in(_recent_context(history))
         ff = ctx_clients[0][1] if ctx_clients else ""

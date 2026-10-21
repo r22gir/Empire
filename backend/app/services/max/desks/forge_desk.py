@@ -33,11 +33,14 @@ class ForgeDesk(BaseDesk):
         self.pending_followups: list[dict] = []
         self.pending_reminders: list[dict] = []
     desk_description = (
-        "Handles WorkroomForge operations: quote generation, customer follow-up, "
+        "Handles WorkroomForge operations and Drawing Studio: shop drawings, "
+        "layout revisions, quote generation, customer follow-up, "
         "appointment scheduling, measurement tracking, and production coordination. "
         "Custom window treatments — drapes, shades, cornices, valances, bedding, upholstery."
     )
     capabilities = [
+        "shop_drawing",
+        "layout_revision",
         "quote_generation",
         "customer_followup",
         "appointment_scheduling",
@@ -69,6 +72,10 @@ class ForgeDesk(BaseDesk):
         combined = f"{title_lower} {desc_lower}"
 
         try:
+            # Drawing Studio first — never fall through to the pipeline dump
+            # just because the description mentions a quote / estimate.
+            if self._is_drawing_task(task, combined):
+                return await self._handle_drawing(task)
             # Route to specific handler
             if any(w in combined for w in ["quote", "estimate", "price", "pricing", "cost"]):
                 return await self._handle_quote(task)
@@ -96,6 +103,39 @@ class ForgeDesk(BaseDesk):
         except Exception as e:
             logger.error(f"ForgeDesk task failed: {e}")
             return await self.fail_task(task, str(e))
+
+    def _is_drawing_task(self, task: DeskTask, combined: str) -> bool:
+        try:
+            from app.services.max.job_drawing_intent import should_route_to_drawing_desk
+            return should_route_to_drawing_desk(f"{task.title}\n{task.description}")
+        except Exception:
+            return any(w in combined for w in (
+                "drawing", "layout", "channel back", "shop drawing", "redraw",
+            ))
+
+    async def _handle_drawing(self, task: DeskTask) -> DeskTask:
+        """Generate a revised internal shop drawing for the named job."""
+        task.actions.append(DeskAction(
+            action="drawing_studio",
+            detail="Generating revised shop drawing (Drawing Studio / Kai)",
+        ))
+        try:
+            from app.services.drawing.job_drawing import generate_job_drawing, founder_drawing_reply
+            result = generate_job_drawing(
+                message=task.description or task.title,
+                job_hint=task.customer_name,
+            )
+        except Exception as exc:
+            logger.error("ForgeDesk drawing failed: %s", exc)
+            return await self.fail_task(task, f"Drawing Studio failed: {exc}")
+        if not result.get("success"):
+            return await self.fail_task(task, founder_drawing_reply(result))
+        task.actions.append(DeskAction(
+            action="drawing_pdf",
+            detail=result.get("pdf_filename") or "drawing.pdf",
+            success=True,
+        ))
+        return await self.complete_task(task, founder_drawing_reply(result))
 
     async def _handle_quote(self, task: DeskTask) -> DeskTask:
         """Generate or process a quote."""

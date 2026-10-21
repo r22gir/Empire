@@ -642,6 +642,13 @@ def is_drawing_intent(text: str, history: Any = None, pending_drawing: bool = Fa
         ) and not is_explicit_drawing_request(text):
             return False
 
+    try:
+        from app.services.max.job_drawing_intent import should_route_to_drawing_desk
+        if should_route_to_drawing_desk(text, history):
+            return True
+    except Exception:
+        pass
+
     if is_named_non_drawing_followup(text) and not is_explicit_drawing_request(text):
         return False
     if (
