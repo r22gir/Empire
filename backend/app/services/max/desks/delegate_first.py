@@ -124,6 +124,8 @@ DESK_RULES: list[tuple[str, tuple[str, ...]]] = [
     ("forge", (
         "window treatment", "drape", "shade", "cornice", "valance",
         "yardage", "workroom job", "fabric lookup", "measure the window",
+        "shop drawing", "job drawing", "drawing of the", "channel back",
+        "revise the drawing", "revise the layout",
     )),
     ("sales", (
         "new lead", "prospect", "pipeline", "follow up with",
@@ -194,6 +196,7 @@ def classify_request(
     *,
     specified_desk: Optional[str] = None,
     has_image: bool = False,
+    history: Any = None,
 ) -> RouteDecision:
     """Deterministic classification. LLM is a separate optional step."""
     text = (message or "").strip()
@@ -206,11 +209,22 @@ def classify_request(
         return RouteDecision(action="answer", reason="empty message")
     if _GREET.match(text):
         return RouteDecision(action="answer", reason="greeting")
+    try:
+        from app.services.max.job_drawing_intent import should_route_to_drawing_desk
+        if should_route_to_drawing_desk(text, history):
+            return RouteDecision(
+                action="delegate", desk_id="forge",
+                reason="drawing / layout revision → Drawing Studio (Kai)",
+                method="rule",
+            )
+    except Exception:
+        pass
     if _FOLLOWUP.search(text):
         return RouteDecision(action="answer", reason="follow-up / not a new desk task")
     if _ORCH.search(text):
         return RouteDecision(action="answer", reason="orchestration/status")
     # Lookups (including "send/show me the Marley docs") beat outbound gates.
+    # Job drawing generation is not a file lookup — handled above.
     if _LOOKUP_TO_ME.search(text) or _LOOKUP.search(text):
         return RouteDecision(action="answer", reason="trivial lookup")
     if _APPROVAL.search(text) or _UNCERTAIN_OUTBOUND.search(text):
@@ -429,6 +443,7 @@ async def maybe_delegate(
     specified_desk: Optional[str] = None,
     conversation_id: Optional[str] = None,
     has_image: bool = False,
+    history: Any = None,
 ) -> Optional[dict[str, Any]]:
     """If the message should be a desk task, create it and return a report dict.
 
@@ -437,7 +452,7 @@ async def maybe_delegate(
     if not workroom_desks_allowed():
         return None
     decision = classify_request(
-        message, specified_desk=specified_desk, has_image=has_image,
+        message, specified_desk=specified_desk, has_image=has_image, history=history,
     )
     if decision.answers_directly:
         return None

@@ -2716,10 +2716,44 @@ def _provider_identity_response(request: ChatRequest) -> ChatResponse:
     )
 
 
+async def _maybe_job_drawing_desk_response(request: ChatRequest) -> ChatResponse | None:
+    """Job drawing / layout revision / 'you change it' → Drawing Studio PDF."""
+    try:
+        from app.services.drawing.job_drawing import run_job_drawing_turn
+        turn = run_job_drawing_turn(
+            request.message or "",
+            history=request.history,
+            job_hint=request.job_id,
+        )
+    except Exception as exc:
+        return ChatResponse(
+            response=f"Drawing desk could not finish: {exc}",
+            model_used="drawing-desk",
+            fallback_used=False,
+            tool_results=[],
+            metadata=_response_metadata(request.channel, skill_used="drawing_desk"),
+        )
+    if not turn.get("handled"):
+        return None
+    return ChatResponse(
+        response=turn.get("response") or "",
+        model_used=turn.get("model_used") or "drawing-desk",
+        fallback_used=False,
+        tool_results=[{
+            "tool": "run_desk_task",
+            "success": bool(turn.get("success")),
+            "result": turn.get("result"),
+            "desk": turn.get("desk") or "forge",
+        }],
+        metadata=_response_metadata(request.channel, skill_used="drawing_desk"),
+    )
+
+
 async def _maybe_delegate_first_response(request: ChatRequest) -> ChatResponse | None:
     """Chief-of-staff step: classify to a desk before the model answers.
 
-    Existing intent shortcuts already returned. Skip images and drawing asks.
+    Existing intent shortcuts already returned. Skip images and drawing asks
+    that the drawing-router / Drawing Studio intercept already owns.
     """
     if request.image_filename:
         return None
@@ -2730,8 +2764,14 @@ async def _maybe_delegate_first_response(request: ChatRequest) -> ChatResponse |
     except Exception:
         pass
     try:
+        from app.services.max.job_drawing_intent import should_route_to_drawing_desk
+        if should_route_to_drawing_desk(request.message or "", request.history):
+            return None
+    except Exception:
+        pass
+    try:
         from app.services.max.drawing_intent import is_drawing_intent
-        if is_drawing_intent(request.message or ""):
+        if is_drawing_intent(request.message or "", history=request.history):
             return None
     except Exception:
         pass
@@ -2742,6 +2782,7 @@ async def _maybe_delegate_first_response(request: ChatRequest) -> ChatResponse |
             specified_desk=request.desk,
             conversation_id=request.conversation_id,
             has_image=bool(request.image_filename),
+            history=request.history,
         )
     except Exception as exc:
         logger.debug("delegate-first skipped: %s", exc)
@@ -3539,6 +3580,10 @@ async def _chat_with_max_service_impl(
             tool_results=[],
             metadata=_response_metadata(request.channel, skill_used="inventory_ambiguity_gate"),
         )
+
+    _job_drawing = await _maybe_job_drawing_desk_response(request)
+    if _job_drawing is not None:
+        return _job_drawing
 
     _delegated = await _maybe_delegate_first_response(request)
     if _delegated is not None:
@@ -4868,6 +4913,10 @@ async def _chat_stream_impl(request: ChatRequest, _founder_session: dict | None 
             yield f"data: {_safe_dumps({'type': 'done', 'model_used': 'clarification-gate', 'metadata': _response_metadata(request.channel, skill_used='inventory_ambiguity_gate')})}\n\n"
 
         return StreamingResponse(clarification_gen(), media_type="text/event-stream", headers={"X-Accel-Buffering": "no", "Cache-Control": "no-cache"})
+
+    _job_drawing = await _maybe_job_drawing_desk_response(request)
+    if _job_drawing is not None:
+        return _stream_immediate_response(_job_drawing, request.conversation_id)
 
     _delegated = await _maybe_delegate_first_response(request)
     if _delegated is not None:
