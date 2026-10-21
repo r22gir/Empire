@@ -361,6 +361,158 @@ def get_business(slug: str) -> Optional[dict]:
     return None
 
 
+def company_choices() -> list[dict]:
+    """Juan's companies from EMPIRE_DATA_DIR/businesses. Empty if no data root."""
+    try:
+        rows = list_businesses()
+    except Exception:
+        return []
+    out: list[dict] = []
+    seen = set()
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        slug = safe_slug(str(row.get("slug") or row.get("name") or ""))
+        if not slug or slug in seen:
+            continue
+        seen.add(slug)
+        name = str(row.get("name") or slug).strip()
+        out.append({
+            "slug": slug,
+            "name": name,
+            "industry": str(row.get("industry") or "").strip(),
+            "description": str(row.get("description") or "").strip(),
+            "also_known_as": str(row.get("also_known_as") or "").strip(),
+            "city": str(row.get("city") or "").strip(),
+        })
+    return out
+
+
+def companies_prompt_block() -> str:
+    """Spanish list for Max-e chat context. One line per company."""
+    if not is_amp():
+        return ""
+    rows = company_choices()
+    if not rows:
+        return (
+            "=== EMPRESAS DE JUAN ===\n"
+            "Todavía no hay empresas en EMPIRE_DATA_DIR/businesses. "
+            "Pregunta una cosa a la vez y confirma antes de guardar."
+        )
+    lines = [
+        "=== EMPRESAS DE JUAN ===",
+        "Estas son las empresas de esta instancia (no las de Rafael ni las de Maxine):",
+    ]
+    for row in rows:
+        extra = row["industry"] or row["description"]
+        aka = f" (también {row['also_known_as']})" if row["also_known_as"] else ""
+        tail = f" — {extra}" if extra else ""
+        lines.append(f"- {row['name']}{aka} [slug: {row['slug']}]{tail}")
+    lines.append(
+        "Si Juan quiere crear o cambiar una empresa, usa list_companies / save_company. "
+        "Una pregunta a la vez. Confirma con él antes de guardar."
+    )
+    return "\n".join(lines)
+
+
+def _company_patch(fields: Optional[dict]) -> dict:
+    raw = fields if isinstance(fields, dict) else {}
+    allowed = {
+        "name",
+        "industry",
+        "description",
+        "also_known_as",
+        *(_EXTRA_KEYS - {"interview", "setup", "cf_project_id", "brand", "model"}),
+    }
+    patch: dict = {}
+    for key, value in raw.items():
+        if key not in allowed:
+            continue
+        if key == "charges_iva":
+            patch[key] = _as_bool(value)
+        elif key == "payment_methods":
+            patch[key] = _payment_methods(value)
+        elif key == "roles":
+            patch[key] = _roles(value)
+        elif key in {"starter_items", "items"}:
+            patch["starter_items"] = _sanitize_items(value)
+        else:
+            patch[key] = _clip(value, 2000 if key in {"description", "customer_who"} else 200)
+    return patch
+
+
+def update_business(slug: str, *, fields: Optional[dict] = None, confirm: bool = False) -> dict:
+    """Create or update a company after Juan confirms.
+
+    Without confirm=True this only returns a preview. Never writes then.
+    """
+    if not is_family_edition():
+        raise RuntimeError("Empresas solo existen en esta edición")
+    if is_amp():
+        ensure_maxe_businesses()
+    wanted = safe_slug(slug or (fields or {}).get("name") or "")
+    if wanted in RESERVED_SLUGS:
+        raise ValueError("Ese nombre de empresa no se puede usar")
+    existing = get_business(wanted)
+    patch = _company_patch(fields)
+    creating = existing is None
+    if creating:
+        name = str(patch.get("name") or slug or "").strip()
+        if not name:
+            raise ValueError("El nombre de la empresa es obligatorio")
+        preview = {
+            "slug": safe_slug(name),
+            "name": name,
+            **{k: v for k, v in patch.items() if k != "name"},
+            "action": "create",
+        }
+    else:
+        preview = {**existing, **patch, "slug": wanted, "action": "update"}
+    if not confirm:
+        return {
+            "ok": False,
+            "needs_confirmation": True,
+            "preview": preview,
+            "message": (
+                "Manito, revisa esto y dime si lo guardo. "
+                "No escribo nada hasta que confirmes."
+            ),
+        }
+    if creating:
+        extra = {k: v for k, v in patch.items() if k not in {"name", "industry", "description"}}
+        stored = create_business(
+            name=str(patch.get("name") or slug).strip(),
+            industry=str(patch.get("industry") or ""),
+            description=str(patch.get("description") or ""),
+            extra=extra or None,
+        )
+        return {"ok": True, "created": True, "business": stored}
+    registry = _load_registry()
+    updated = None
+    for row in registry["businesses"]:
+        if row.get("slug") == wanted:
+            row.update(patch)
+            row["slug"] = wanted
+            row["updated_at"] = _now()
+            updated = row
+            break
+    if updated is None:
+        raise ValueError("Empresa no encontrada")
+    _save_registry(registry)
+    path = assert_under_root(business_dir(wanted) / "business.json")
+    stored = {}
+    if path.is_file():
+        try:
+            stored = json.loads(path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError:
+            stored = {}
+    if not isinstance(stored, dict):
+        stored = {}
+    stored.update(updated)
+    _write_profile(wanted, stored)
+    return {"ok": True, "created": False, "business": updated}
+
+
 def _seed_fields(conn: sqlite3.Connection, fields: list[tuple[str, str]]) -> None:
     for index, (key, label) in enumerate(fields):
         conn.execute(

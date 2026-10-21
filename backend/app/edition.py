@@ -668,6 +668,14 @@ def edition_prompt_suffix() -> str:
             "Workroom, WoodCraft, LuxeForge and drawing tools are off. "
             "Shared modules stay. Facts marked confidential never appear in public content."
         )
+        try:
+            from app.services.amp_businesses import companies_prompt_block
+
+            live = companies_prompt_block()
+            if live:
+                lines.append(live)
+        except Exception:
+            pass
     if is_maxine():
         lines.append(
             "This instance is based on ConstructionForge. That is the only project, "
@@ -698,6 +706,38 @@ def apply_edition_prompt(base: str) -> str:
     return base + suffix
 
 
+def _amp_company_phrase(lang: str) -> str:
+    """Live company list for Max-e greetings. Falls back to AMP + Cibernettic."""
+    rows = []
+    try:
+        from app.services.amp_businesses import company_choices
+
+        rows = company_choices()
+    except Exception:
+        rows = []
+    if not rows:
+        return (
+            "AMP (coaching) y Cibernettic (tecnología)"
+            if (lang or "").startswith("es")
+            else "AMP (coaching) and Cibernettic (technology)"
+        )
+    parts = []
+    for row in rows:
+        name = row.get("name") or row.get("slug") or ""
+        industry = row.get("industry") or ""
+        parts.append(f"{name} ({industry})" if industry else name)
+    parts = [p for p in parts if p]
+    if not parts:
+        return "AMP (coaching) y Cibernettic (tecnología)" if (lang or "").startswith("es") else "AMP (coaching) and Cibernettic (technology)"
+    if (lang or "").startswith("es"):
+        if len(parts) == 1:
+            return parts[0]
+        return ", ".join(parts[:-1]) + " y " + parts[-1]
+    if len(parts) == 1:
+        return parts[0]
+    return ", ".join(parts[:-1]) + " and " + parts[-1]
+
+
 def greeting(locale: Optional[str] = None, *, include_owner: bool = True) -> str:
     """Public anonymous callers get the assistant name only — no owner name."""
     name = assistant_name()
@@ -709,9 +749,10 @@ def greeting(locale: Optional[str] = None, *, include_owner: bool = True) -> str
             return f"¡Quiubo manito! Hola, soy {name}."
         if is_amp():
             if include_owner:
+                phrase = _amp_company_phrase("es")
                 return (
-                    f"¡Quiubo manito! Hola, soy {name}. Juan Diego Giraldo tiene dos empresas aquí: "
-                    "AMP (coaching) y Cibernettic (tecnología). Yo llevo la operación de las dos."
+                    f"¡Quiubo manito! Hola, soy {name}. Juan Diego Giraldo tiene "
+                    f"estas empresas aquí: {phrase}. Yo llevo la operación."
                 )
             return f"¡Quiubo manito! Hola, soy {name}."
         return f"¡Quiubo manito! Hola, soy {name}."
@@ -721,9 +762,10 @@ def greeting(locale: Optional[str] = None, *, include_owner: bool = True) -> str
         return f"Hi, I'm {name}."
     if is_amp():
         if include_owner:
+            phrase = _amp_company_phrase("en")
             return (
-                f"Hi, I'm {name}. Juan Diego Giraldo has two businesses here: "
-                "AMP (coaching) and Cibernettic (technology). I run operations for both."
+                f"Hi, I'm {name}. Juan Diego Giraldo has these businesses here: "
+                f"{phrase}. I run operations for them."
             )
         return f"Hi, I'm {name}."
     return f"Hi, I'm {name}."
@@ -953,6 +995,53 @@ def apply_amp_process_paths() -> None:
     ensure_founder_profile()
 
 
+def _manifest_businesses() -> list[dict]:
+    """AMP companies from the instance registry, not a hard-coded pair."""
+    fallback = [
+        {
+            "slug": "amp",
+            "name": "Actitud Mental Positiva",
+            "also_known_as": "El Portal de la Alegría",
+            "focus": "coaching, cursos y membresías",
+        },
+        {
+            "slug": "cibernettic",
+            "name": "Cibernettic",
+            "focus": "servicios de tecnología",
+            "lines": [
+                "ciberseguridad",
+                "datos y BI",
+                "Oracle DBA",
+                "GIS/Esri",
+                "redes y VoIP",
+                "ERP/CRM",
+            ],
+        },
+    ]
+    try:
+        from app.services.amp_businesses import company_choices
+
+        rows = company_choices()
+    except Exception:
+        rows = []
+    if not rows:
+        return fallback
+    by_slug = {item["slug"]: item for item in fallback}
+    out = []
+    for row in rows:
+        slug = row.get("slug") or ""
+        base = dict(by_slug.get(slug) or {})
+        base.update({
+            "slug": slug,
+            "name": row.get("name") or slug,
+            "focus": row.get("industry") or base.get("focus") or "",
+        })
+        if row.get("also_known_as"):
+            base["also_known_as"] = row["also_known_as"]
+        out.append(base)
+    return out
+
+
 def edition_manifest() -> dict:
     name = assistant_name()
     manifest = {
@@ -980,27 +1069,7 @@ def edition_manifest() -> dict:
             "disabled": sorted(AMP_DISABLED_MODULES) if is_family_edition() else [],
             "labels_es": AMP_MODULE_LABELS_ES if is_family_edition() else {},
         },
-        "businesses": [
-            {
-                "slug": "amp",
-                "name": "Actitud Mental Positiva",
-                "also_known_as": "El Portal de la Alegría",
-                "focus": "coaching, cursos y membresías",
-            },
-            {
-                "slug": "cibernettic",
-                "name": "Cibernettic",
-                "focus": "servicios de tecnología",
-                "lines": [
-                    "ciberseguridad",
-                    "datos y BI",
-                    "Oracle DBA",
-                    "GIS/Esri",
-                    "redes y VoIP",
-                    "ERP/CRM",
-                ],
-            },
-        ] if is_amp() else [],
+        "businesses": _manifest_businesses() if is_amp() else [],
         "product": {
             "name": "Actitud Mental Positiva",
             "also_known_as": "El Portal de la Alegría",
@@ -1073,3 +1142,4 @@ def paths_touched_by_provision(root: Path) -> Iterable[Path]:
     yield root / "assistant" / "history" / "conversations.db"
     yield root / "logs" / "amp.log"
     yield root / "businesses" / "amp" / "business.json"
+    yield root / "whatsapp_credentials.json"

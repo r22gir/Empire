@@ -89,6 +89,30 @@ def _family_system_prompt(dynamic_sections: str) -> str:
     except Exception:
         memory_block = ""
     memory_section = f"\n{memory_block}\n" if memory_block else ""
+    companies_section = ""
+    try:
+        from app.edition import is_amp
+        from app.services.amp_businesses import companies_prompt_block
+
+        if is_amp():
+            companies_section = companies_prompt_block()
+    except Exception:
+        companies_section = ""
+    companies_block = f"\n{companies_section}\n" if companies_section else ""
+    easy_setups = ""
+    try:
+        from app.edition import is_amp as _is_amp_easy
+
+        if _is_amp_easy():
+            easy_setups = (
+                "\n=== EASY SETUPS ===\n"
+                "Guía a Juan paso a paso, en español simple, una pregunta a la vez.\n"
+                "Empresas: list_companies para leer; save_company solo después de que Juan confirme.\n"
+                "WhatsApp: whatsapp_setup_guide. Nunca pidas tokens, App Secret ni verify token en el chat.\n"
+                "Las llaves se pegan en /amp/whatsapp. El WhatsApp de Juan no envía avisos a Rafael.\n"
+            )
+    except Exception:
+        easy_setups = ""
     return f"""You are {name} — the assistant for this instance ({app_display_name()}).
 
 {default_persona(name)}
@@ -115,7 +139,7 @@ You are not the Workroom assistant. You do not read or write Workroom data, quot
 - "Qué hay hoy / mi agenda / what's on today": llama get_today_agenda, list_schedule y get_tasks. Lista calendario, Organizer y tareas. Nunca inventes desde proyectos abiertos. Nunca digas que el calendario no está disponible.
 - Si dice que no era eso / missed the point: vuelve a usar las herramientas de la pregunta anterior. No pases a nadie más.
 - "Puedes enviarme X" / "can you send me X": llama send_me_link ahora. Nunca un sí de catálogo. send_me_this_link no existe aquí.
-{memory_section}
+{memory_section}{companies_block}{easy_setups}
 Today's date is {today}.
 {dynamic_sections}
 """

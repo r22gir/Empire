@@ -5,8 +5,11 @@ Each Empire instance has its own WhatsApp number. Max-e, Maxine, and Workroom Ma
 Webhook: `/api/v1/whatsapp/webhook`
 
 In-site Spanish guide (family editions): `/amp/whatsapp` and `/ayuda/whatsapp`.
-Read-only chats: `/amp/whatsapp/chats`. Secrets go only into the Dell env file
-(`/home/rg/empire-amp.env` or `/home/rg/empire-maxine.env`), never into the page.
+Read-only chats: `/amp/whatsapp/chats`. Juan pastes IDs/token on the secure
+`/amp/whatsapp` screen (owner only). Secrets are stored under
+`EMPIRE_DATA_DIR/whatsapp_credentials.json` (mode 0600) or the instance env.
+Family editions refuse without `EMPIRE_DATA_DIR`. Never `~/empire-data`.
+Help-ticket alerts to Rafael never leave Juan's WhatsApp number.
 
 ## English
 
@@ -33,6 +36,10 @@ Set these on the instance. Do not commit them.
 | `WHATSAPP_OWNER_NUMBERS` | Comma-separated owner numbers. Required before the channel answers |
 | `WHATSAPP_APPROVED_TEMPLATES` | Optional comma-separated template names already approved in Meta |
 | `WHATSAPP_REPLY_MODE` | `voice_text` (default), `text`, or `match` |
+
+Owner routes: `POST /api/v1/whatsapp/credentials` and `POST /api/v1/whatsapp/test`
+require the edition owner (`_require_admin`). The test call is a Graph GET only
+and never sends a WhatsApp message.
 
 If any of the first four is missing, inbound webhooks return 503 and the UI shows the channel off.
 

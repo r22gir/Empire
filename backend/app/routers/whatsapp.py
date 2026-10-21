@@ -1,16 +1,49 @@
-"""WhatsApp Cloud API webhook plus a read-only chat log.
+"""WhatsApp Cloud API webhook, owner credential setup, and read-only chat log.
 
-Draft-only. This router never sends to clients. Secrets stay in the
-instance env file — they are never accepted on these routes.
+Draft-only toward clients. Secrets are stored under EMPIRE_DATA_DIR and
+never echoed. Family editions refuse without EMPIRE_DATA_DIR.
 """
 from __future__ import annotations
 
-from fastapi import APIRouter, Request
-from fastapi.responses import JSONResponse, Response
+from typing import Optional
 
-from app.services.whatsapp_cloud import channel_status, handle_webhook, verify_handshake
+from fastapi import APIRouter, HTTPException, Request
+from fastapi.responses import JSONResponse, Response
+from pydantic import BaseModel, Field
+
+from app.services.whatsapp_cloud import (
+    channel_status,
+    get_credentials_safe,
+    handle_webhook,
+    save_stored_credentials,
+    test_connection,
+    verify_handshake,
+)
 
 router = APIRouter(tags=["whatsapp"])
+
+
+class WhatsAppCredentialsBody(BaseModel):
+    phone_number_id: str = Field(default="")
+    access_token: str = Field(default="")
+    app_secret: str = Field(default="")
+    verify_token: Optional[str] = Field(default="")
+    owner_numbers: Optional[list[str]] = None
+
+
+class WhatsAppTestBody(BaseModel):
+    phone_number_id: Optional[str] = None
+    access_token: Optional[str] = None
+
+
+def _require_admin(request: Request) -> None:
+    """Same owner/admin gate as edition.py."""
+    from app.services import amp_allowlist
+
+    email = getattr(request.state, "amp_email", None)
+    role = amp_allowlist.entry_role(email=email, username=None)
+    if role not in {"owner", "admin"}:
+        raise HTTPException(status_code=403, detail="Sin acceso. Se requiere una cuenta administrador.")
 
 
 @router.get("/whatsapp/status")
@@ -36,7 +69,49 @@ def whatsapp_setup_meta():
         "owner_last4": status.get("owner_last4") or [],
         "status": status.get("status"),
         "secrets_in_page": False,
+        "secrets_in_chat": False,
     }
+
+
+@router.get("/whatsapp/credentials")
+def whatsapp_get_credentials(request: Request):
+    _require_admin(request)
+    return get_credentials_safe()
+
+
+@router.post("/whatsapp/credentials")
+def whatsapp_save_credentials(body: WhatsAppCredentialsBody, request: Request):
+    _require_admin(request)
+    try:
+        safe = save_stored_credentials(
+            phone_number_id=body.phone_number_id,
+            access_token=body.access_token,
+            app_secret=body.app_secret,
+            verify_token=body.verify_token or "",
+            owner_numbers=body.owner_numbers,
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"ok": True, "credentials": safe}
+
+
+@router.post("/whatsapp/test")
+def whatsapp_test_connection(request: Request, body: Optional[WhatsAppTestBody] = None):
+    """Read-only Graph check. Does not send WhatsApp messages."""
+    _require_admin(request)
+    pid = body.phone_number_id if body else ""
+    tok = body.access_token if body else ""
+    result = test_connection(phone_number_id=pid or "", access_token=tok or "")
+    if not result.get("ok"):
+        return JSONResponse(result, status_code=400)
+    dumped = json_safe(result)
+    return dumped
+
+
+def json_safe(result: dict) -> dict:
+    """Drop raw tokens if a caller stuffed them into the result."""
+    banned = ("access_token", "app_secret", "token")
+    return {k: v for k, v in result.items() if k not in banned}
 
 
 @router.get("/whatsapp/webhook")

@@ -274,7 +274,7 @@ _QUESTIONS = {
     "cuota_inicial_pct": "¿Qué porcentaje de cuota inicial quieres?",
     "installments": "¿En cuántos meses queda el saldo?",
     "product_name": "¿Cómo se llama el programa, curso, membresía o servicio?",
-    "business": "¿Esto es de AMP (coaching) o de Cibernettic (tecnología)?",
+    "business": "¿De cuál empresa es esto?",
     "billing": "¿El servicio se cobra por horas, por mensualidad o por proyecto?",
     "currency": "¿La cifra es en pesos (COP) o en dólares (USD)?",
     "service_line": "¿Qué servicio es: auditoría, evaluación, servicio administrado, base de datos, respaldos, red/VoIP o BI?",
@@ -320,6 +320,59 @@ def missing_fields(doc_type: str, fields: dict) -> list[str]:
     return needed
 
 
+def _business_question() -> str:
+    try:
+        from app.services.amp_businesses import company_choices
+
+        rows = company_choices()
+    except Exception:
+        rows = []
+    if not rows:
+        return "¿Esto es de AMP (coaching) o de Cibernettic (tecnología)?"
+    if len(rows) == 1:
+        return f"¿Esto es de {rows[0]['name']}?"
+    names = []
+    for row in rows:
+        label = row["name"]
+        if row.get("industry"):
+            label = f"{row['name']} ({row['industry']})"
+        names.append(label)
+    if len(names) == 2:
+        return f"¿Esto es de {names[0]} o de {names[1]}?"
+    return "¿De cuál empresa es esto: " + ", ".join(names[:-1]) + f" o {names[-1]}?"
+
+
+def _company_choice_from_text(folded: str) -> Optional[str]:
+    try:
+        from app.services.amp_businesses import company_choices
+
+        rows = company_choices()
+    except Exception:
+        rows = []
+    if not rows:
+        if re.search(r"\bcibernettic\b", folded):
+            return "business_cibernettic"
+        if re.search(r"\bamp\b", folded) or "coaching" in folded:
+            return "business_amp"
+        return None
+    ranked = sorted(rows, key=lambda row: len(row.get("name") or ""), reverse=True)
+    for row in ranked:
+        slug = (row.get("slug") or "").strip()
+        name = _fold(row.get("name") or "")
+        aka = _fold(row.get("also_known_as") or "")
+        if slug and re.search(rf"\b{re.escape(_fold(slug))}\b", folded):
+            return f"business_{slug}"
+        if name and name in folded:
+            return f"business_{slug}"
+        if aka and aka in folded:
+            return f"business_{slug}"
+    if "coaching" in folded:
+        for row in rows:
+            if row.get("slug") == "amp":
+                return "business_amp"
+    return None
+
+
 def looks_like_draft_followup(text: str) -> bool:
     folded = _fold(text)
     if _LISTO.search(folded):
@@ -329,10 +382,9 @@ def looks_like_draft_followup(text: str) -> bool:
 
 def choice_from_text(text: str) -> Optional[str]:
     folded = _fold(text)
-    if re.search(r"\bcibernettic\b", folded):
-        return "business_cibernettic"
-    if re.search(r"\bamp\b", folded) or "coaching" in folded:
-        return "business_amp"
+    company = _company_choice_from_text(folded)
+    if company:
+        return company
     if "por horas" in folded:
         return "billing_hours"
     if "mensual" in folded:
@@ -362,4 +414,6 @@ def choice_from_text(text: str) -> Optional[str]:
 def follow_up_question(missing: list[str]) -> str:
     if not missing:
         return "Cuando termines, di listo. El documento queda en borrador hasta que lo apruebes."
+    if missing[0] == "business":
+        return _business_question()
     return _QUESTIONS.get(missing[0], "¿Qué dato falta?")

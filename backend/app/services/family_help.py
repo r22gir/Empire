@@ -1674,6 +1674,16 @@ def notify_new_ticket(ticket: dict) -> dict:
     except Exception:
         pass
 
+    try:
+        from app.services.whatsapp_cloud import refuse_rafael_alert_from_family_whatsapp
+
+        result["whatsapp_alert"] = refuse_rafael_alert_from_family_whatsapp()
+    except Exception:
+        result["whatsapp_alert"] = {
+            "sent": False,
+            "reason": "family_number_not_for_rafael_alerts",
+        }
+
     to = founder_notify_email()
     if to != FOUNDER_NOTIFY_EMAIL:
         result["email"] = "blocked_non_founder"

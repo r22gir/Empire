@@ -165,7 +165,7 @@ export function renderWhatsAppSetupPage(edition, extras = {}) {
 <div class="wa-field">App settings → Basic</div>
 <div class="wa-meta-row"><span>Chat / esta página</span><span>no</span></div>`,
     ),
-    'Entrega de las llaves, sin formulario en la app',
+    'Entrega de las llaves en la pantalla segura, nunca en el chat',
   );
 
   const webhookMock = figure(
@@ -316,7 +316,7 @@ ${keysMock}
 <li>Pulsa <strong>Verify and save</strong>. Meta hace GET a esta instancia.</li>
 </ol>
 ${webhookMock}
-<p><strong>Punto de control:</strong> Meta muestra el webhook verificado. Si falla, avísale a Rafael.</p>
+<p><strong>Punto de control:</strong> Meta muestra el webhook verificado. Si falla, revisa el verify token en la pantalla segura.</p>
 </div>
 
 <div class="wa-card" id="wa-7">
@@ -336,7 +336,7 @@ ${chatsMock}
 <li><strong>Token temporal de 24 horas vs permanente.</strong> El token que Meta muestra al empezar caduca. Si ${name} deja de contestar al día siguiente, crea un token permanente en <strong>Business Settings → System users</strong> (permisos <code>whatsapp_business_messaging</code> y <code>whatsapp_business_management</code>). ${keysHandoff}</li>
 <li><strong>Ventana de respuesta de 24 horas.</strong> ${name} solo puede contestarte en las 24 horas siguientes a tu último mensaje. Si se pasó el tiempo, escríbele tú otra vez.</li>
 <li><strong>Plantillas.</strong> Fuera de esa ventana, Meta solo deja salir una plantilla ya aprobada. En esta fase no las necesitas: tú escribes primero.</li>
-<li><strong>No responde.</strong> Revisa que el webhook sea exactamente <code>${webhook}</code>, que el destinatario sea tu celular y que no hayas mezclado el token de otra persona. Si sigue igual, avísale a Rafael.</li>
+<li><strong>No responde.</strong> Revisa que el webhook sea exactamente <code>${webhook}</code>, que el destinatario sea tu celular y que no hayas mezclado el token de otra persona. Si sigue igual, vuelve a pegar las llaves en la pantalla segura.</li>
 </ul>
 ${problemsMock}
 </div>

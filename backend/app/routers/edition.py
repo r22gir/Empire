@@ -34,6 +34,22 @@ class BusinessCreate(BaseModel):
     template: Optional[str] = None
 
 
+class BusinessUpdate(BaseModel):
+    name: Optional[str] = None
+    industry: Optional[str] = None
+    description: Optional[str] = None
+    also_known_as: Optional[str] = None
+    legal_name: Optional[str] = None
+    trade_name: Optional[str] = None
+    country: Optional[str] = None
+    city: Optional[str] = None
+    contact_email: Optional[str] = None
+    contact_phone: Optional[str] = None
+    website: Optional[str] = None
+    currency: Optional[str] = None
+    confirm: bool = False
+
+
 class ContactCreate(BaseModel):
     name: str
     email: str = ""
@@ -349,6 +365,21 @@ async def get_business(slug: str):
         return amp_businesses.workspace_summary(slug)
     except ValueError as exc:
         raise HTTPException(404, str(exc)) from exc
+
+
+@router.put("/businesses/{slug}")
+async def put_business(slug: str, body: BusinessUpdate, request: Request):
+    """Create or update a company after Juan confirms in chat."""
+    if not is_family_edition():
+        raise HTTPException(404, "Empresas solo aplican a la edición AMP")
+    _require_admin(request)
+    fields = body.model_dump(exclude_unset=True)
+    confirm = bool(fields.pop("confirm", False))
+    try:
+        result = amp_businesses.update_business(slug, fields=fields, confirm=confirm)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    return result
 
 
 @router.post("/businesses/{slug}/contacts")

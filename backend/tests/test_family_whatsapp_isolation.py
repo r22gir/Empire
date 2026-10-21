@@ -299,8 +299,9 @@ process.stdout.write(renderWhatsAppSetupPage(process.env.EDITION || 'amp'));
         assert "¡Quiubo manito!" in html
         assert "Hola Juan" not in html
         assert "Hola Camilo" not in html
-        assert "Las llaves no van en el chat ni en esta página" in html
-        assert "avísale a Rafael" in html
+        assert "Las llaves no van en el chat" in html
+        assert "pantalla segura" in html
+        assert "avísale a Rafael" not in html
         assert "formulario seguro" not in html
         assert "solicitud segura" not in html
         assert "/home/rg/" not in html
