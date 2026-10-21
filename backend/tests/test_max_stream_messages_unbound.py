@@ -13,6 +13,7 @@ a reply chunk is yielded with no error event.
 from __future__ import annotations
 
 import asyncio
+import importlib
 import json
 from types import SimpleNamespace
 
@@ -33,7 +34,7 @@ async def _collect(agen):
 
 
 def test_chat_stream_one_turn_yields_reply_without_messages_unbound(monkeypatch):
-    import app.routers.max.router as r
+    r = importlib.import_module("app.routers.max.router")
 
     reply = "STREAM_OK_42."
 
