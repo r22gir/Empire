@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import AmpNav from '../../components/amp/AmpNav';
+import WhatsAppSecureKeys from '../../components/voice/WhatsAppSecureKeys';
 import { API } from '../../lib/api';
 import { useEdition } from '../../lib/edition';
 import { renderWhatsAppSetupPage } from '../../lib/whatsappSetup';
@@ -24,6 +25,7 @@ export default function AmpWhatsAppSetupPage() {
     <div data-amp-page>
       <AmpNav />
       <div dangerouslySetInnerHTML={{ __html: html }} />
+      <WhatsAppSecureKeys />
     </div>
   );
 }

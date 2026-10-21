@@ -62,10 +62,10 @@ def _choice_patch(choice_id: str) -> dict:
         return {"selected_plan": choice}
     if choice in {"12", "24", "36"}:
         return {"installments": int(choice)}
-    if choice == "business_amp":
-        return {"business": "amp"}
-    if choice == "business_cibernettic":
-        return {"business": "cibernettic"}
+    if choice.startswith("business_"):
+        slug = choice[len("business_"):].strip()
+        if slug:
+            return {"business": slug}
     if choice == "billing_hours":
         return {"billing": "hours"}
     if choice == "billing_retainer":
@@ -85,11 +85,29 @@ def build_options(doc_type: str, fields: dict) -> dict | None:
         and not fields.get("business")
         and doc_type not in {"general", "meeting_notes", "reservation"}
     ):
+        try:
+            from app.services.amp_businesses import company_choices
+
+            rows = company_choices()
+        except Exception:
+            rows = []
+        if not rows:
+            rows = [
+                {"slug": "amp", "name": "AMP", "industry": "coaching, cursos y membresías"},
+                {"slug": "cibernettic", "name": "Cibernettic", "industry": "servicios de tecnología"},
+            ]
         return {
             "kind": "business",
             "choices": [
-                {"id": "business_amp", "label": "AMP · coaching, cursos y membresías"},
-                {"id": "business_cibernettic", "label": "Cibernettic · servicios de tecnología"},
+                {
+                    "id": f"business_{row['slug']}",
+                    "label": (
+                        f"{row['name']} · {row['industry']}"
+                        if row.get("industry")
+                        else row["name"]
+                    ),
+                }
+                for row in rows
             ],
         }
     if fields.get("mentions_house") and not fields.get("house_type"):

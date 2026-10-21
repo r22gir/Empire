@@ -13,6 +13,7 @@ No prices, legal or company registration details live here.
 """
 from __future__ import annotations
 
+import copy
 import os
 from typing import Optional
 
@@ -464,9 +465,66 @@ _AMP = {
 _PROFILES = {"maxine": _MAXINE, "amp": _AMP}
 
 
+def _amp_with_dynamic_units(prof: dict) -> dict:
+    """Replace hard-coded AMP/Cibernettic units with Juan's live companies."""
+    try:
+        from app.services.amp_businesses import company_choices
+
+        rows = company_choices()
+    except Exception:
+        return prof
+    if not rows:
+        return prof
+    existing = {str(unit.get("value") or ""): unit for unit in (prof.get("business_units") or [])}
+    units = []
+    for row in rows:
+        slug = row.get("slug") or ""
+        if not slug:
+            continue
+        if slug in existing:
+            unit = dict(existing[slug])
+            label = row.get("name") or unit.get("label") or slug
+            if row.get("industry"):
+                label = f"{row['name']} · {row['industry']}"
+            unit["label"] = label
+            units.append(unit)
+            continue
+        units.append({
+            "value": slug,
+            "label": (
+                f"{row['name']} · {row['industry']}"
+                if row.get("industry")
+                else (row.get("name") or slug)
+            ),
+            "default_location": row.get("city") or "Colombia",
+            "default_target": "general",
+            "targets": [
+                {
+                    "value": "general",
+                    "label": row.get("description") or row.get("name") or slug,
+                }
+            ],
+        })
+    if not units:
+        return prof
+    prof["business_units"] = units
+    prof["subtitle"] = " · ".join(unit.get("label") or unit.get("value") or "" for unit in units)
+    slugs = {unit.get("value") for unit in units}
+    if prof.get("default_unit") not in slugs:
+        prof["default_unit"] = "amp" if "amp" in slugs else units[0]["value"]
+    return prof
+
+
 def trade_profile(edition: Optional[str] = None) -> Optional[dict]:
     """The family edition's trade profile, or None on the workroom build."""
-    return _PROFILES.get((edition or _edition()).strip().lower())
+    key = (edition or _edition()).strip().lower()
+    raw = _PROFILES.get(key)
+    if not raw:
+        return None
+    prof = copy.deepcopy(raw)
+    if prof.get("edition") == "amp":
+        return _amp_with_dynamic_units(prof)
+    return prof
 
 
 def public_profile(edition: Optional[str] = None) -> dict:

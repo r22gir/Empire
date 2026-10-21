@@ -10,14 +10,15 @@ const BANNED_SENDS = [
   'navigator.sendBeacon',
 ];
 
-const HANDOFF = 'Las llaves no van en el chat ni en esta página. Cuando las tengas, avísale a Rafael y él te dice cómo entregárselas de forma segura.';
+const HANDOFF = 'Las llaves no van en el chat. Cuando las tengas, pégalas abajo en la pantalla segura. El token no se vuelve a mostrar.';
 
-test('amp WhatsApp guide opens with manito and the Rafael handoff', () => {
+test('amp WhatsApp guide opens with manito and the secure-screen handoff', () => {
   const html = renderWhatsAppSetupPage('amp');
   assert.equal(html.includes(AYUDA_OPENER), true);
   assert.equal(html.includes(KEYS_HANDOFF), true);
   assert.equal(html.includes(HANDOFF), true);
   assert.equal(html.includes('Entrega de las llaves'), true);
+  assert.equal(html.includes('avísale a Rafael'), false);
   assert.equal(html.includes('formulario seguro'), false);
   assert.equal(html.includes('solicitud segura'), false);
   assert.equal(html.includes('/home/rg/'), false);

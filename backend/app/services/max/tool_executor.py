@@ -7906,6 +7906,22 @@ try:
 except Exception as _can_do_err:
     logger.error(f"voice_can_do not loaded: {_can_do_err}")
 
+try:
+    import importlib as _importlib, sys as _sys
+    _guides_name = "app.services.max.tools_maxe_guides"
+    _guides = (_importlib.reload(_sys.modules[_guides_name]) if _guides_name in _sys.modules
+               else _importlib.import_module(_guides_name))
+    _guides.register_tools(tool, ToolResult)
+    try:
+        from app.edition import is_amp as _guides_is_amp
+
+        if _guides_is_amp():
+            FAMILY_TOOLS_DOC = FAMILY_TOOLS_DOC + _guides.MAXE_GUIDES_DOC
+    except Exception:
+        pass
+except Exception as _guides_err:
+    logger.error(f"tools_maxe_guides not loaded: {_guides_err}")
+
 TOOL_COUNT = len(TOOL_REGISTRY)
 TOOLS_DOC = TOOLS_DOC.replace("__TOOL_COUNT__", str(TOOL_COUNT))
 TOOLS_DOC = TOOLS_DOC.replace("__EMPIRE_API_BASE__", empire_api_base())

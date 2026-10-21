@@ -60,6 +60,9 @@ export function interviewSteps(edition) {
   const offerAt = 3;
   const steps = SHARED.slice();
   steps.splice(offerAt, 0, OFFER[kind]);
+  if (kind === 'amp') {
+    steps.splice(offerAt + 1, 0, { id: 'whatsapp', es: 'Conectar WhatsApp', en: 'Connect WhatsApp' });
+  }
   if (kind === 'maxine') steps.splice(1, 0, ARGOS_STEP);
   return steps;
 }

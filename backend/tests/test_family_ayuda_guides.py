@@ -7,8 +7,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 HANDOFF = (
-    "Las llaves no van en el chat ni en esta página. "
-    "Cuando las tengas, avísale a Rafael y él te dice cómo entregárselas de forma segura."
+    "Las llaves no van en el chat. "
+    "Cuando las tengas, pégalas abajo en la pantalla segura. El token no se vuelve a mostrar."
 )
 
 WHATSAPP_SCRIPT = """
