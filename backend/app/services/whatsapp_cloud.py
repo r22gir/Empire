@@ -50,7 +50,7 @@ def _family_edition() -> bool:
 def _credentials_file_path() -> Path:
     """Edition-owned credentials file. Family editions refuse without EMPIRE_DATA_DIR.
 
-    Never falls back to ~/empire-data.
+    Never falls back to the shared home data directory.
     """
     from app.edition import EditionPathError, is_family_edition, require_data_root, data_root_or_none
 
@@ -60,7 +60,7 @@ def _credentials_file_path() -> Path:
     if root is None:
         raise EditionPathError(
             "WhatsApp credentials require EMPIRE_DATA_DIR "
-            "(no ~/empire-data fallback)"
+            "(this instance does not use a shared home data directory)"
         )
     return root / CREDENTIALS_FILE_NAME
 

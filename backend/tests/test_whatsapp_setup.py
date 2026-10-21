@@ -151,5 +151,6 @@ def test_no_live_paths_in_this_module():
     text = Path("backend/app/services/whatsapp_cloud.py").read_text(encoding="utf-8")
     assert 'Path(os.path.expanduser("~/empire-data"))' not in text or "family" in text
     # Family credentials path must not assign ~/empire-data.
-    cred_fn = text.split("def _credentials_file_path")[1].split("def ")[0]
-    assert "~/empire-data" not in cred_fn
+    cred_fn = text.split("def _credentials_file_path")[1].split("\ndef ")[0]
+    assert "expanduser" not in cred_fn
+    assert "Path(" not in cred_fn

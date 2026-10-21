@@ -33,9 +33,8 @@ def _cookie(client, email="owner@example.com"):
 
 def test_list_businesses_and_prompt_include_juan_companies(monkeypatch, tmp_path):
     _env(monkeypatch, tmp_path)
-    from app.edition import greeting
+    from app.edition import edition_prompt_suffix, greeting
     from app.services.amp_businesses import companies_prompt_block, company_choices, create_business
-    from app.services.max import system_prompt as sp
 
     rows = company_choices()
     slugs = [row["slug"] for row in rows]
@@ -48,10 +47,9 @@ def test_list_businesses_and_prompt_include_juan_companies(monkeypatch, tmp_path
     assert "slug:" in block
     assert "Cibernettic" in greeting("es")
     assert "Datos Andinos" in greeting("es")
-    sp._prompt_cache = {"prompt": None, "expires": 0, "edition": None}
-    prompt = sp.get_system_prompt()
-    assert "Datos Andinos" in prompt
-    assert "save_company" in prompt
+    suffix = edition_prompt_suffix()
+    assert "Datos Andinos" in suffix
+    assert "save_company" in suffix
 
 
 def test_update_requires_confirm_then_writes(monkeypatch, tmp_path):
