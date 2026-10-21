@@ -5112,6 +5112,7 @@ async def _chat_stream_impl(request: ChatRequest, _founder_session: dict | None 
         logger.debug(f"founder_session apply failed (stream): {_fs_err}")
 
     async def event_generator():
+        nonlocal messages
         model_used = "unknown"
         _pin_card_sent = False  # 2026-10-05: at most ONE PIN card per reply
         full_response = ""
