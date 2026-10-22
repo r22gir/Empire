@@ -5,13 +5,27 @@ No live SMTP. Fake owner addresses only.
 from __future__ import annotations
 
 import asyncio
+import importlib
 import logging
+import sys
+import types
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from zoneinfo import ZoneInfo
 
 import pytest
 
-from app.services.max import scheduler as sched
+# Load scheduler.py without executing app.services.max.__init__ (Telegram/desks).
+_MAX_DIR = Path(__file__).resolve().parents[1] / "app" / "services" / "max"
+import app.services  # noqa: F401
+if "app.services.max" not in sys.modules or not getattr(sys.modules.get("app.services.max"), "__file__", None):
+    _pkg = types.ModuleType("app.services.max")
+    _pkg.__path__ = [str(_MAX_DIR)]
+    _pkg.__package__ = "app.services.max"
+    sys.modules["app.services.max"] = _pkg
+    app.services.max = _pkg
+
+sched = importlib.import_module("app.services.max.scheduler")
 
 
 ET = ZoneInfo("America/New_York")
@@ -55,15 +69,12 @@ def _freeze_et(monkeypatch, when: datetime):
 def _capture_email(monkeypatch):
     sent: list[dict] = []
 
-    class _Svc:
-        is_configured = True
-
-        def send(self, **kwargs):
-            sent.append(kwargs)
-            return True
+    def _fake(brief, now=None):
+        sent.append({"brief": brief, "now": now, "to": FAKE_OWNER, "cc": None})
+        return {"sent": True, "skipped": False, "to": FAKE_OWNER, "cc": None}
 
     monkeypatch.setattr(sched, "_refuse_live_brief_send", lambda: None)
-    monkeypatch.setattr("app.services.max.email_service.EmailService", _Svc)
+    monkeypatch.setattr(sched, "email_daily_brief", _fake)
     return sent
 
 

@@ -1,10 +1,25 @@
 import asyncio
+import importlib
+import sys
+import types
 from datetime import datetime
+from pathlib import Path
 
 
 def test_max_scheduler_starts_and_registers_jobs(tmp_path, monkeypatch):
     monkeypatch.setenv("EMPIRE_DATA_DIR", str(tmp_path))
-    from app.services.max.scheduler import MaxScheduler, MORNING_BRIEF_TZ
+    max_dir = Path(__file__).resolve().parents[1] / "app" / "services" / "max"
+    if "app.services.max" not in sys.modules or not getattr(
+        sys.modules.get("app.services.max"), "__file__", None
+    ):
+        import app.services  # noqa: F401
+        pkg = types.ModuleType("app.services.max")
+        pkg.__path__ = [str(max_dir)]
+        pkg.__package__ = "app.services.max"
+        sys.modules["app.services.max"] = pkg
+    sched = importlib.import_module("app.services.max.scheduler")
+    MaxScheduler = sched.MaxScheduler
+    MORNING_BRIEF_TZ = sched.MORNING_BRIEF_TZ
 
     scheduler = MaxScheduler()
 
