@@ -3,10 +3,12 @@ MAX Scheduler — Persistent background scheduler for autonomous operations.
 Uses APScheduler to run recurring tasks: daily briefs, task checks, followups, reports.
 Each action calls existing tools/functions — no new AI logic needed.
 """
+import json
 import logging
 import asyncio
 import os
-from datetime import datetime
+from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 
 from pathlib import Path
 
@@ -14,6 +16,15 @@ from app.config.business_config import biz
 from app.edition import brain_sync_storage_paths
 
 logger = logging.getLogger("max.scheduler")
+
+# Morning Brief is always 8:00 AM America/New_York. Never catch up a missed day.
+MORNING_BRIEF_TZ_NAME = "America/New_York"
+MORNING_BRIEF_TZ = ZoneInfo(MORNING_BRIEF_TZ_NAME)
+MORNING_BRIEF_HOUR = 8
+MORNING_BRIEF_MINUTE = 0
+MORNING_BRIEF_GRACE_SECONDS = 60
+MORNING_BRIEF_JOB_ID = "daily_brief"
+MORNING_BRIEF_JOB_NAME = "Daily Morning Brief"
 
 _DAYS_ES = (
     "lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo",
@@ -34,6 +45,157 @@ def _family_mode() -> bool:
 
 def format_brief_date_es(now: datetime) -> str:
     return f"{_DAYS_ES[now.weekday()]} {now.day} de {_MONTHS_ES[now.month - 1]} de {now.year}"
+
+
+def morning_brief_now(now: datetime | None = None) -> datetime:
+    """Current time in America/New_York. Naive datetimes are treated as ET, not UTC."""
+    if now is None:
+        return datetime.now(MORNING_BRIEF_TZ)
+    if now.tzinfo is None:
+        return now.replace(tzinfo=MORNING_BRIEF_TZ)
+    return now.astimezone(MORNING_BRIEF_TZ)
+
+
+def next_morning_brief_run(now: datetime | None = None) -> datetime:
+    """Next 8:00 AM America/New_York strictly after `now`. Never returns a past slot."""
+    current = morning_brief_now(now)
+    slot = current.replace(
+        hour=MORNING_BRIEF_HOUR,
+        minute=MORNING_BRIEF_MINUTE,
+        second=0,
+        microsecond=0,
+    )
+    if current >= slot:
+        nxt = current.date() + timedelta(days=1)
+        slot = datetime(
+            nxt.year,
+            nxt.month,
+            nxt.day,
+            MORNING_BRIEF_HOUR,
+            MORNING_BRIEF_MINUTE,
+            tzinfo=MORNING_BRIEF_TZ,
+        )
+    return slot
+
+
+def should_send_morning_brief(
+    now: datetime | None = None,
+    last_sent_date: str | None = None,
+    grace_seconds: int = MORNING_BRIEF_GRACE_SECONDS,
+) -> bool:
+    """True only inside today's 8:00 AM ET window, and only if not already sent today.
+
+    Missed days are never caught up. Restarting after 8:00 AM does not send.
+    """
+    current = morning_brief_now(now)
+    today = current.date().isoformat()
+    if last_sent_date == today:
+        return False
+    slot = current.replace(
+        hour=MORNING_BRIEF_HOUR,
+        minute=MORNING_BRIEF_MINUTE,
+        second=0,
+        microsecond=0,
+    )
+    if current < slot:
+        return False
+    if (current - slot).total_seconds() > grace_seconds:
+        return False
+    return True
+
+
+def morning_brief_state_path() -> Path:
+    """Persist last_sent_date / next_run under EMPIRE_DATA_DIR when set."""
+    override = os.environ.get("MORNING_BRIEF_STATE_PATH", "").strip()
+    if override:
+        return Path(override)
+    try:
+        from app.edition import data_root_or_none
+        root = data_root_or_none()
+    except Exception:
+        root = None
+    if root is None:
+        root = Path(__file__).resolve().parents[3] / "data"
+    return root / "scheduler" / "morning_brief.json"
+
+
+def load_morning_brief_state(path: Path | None = None) -> dict:
+    target = path or morning_brief_state_path()
+    try:
+        data = json.loads(target.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError, TypeError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def save_morning_brief_state(state: dict, path: Path | None = None) -> dict:
+    target = path or morning_brief_state_path()
+    target.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "last_sent_date": state.get("last_sent_date"),
+        "next_run": state.get("next_run"),
+        "timezone": MORNING_BRIEF_TZ_NAME,
+    }
+    target.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+    return payload
+
+
+def parse_persisted_next_run(value) -> datetime | None:
+    if not value:
+        return None
+    if isinstance(value, datetime):
+        return morning_brief_now(value)
+    try:
+        text = str(value).strip()
+        if text.endswith("Z"):
+            text = text[:-1] + "+00:00"
+        parsed = datetime.fromisoformat(text)
+    except (TypeError, ValueError):
+        return None
+    return morning_brief_now(parsed)
+
+
+def recover_morning_brief_schedule(
+    now: datetime | None = None,
+    state: dict | None = None,
+) -> datetime:
+    """Next legal 8:00 AM ET slot. Past persisted next_run is advanced, never sent."""
+    current = morning_brief_now(now)
+    state = dict(state if state is not None else load_morning_brief_state())
+    today_slot = current.replace(
+        hour=MORNING_BRIEF_HOUR,
+        minute=MORNING_BRIEF_MINUTE,
+        second=0,
+        microsecond=0,
+    )
+    last_sent = state.get("last_sent_date")
+    if last_sent == current.date().isoformat():
+        computed = next_morning_brief_run(today_slot)
+    elif should_send_morning_brief(current, last_sent):
+        # Still inside today's 8:00 AM window and not yet sent — fire this slot.
+        computed = today_slot if today_slot >= current else current
+    else:
+        computed = next_morning_brief_run(current)
+    persisted = parse_persisted_next_run(state.get("next_run"))
+    if persisted is not None and persisted <= current:
+        logger.warning(
+            "Morning Brief next_run was in the past (%s); recovered to %s %s "
+            "(no catch-up send)",
+            persisted.isoformat(),
+            computed.isoformat(),
+            MORNING_BRIEF_TZ_NAME,
+        )
+    state["next_run"] = computed.isoformat()
+    save_morning_brief_state(state)
+    return computed
+
+
+def mark_morning_brief_sent(now: datetime | None = None, state: dict | None = None) -> dict:
+    current = morning_brief_now(now)
+    state = dict(state if state is not None else load_morning_brief_state())
+    state["last_sent_date"] = current.date().isoformat()
+    state["next_run"] = next_morning_brief_run(current).isoformat()
+    return save_morning_brief_state(state)
 
 
 def _refuse_live_brief_send() -> None:
@@ -194,12 +356,20 @@ class MaxScheduler:
             return
         self._started = True
 
-        # Daily morning brief — 8:00 AM
+        # Daily morning brief — next 8:00 AM America/New_York, never catch-up.
+        brief_next = recover_morning_brief_schedule()
         self.scheduler.add_job(
             self.send_daily_brief,
-            CronTrigger(hour=8, minute=0),
-            id="daily_brief",
-            name="Daily Morning Brief",
+            CronTrigger(
+                hour=MORNING_BRIEF_HOUR,
+                minute=MORNING_BRIEF_MINUTE,
+                timezone=MORNING_BRIEF_TZ_NAME,
+            ),
+            id=MORNING_BRIEF_JOB_ID,
+            name=MORNING_BRIEF_JOB_NAME,
+            next_run_time=brief_next,
+            misfire_grace_time=1,
+            coalesce=True,
         )
 
         # Check overdue tasks — 9:00 AM
@@ -264,23 +434,42 @@ class MaxScheduler:
             logger.exception("Nightly Drive export failed")
 
     async def send_daily_brief(self):
-        """Compile and email the 8:00 AM morning brief. Family: owner only, no CC."""
+        """Compile and email the 8:00 AM morning brief. Family: owner only, no CC.
+
+        At most one email per America/New_York calendar day. Missed days are
+        never resent — a stale or past next_run only advances the schedule.
+        """
         try:
+            now = morning_brief_now()
+            state = load_morning_brief_state()
+            if not should_send_morning_brief(now, state.get("last_sent_date")):
+                nxt = recover_morning_brief_schedule(now, state)
+                logger.info(
+                    "Morning Brief not sent (already sent today or outside the "
+                    "8:00 AM %s window). Next run: %s",
+                    MORNING_BRIEF_TZ_NAME,
+                    nxt.isoformat(),
+                )
+                return
+
             family = _family_mode()
             if not family:
                 from app.services.max.telegram_bot import telegram_bot
                 if not telegram_bot.is_configured:
+                    mark_morning_brief_sent(now, state)
                     return
 
-            brief = compile_daily_brief()
+            brief = compile_daily_brief(now)
             self._last_brief = brief
             from app.routers.notifications import notify_founder
             notify_founder("MAX", "system_alert", "Morning Brief", brief, "low")
             try:
-                email_daily_brief(brief)
+                email_daily_brief(brief, now)
             except Exception as e:
                 from app.services.max.email_service import smtp_failure_log_es
                 logger.error("%s %s", smtp_failure_log_es(e), e)
+            # One attempt per ET day — success, skip, or SMTP failure. No catch-up.
+            mark_morning_brief_sent(now, state)
             logger.info("Daily brief generated and dispatched")
         except Exception as e:
             logger.error(f"Daily brief failed: {e}")
