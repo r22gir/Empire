@@ -20,6 +20,7 @@ from app.services.max.desks.desk_router import DeskRouter
 from app.services.max.job_drawing_intent import (
     DRAWING_DESK_ID,
     extract_job_hint,
+    extract_spec_changes,
     is_drawing_change_followup,
     is_job_drawing_request,
     is_layout_revision_request,
@@ -68,10 +69,35 @@ def test_layout_revision_and_change_it_followup():
     assert is_layout_revision_request(spec_msg)
     assert is_drawing_change_followup("you change it")
     assert is_drawing_change_followup("change it")
+    assert is_drawing_change_followup("change it to 10 inch channels")
+    assert is_drawing_change_followup("can you change the drawing")
+    assert is_drawing_change_followup("redo the drawing with black seats")
     assert should_route_to_drawing_desk(spec_msg)
     assert should_route_to_drawing_desk("you change it", MARLEY_HISTORY)
+    assert should_route_to_drawing_desk("change it to 10 inch channels", MARLEY_HISTORY)
+    assert should_route_to_drawing_desk("make the channels 10 inches", MARLEY_HISTORY)
+    assert should_route_to_drawing_desk("use V008-Bittersweet for the seats", MARLEY_HISTORY)
+    assert should_route_to_drawing_desk("seat cushions on Black", MARLEY_HISTORY)
+    assert should_route_to_drawing_desk("change the drawing to 10 inch channels", MARLEY_HISTORY)
     assert not should_route_to_drawing_desk("you change it", [])
     assert not should_route_to_drawing_desk("can you show me the Marley docs")
+
+
+def test_extract_channel_width_and_fabric_phrasings():
+    assert extract_spec_changes("channel width 10 inch")["channel_width_in"] == 10
+    assert extract_spec_changes("change it to 10 inch channels")["channel_width_in"] == 10
+    assert extract_spec_changes("make the channels 10 inches")["channel_width_in"] == 10
+    assert extract_spec_changes('channels at 10"')["channel_width_in"] == 10
+    seat = extract_spec_changes("seat cushions on V008-Bittersweet")
+    assert seat["seat_fabric"].lower().startswith("v008")
+    assert extract_spec_changes("seat cushions on Black")["seat_fabric"].lower() == "black"
+    assert extract_spec_changes("use V008-Bittersweet for the seats")["seat_fabric"].upper().startswith("V008")
+    assert extract_spec_changes("backs on V003-Cognac")["back_fabric"].upper().startswith("V003")
+    both = extract_spec_changes(
+        'revise the drawing: channel width 10 inch, seat cushions on V008-Bittersweet'
+    )
+    assert both["channel_width_in"] == 10
+    assert "v008" in both["seat_fabric"].lower()
 
 
 def test_followup_carries_job_and_spec_context():

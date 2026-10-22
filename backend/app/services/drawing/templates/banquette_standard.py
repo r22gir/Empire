@@ -430,11 +430,83 @@ def _draw_straight_plan(c: canvas.Canvas, job: BanquetteJob, bench: BenchSpec) -
     return p
 
 
-def _notes_block(c: canvas.Canvas, lines: list[str], x: float, y: float, size: float = 7.5, leading: float = 11) -> None:
-    c.setFont("Helvetica", size)
+def _wrap_line(c: canvas.Canvas, text: str, font: str, size: float, max_w: float) -> list[str]:
+    raw = (text or "").strip()
+    if not raw:
+        return [""]
+    words = raw.split()
+    lines: list[str] = []
+    cur = ""
+    for word in words:
+        trial = (cur + " " + word).strip()
+        if c.stringWidth(trial, font, size) <= max_w:
+            cur = trial
+            continue
+        if cur:
+            lines.append(cur)
+        if c.stringWidth(word, font, size) <= max_w:
+            cur = word
+        else:
+            chunk = word
+            while chunk:
+                lo, hi = 1, len(chunk)
+                fit = 1
+                while lo <= hi:
+                    mid = (lo + hi) // 2
+                    if c.stringWidth(chunk[:mid], font, size) <= max_w:
+                        fit = mid
+                        lo = mid + 1
+                    else:
+                        hi = mid - 1
+                lines.append(chunk[:fit])
+                chunk = chunk[fit:]
+            cur = ""
+    if cur:
+        lines.append(cur)
+    return lines or [""]
+
+
+def _notes_block(
+    c: canvas.Canvas,
+    lines: list[str],
+    x: float,
+    y: float,
+    size: float = 7.5,
+    leading: float = 11,
+    width: float | None = None,
+    max_y: float = 36,
+) -> None:
+    """Wrap notes inside a bounded box. Never run off the page edge."""
+    max_w = width if width is not None else max(80.0, PW - x - 36)
+    wrapped: list[str] = []
+    for text in lines:
+        wrapped.extend(_wrap_line(c, text, "Helvetica", size, max_w - 8))
+        wrapped.append("")
+    while wrapped and wrapped[-1] == "":
+        wrapped.pop()
+    title_h = 12
+    fit: list[str] = []
+    yy = y - title_h
+    for text in wrapped:
+        if yy < max_y:
+            break
+        fit.append(text)
+        yy -= leading
+    box_h = max(24.0, title_h + len(fit) * leading + 10)
+    c.setStrokeColor(BR)
+    c.setLineWidth(0.6)
+    c.setFillColor(CREAM)
+    c.rect(x - 6, y + 10 - box_h, max_w + 12, box_h, fill=1, stroke=1)
     c.setFillColor(INK)
-    for i, text in enumerate(lines):
-        c.drawString(x, y - i * leading, text[:140])
+    c.setFont("Helvetica-Bold", size)
+    c.drawString(x, y, "NOTES")
+    c.setFont("Helvetica", size)
+    yy = y - title_h
+    for text in fit:
+        if yy < max_y:
+            break
+        c.drawString(x, yy, text)
+        yy -= leading
 
 
 def _draw_plan_page(c: canvas.Canvas, job: BanquetteJob, bench: BenchSpec, page: int, total: int) -> None:
@@ -447,12 +519,15 @@ def _draw_plan_page(c: canvas.Canvas, job: BanquetteJob, bench: BenchSpec, page:
     if bench.shape == "u_shape":
         p = _draw_u_plan(c, job, bench)
         _legend(c, job, PW - 330, 170, bench)
-        _notes_block(c, bench.notes, 40, 170)
+        _notes_block(c, bench.notes, 40, 170, width=PW - 400, max_y=52)
         _scalebar(c, p, 40, 40)
     elif bench.shape == "l_shape":
         p = _draw_l_plan(c, job, bench)
         _legend(c, job, PW - 330, PH - 110, bench)
-        _notes_block(c, bench.notes, PW - 330, PH - 240, size=8, leading=12)
+        _notes_block(
+            c, bench.notes, PW - 330, PH - 250,
+            size=7.5, leading=10, width=294, max_y=78,
+        )
         _scalebar(c, p, PW - 430, 60)
     else:
         p = _draw_straight_plan(c, job, bench)
@@ -471,7 +546,7 @@ def _elevation_run(
     y: float,
     scale: float,
     name: str,
-) -> None:
+) -> float:
     s = scale
     w = run.back_run_in * s
     back_h = bench.channel_height_in * s
@@ -503,8 +578,19 @@ def _elevation_run(
     n_std = len(run.standard_channels)
     odd = run.odd_channels
     extra = f" + {odd[0].width_text} ODD at {run.odd_at}" if odd else ""
-    c.drawString(x, y - 10, f"{n_std} x {inch_text(bench.channel_width_in)} channels{extra}")
-    c.drawString(x, y - 19, f"seat cushion: {job.seat_fabric.sheet_label}   back: {job.back_fabric.sheet_label}")
+    cap_w = max(w, 72)
+    captions = _wrap_line(
+        c, f"{n_std} x {inch_text(bench.channel_width_in)} channels{extra}",
+        "Helvetica", 6.5, cap_w,
+    ) + _wrap_line(
+        c, f"seat {job.seat_fabric.sheet_label}  back {job.back_fabric.sheet_label}",
+        "Helvetica", 6.5, cap_w,
+    )
+    yy = y - 10
+    for part in captions:
+        c.drawString(x, yy, part)
+        yy -= 9
+    return yy
 
 
 def _side_section(c: canvas.Canvas, job: BanquetteJob, bench: BenchSpec, x: float, y: float, scale: float) -> None:
@@ -529,14 +615,27 @@ def _side_section(c: canvas.Canvas, job: BanquetteJob, bench: BenchSpec, x: floa
     # back
     c.setFillColor(colors.HexColor(job.back_fabric.plan_hex))
     c.rect(x, y + sh, bk, bh, fill=1, stroke=1)
-    c.setStrokeColor(DIM)
-    c.setFont("Helvetica", 6.5)
-    c.setFillColor(DIM)
-    c.drawString(x, y - 12, f"SIDE SECTION  seat {inch_text(bench.seat_depth_in)}  back {inch_text(bench.back_stack_in)}  height {inch_text(bench.channel_height_in)}")
-    c.drawString(x, y - 22, f"front overhang {inch_text(bench.front_overhang_in)}  foam {inch_text(bench.foam_thickness_in) if bench.foam_thickness_in else 'TBC'}")
+    label_w = max(80.0, PW - 36 - x)
     c.setFillColor(INK)
     c.setFont("Helvetica-Bold", 7)
-    c.drawString(x, y + sh + bh + 6, "SIDE SECTION")
+    c.drawString(x, y + sh + bh + 8, "SIDE SECTION (typical)")
+    c.setFillColor(DIM)
+    c.setFont("Helvetica", 6.5)
+    yy = y - 12
+    for part in _wrap_line(
+        c,
+        f"seat {inch_text(bench.seat_depth_in)}  back {inch_text(bench.back_stack_in)}  "
+        f"height {inch_text(bench.channel_height_in)}  "
+        f"front overhang {inch_text(bench.front_overhang_in)}  "
+        f"foam {inch_text(bench.foam_thickness_in) if bench.foam_thickness_in else 'TBC'}",
+        "Helvetica",
+        6.5,
+        label_w,
+    ):
+        if yy < 28:
+            break
+        c.drawString(x, yy, part)
+        yy -= 9
 
 
 def _draw_elevations_page(c: canvas.Canvas, job: BanquetteJob, page: int, total: int) -> None:
@@ -549,6 +648,7 @@ def _draw_elevations_page(c: canvas.Canvas, job: BanquetteJob, page: int, total:
     )
     y = PH - 220
     x = 50
+    lowest = y
     for bench in job.benches:
         runs = list(bench.runs)
         max_run = max(r.back_run_in for r in runs)
@@ -560,20 +660,30 @@ def _draw_elevations_page(c: canvas.Canvas, job: BanquetteJob, page: int, total:
         long_runs = [r for r in runs if r.back_run_in * scale > 280]
         short_runs = [r for r in runs if r not in long_runs]
         for run in long_runs:
-            _elevation_run(c, job, bench, run, x, y, scale, run.name.upper())
-            y -= elev_h + 48
+            cap_bottom = _elevation_run(c, job, bench, run, x, y, scale, run.name.upper())
+            y = min(cap_bottom, y - elev_h) - 36
         cursor = x
         row_y = y
+        row_bottom = y
         for run in short_runs:
             w = run.back_run_in * scale
-            if cursor > x and cursor + w > PW - 240:
-                y -= elev_h + 48
+            # Keep arm captions from colliding: wrap to run width and
+            # start a new row when the next run would overlap.
+            if cursor > x and cursor + max(w, 90) > PW - 260:
+                y = row_bottom - elev_h - 36
                 cursor = x
                 row_y = y
-            _elevation_run(c, job, bench, run, cursor, row_y, scale, run.name.upper())
-            cursor += w + 28
-        _side_section(c, job, bench, PW - 200, row_y, min(2.8, 130.0 / max(bench.seat_depth_in, 1)))
-        y = row_y - elev_h - 70
+            cap_bottom = _elevation_run(c, job, bench, run, cursor, row_y, scale, run.name.upper())
+            row_bottom = min(row_bottom, cap_bottom)
+            cursor += max(w, 90) + 36
+        y = row_bottom - elev_h - 40
+        lowest = min(lowest, y)
+    typical = job.benches[0]
+    section_y = max(48.0, min(lowest + 20, 120.0))
+    _side_section(
+        c, job, typical, PW - 210, section_y,
+        min(2.4, 110.0 / max(typical.seat_depth_in, 1)),
+    )
     c.showPage()
 
 

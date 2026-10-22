@@ -1,8 +1,9 @@
 code,color,material_type,width_inches,pattern_repeat_v,pattern_repeat_h,backing,specs,brand,supplier,supplier_sku,notes
-V001-Assigned,Assigned,vinyl,54,0,0,,Reserved existing assignment — never reuse,,,,Do not reallocate V001
-V002-Assigned,Assigned,vinyl,54,0,0,,Reserved existing assignment — never reuse,,,,Do not reallocate V002
-V003-Assigned,Assigned,vinyl,54,0,0,,Reserved existing assignment — never reuse,,,,Do not reallocate V003
-V004-Assigned,Assigned,vinyl,54,0,0,,Reserved existing assignment — never reuse,,,,Do not reallocate V004
-V005-Assigned,Assigned,vinyl,54,0,0,,Reserved existing assignment — never reuse,,,,Do not reallocate V005
-V006-Assigned,Assigned,vinyl,54,0,0,,Reserved existing assignment — never reuse,,,,Do not reallocate V006
-V007-Assigned,Assigned,vinyl,54,0,0,,Reserved existing assignment — never reuse,,,,Do not reallocate V007
+V001-Raven,Black,vinyl,54,0,0,,Seat vinyl. Code + color only.,,,,Black seat vinyl (Raven)
+V002-Cherrywood,Cherrywood,vinyl,54,0,0,,Vinyl. Code + color only.,,,,
+V003-Cognac,Cognac,vinyl,54,0,0,,Channel-back vinyl. Code + color only.,,,,Cognac backs
+V004-Cognac,Cognac,vinyl,54,0,0,,Vinyl. Code + color only.,,,,
+V005-Copper,Copper,vinyl,54,0,0,,Vinyl. Code + color only.,,,,
+V006-Bourbon,Bourbon,vinyl,54,0,0,,Vinyl. Code + color only.,,,,
+V007-Tannery,Tannery,vinyl,54,0,0,,Vinyl. Code + color only.,,,,
+V008-Bittersweet,Bittersweet,vinyl,54,0,0,,Vinyl. Code + color only. Dark espresso, not true black.,,,,

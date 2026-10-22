@@ -35,17 +35,19 @@ _LAYOUT_REVISION = re.compile(
     r"\brevis(?:e|ed|ion)\b.{0,40}\b(?:drawing|layout)\b|"
     r"\b(?:drawing|layout)\b.{0,40}\brevis(?:e|ed|ion)\b|"
     r"\bchannel(?:s)?\s+back\b|"
-    r"\bchannel(?:s)?\s+(?:at|to|width|wide)\b|"
+    r"\bchannel(?:s)?\s+(?:at|to|of|width|wide)\b|"
+    r"\bchannel\s+width\b|"
+    r"\bseat\s+cushions?\s+(?:on|in|to)\b|"
     r"\bseat\s+(?:backs?|cushion)\s+on\b|"
-    r"\b(?:back|seat)\s+(?:fabric|vinyl|cushion)\b.{0,20}\bon\b|"
-    r"\bchannel width\b",
+    r"\b(?:back|seat)\s+(?:fabric|vinyl|cushion)\b.{0,20}\b(?:on|in)\b",
     re.I,
 )
 
+# Bare "change it" and "change it to <specs>" / "redo the drawing with …"
 _CHANGE_FOLLOWUP = re.compile(
-    r"^\s*(?:you\s+)?(?:change|revise|update|fix|edit|redraw|redo)\s+"
-    r"(?:it|this|that|the drawing|the layout)\s*[.!]?\s*$|"
-    r"^\s*(?:change|revise|update)\s+it\s*[.!]?\s*$",
+    r"^\s*(?:you\s+)?(?:can you\s+|could you\s+|please\s+)?"
+    r"(?:change|revise|update|fix|edit|redraw|redo)\s+"
+    r"(?:it|this|that|the\s+drawing|the\s+layout)\b",
     re.I,
 )
 
@@ -56,8 +58,15 @@ _JOB_HINT = re.compile(
     re.I,
 )
 
+_INCH_NUM = r"(\d+(?:\s+\d+/\d+)?(?:\.\d+)?)"
 _CHANNEL_WIDTH = re.compile(
-    r"\bchannel(?:s)?(?:\s+back)?(?:\s+at)?\s+(\d+(?:\s+\d+/\d+)?(?:\.\d+)?)\s*(?:\"|in(?:ch(?:es)?)?|wide)?",
+    r"\bchannel(?:s)?(?:\s+backs?)?(?:\s+width)?(?:\s+(?:at|to|of))?\s+"
+    + _INCH_NUM
+    + r"\s*(?:\"|in(?:ch(?:es)?)?|wide)?",
+    re.I,
+)
+_CHANNEL_WIDTH_PREFIX = re.compile(
+    r"\b" + _INCH_NUM + r"\s*(?:\"|in(?:ch(?:es)?)?)?\s+(?:wide\s+)?channels?\b",
     re.I,
 )
 _CHANNEL_WIDTH_WIDE = re.compile(
@@ -65,11 +74,25 @@ _CHANNEL_WIDTH_WIDE = re.compile(
     re.I,
 )
 _BACK_FABRIC = re.compile(
-    r"\b(?:seat\s+backs?|backs?|channel backs?)\s+on\s+([A-Za-z0-9#/-]+)",
+    r"\b(?:seat\s+backs?|channel\s+backs?|backs?)\s+(?:on|in|to)\s+([A-Za-z0-9#/-]+)",
     re.I,
 )
 _SEAT_FABRIC = re.compile(
-    r"\bseat\s+cushion(?:s)?\s+on\s+([A-Za-z0-9#/-]+)",
+    r"\b(?:seat\s+cushions?|seat\s+fabric|seats?)\s+(?:on|in|to)\s+([A-Za-z0-9#/-]+)",
+    re.I,
+)
+_SEAT_FOR = re.compile(
+    r"\b(?:use|put)\s+([A-Za-z0-9#/-]+)\s+for\s+(?:the\s+)?(?:seat\s+cushions?|seats?)\b",
+    re.I,
+)
+_BACK_FOR = re.compile(
+    r"\b(?:use|put)\s+([A-Za-z0-9#/-]+)\s+for\s+(?:the\s+)?(?:seat\s+backs?|channel\s+backs?|backs?)\b",
+    re.I,
+)
+_SEAT_CODE = re.compile(r"\bseats?\s+(V\d{3}-[A-Za-z0-9]+)\b", re.I)
+_BACK_CODE = re.compile(r"\b(?:channel\s+)?backs?\s+(V\d{3}-[A-Za-z0-9]+)\b", re.I)
+_SEATS_COLOR = re.compile(
+    r"\b(?:with\s+)?(black|cognac|bittersweet|raven|cherrywood)\s+seats?\b",
     re.I,
 )
 _FABRIC_CODE = re.compile(r"\b(V\d{3}-[A-Za-z0-9]+)\b", re.I)
@@ -183,23 +206,33 @@ def extract_spec_changes(text: str | None) -> dict[str, Any]:
     codes = [m.group(1) for m in _FABRIC_CODE.finditer(raw)]
     if codes:
         changes["fabric_codes"] = codes
+    inches = None
     ch = _CHANNEL_WIDTH.search(raw)
     if ch:
         inches = _parse_inches(ch.group(1))
-        if inches is not None:
-            changes["channel_width_in"] = inches
-    elif "wide" in raw.lower() and "channel" in raw.lower():
+    if inches is None:
+        prefixed = _CHANNEL_WIDTH_PREFIX.search(raw)
+        if prefixed:
+            inches = _parse_inches(prefixed.group(1))
+    if inches is None and "wide" in raw.lower() and "channel" in raw.lower():
         wide = _CHANNEL_WIDTH_WIDE.search(raw)
         if wide:
             inches = _parse_inches(wide.group(1))
-            if inches is not None:
-                changes["channel_width_in"] = inches
-    back = _BACK_FABRIC.search(raw)
+    if inches is not None:
+        changes["channel_width_in"] = inches
+    back = _BACK_FABRIC.search(raw) or _BACK_FOR.search(raw) or _BACK_CODE.search(raw)
     if back:
         changes["back_fabric"] = back.group(1).strip().rstrip(".,;")
-    seat = _SEAT_FABRIC.search(raw)
+    seat = (
+        _SEAT_FABRIC.search(raw)
+        or _SEAT_FOR.search(raw)
+        or _SEAT_CODE.search(raw)
+        or _SEATS_COLOR.search(raw)
+    )
     if seat:
-        changes["seat_fabric"] = seat.group(1).strip().rstrip(".,;")
+        token = seat.group(1).strip().rstrip(".,;")
+        if token.lower() not in {"backs", "back", "channels", "channel"}:
+            changes["seat_fabric"] = token
     return changes
 
 
@@ -219,6 +252,24 @@ def merge_drawing_job_context(message: str | None, history: Any = None) -> dict[
     }
 
 
+def is_spec_revision_request(text: str | None) -> bool:
+    """True when the sentence carries drawing specs (width / fabric / redo)."""
+    raw = (text or "").strip()
+    if not raw:
+        return False
+    if extract_spec_changes(raw):
+        return True
+    if is_layout_revision_request(raw):
+        return True
+    if _FABRIC_CODE.search(raw) and re.search(
+        r"\b(?:seat|seats|back|backs|cushion|cushions|channel|drawing|layout)\b",
+        raw,
+        re.I,
+    ):
+        return True
+    return False
+
+
 def should_route_to_drawing_desk(
     text: str | None,
     history: Any = None,
@@ -233,11 +284,18 @@ def should_route_to_drawing_desk(
         return True
     if is_layout_revision_request(raw):
         return True
-    if is_drawing_change_followup(raw) and history_has_drawing_job_context(history):
-        return True
-    if is_drawing_change_followup(raw) and (
+    has_ctx = history_has_drawing_job_context(history) or (
         is_job_drawing_request(_history_blob(history))
         or is_layout_revision_request(_history_blob(history))
+    )
+    if is_drawing_change_followup(raw) and has_ctx:
+        return True
+    if has_ctx and is_spec_revision_request(raw):
+        return True
+    if has_ctx and re.search(
+        r"\b(?:change|revise|update|redo|redraw)\b.{0,40}\b(?:drawing|layout)\b",
+        raw,
+        re.I,
     ):
         return True
     return False
