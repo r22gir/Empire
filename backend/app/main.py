@@ -251,6 +251,8 @@ load_router("app.routers.amp", "/api/v1/amp", ["amp"])
 
 # Founder inbox for Max-e / Maxine help tickets (reads /data/family-help)
 load_router("app.routers.family_help", "/api/v1", ["family-help"])
+# Luna / Pedir ayuda dry-run — localhost or internal token only
+load_router("app.routers.support_health", "/api/v1", ["support-health"])
 # Shared MiniMax meter + H3 approval (founder aggregator)
 load_router("app.routers.minimax_meter", "/api/v1", ["minimax-meter"])
 

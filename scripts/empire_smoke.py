@@ -49,6 +49,13 @@ def _html(_data: Any, body: str) -> tuple[bool, str]:
     return ok, "html returned" if ok else "html marker missing"
 
 
+def _support_working(data: Any, _body: str) -> tuple[bool, str]:
+    if not isinstance(data, dict):
+        return False, "support health payload missing"
+    yes = data.get("yes_no") == "yes" and data.get("support_working") is True
+    return yes, f"support_working={data.get('yes_no')}" if yes else "support not working"
+
+
 CHECKS = [
     Check("MAX runtime truth path", f"{BACKEND}/api/v1/max/status", _max_status),
     Check("Empire Workroom", f"{BACKEND}/api/v1/inventory/dashboard?business=workroom", _json_has("total_items")),
@@ -57,6 +64,7 @@ CHECKS = [
     Check("ArchiveForge", f"{BACKEND}/api/v1/archiveforge/stats", _json_has("total_items")),
     Check("ApostApp", f"{BACKEND}/api/v1/apostapp/dashboard", _json_has("total_orders")),
     Check("OpenClaw health", f"{BACKEND}/api/v1/openclaw/health", _openclaw),
+    Check("Support dry-run", f"{BACKEND}/api/v1/support/health", _support_working),
     Check("TranscriptForge standalone route", f"{BACKEND}/api/v1/transcriptforge/modes", _json_has("modes")),
     Check("System", f"{BACKEND}/api/v1/system/stats", _json_has("cpu")),
     Check("Tokens & Costs", f"{BACKEND}/api/v1/costs/overview?days=1", _json_has("total")),
