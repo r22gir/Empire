@@ -237,9 +237,11 @@ export default function JobHub({ initial }: { initial?: { job?: string | null; q
   const contacts = job || d?.customer ? jobContacts(job || {}, d?.customer) : [];
   const calendarRows = [
     ...(d?.calendar || []).map((c: Any) => ({ at: c.start_time || c.due_at || c.date, title: c.title || label(c.kind || c.type), detail: c.location_address || c.notes })),
-    ...([['scheduled_date', 'Scheduled'], ['install_date', 'Install'], ['due_date', 'Due'], ['site_visit_date', 'Site visit'], ['production_start', 'Production']] as const)
-      .filter(([k]) => job?.[k])
-      .map(([k, l]) => ({ at: job[k], title: l, detail: '' })),
+    ...(job
+      ? ([['scheduled_date', 'Scheduled'], ['install_date', 'Install'], ['due_date', 'Due'], ['site_visit_date', 'Site visit'], ['production_start', 'Production']] as const)
+        .filter(([k]) => job[k])
+        .map(([k, l]) => ({ at: job[k], title: l, detail: '' }))
+      : []),
   ].filter((r) => r.at);
   const nav = [
     ['client', 'Client'], ['quotes', 'Quotes'], ['invoices', 'Invoices'], ['payments', 'Payments'],
