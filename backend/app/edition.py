@@ -68,6 +68,9 @@ _ALLOWLIST_EXEMPT = (
     ("GET", "/health"),
     ("GET", "/"),
     ("GET", "/api/v1/edition"),
+    ("GET", "/api/v1/support/health"),
+    ("GET", "/api/v1/support/dry-run"),
+    ("POST", "/api/v1/support/dry-run"),
 )
 
 
