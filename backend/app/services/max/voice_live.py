@@ -647,9 +647,18 @@ def run_voice_tool(name: str, arguments: dict[str, Any], *, call_id: str = "",
     call = {k: v for k, v in (arguments or {}).items() if not str(k).startswith("_")}
     if name == SEND_ME_TOOL:
         via = str(call.get("via") or "whatsapp").strip().lower()
-        if via not in ("whatsapp", "email"):
+        try:
+            from app.services.max.drawing_share import wants_studio_share
+            if wants_studio_share(user_text) or via in ("studio", "link"):
+                via = "studio"
+        except Exception:
+            if via in ("studio", "link"):
+                via = "studio"
+        if via not in ("whatsapp", "email", "studio"):
             via = "whatsapp"
         call["via"] = via
+        call["user_text"] = user_text
+        call["conversation_id"] = conversation_id
         to = str(call.get("to") or "").strip()
         if to and to.lower() not in ("", "me", "myself", "rafael", "founder", "owner",
                                      "my email", "my whatsapp", "empirebox2026@gmail.com"):
@@ -667,7 +676,7 @@ def run_voice_tool(name: str, arguments: dict[str, Any], *, call_id: str = "",
                 call.get("body"),
             ) if x
         )
-        if not asked_to_send(blob):
+        if via != "studio" and not asked_to_send(blob):
             return {"success": False, "tool": SEND_ME_TOOL, "error": (
                 "Not sent: Rafael did not ask to send this. Find or name the file here "
                 "and offer to send it if he wants.")}
@@ -745,7 +754,17 @@ def run_voice_tool(name: str, arguments: dict[str, Any], *, call_id: str = "",
     elif name == "find_files":
         call["limit"] = min(int(call.get("limit") or 8), 20)
     elif name == SHARE_TOOL:
-        call["via"] = str(call.get("via") or "email")
+        via = str(call.get("via") or "").strip().lower()
+        try:
+            from app.services.max.drawing_share import wants_studio_share
+            if wants_studio_share(user_text) or via in ("studio", "link", ""):
+                via = "studio"
+        except Exception:
+            if via in ("studio", "link", ""):
+                via = "studio"
+        if via not in ("studio", "email", "whatsapp"):
+            via = "studio"
+        call["via"] = via
     result = execute_tool(call, desk=None, access_context=None, founder=False, channel="voice_live")
     return _compact_for_voice(name, result.to_dict())
 

@@ -290,10 +290,37 @@ def scrub_internal_sources(text: str) -> str:
 
 
 # ── router hook ──────────────────────────────────────────────────────────────
-def direct_reply(message: str, *, channel: str = "web", has_image: bool = False) -> Optional[dict[str, Any]]:
+def direct_reply(
+    message: str,
+    *,
+    channel: str = "web",
+    has_image: bool = False,
+    history: Any = None,
+    conversation_id: str | None = None,
+) -> Optional[dict[str, Any]]:
     """Return {'text', 'skill', 'quote'?} for messages answered without the model, else None."""
     if has_image:
         return None  # the model must read the attached image first
+    try:
+        from app.services.max.drawing_share import (
+            is_drawing_ready_followup,
+            last_drawing,
+            remember_key,
+        )
+        if is_drawing_ready_followup(message, history):
+            key = remember_key(conversation_id, None, history)
+            remembered = last_drawing(key)
+            url = (remembered or {}).get("share_url") or ""
+            name = (remembered or {}).get("pdf_filename") or "drawing.pdf"
+            if url:
+                return {
+                    "text": f"[{name}]({url})",
+                    "skill": "drawing_share",
+                    "share_url": url,
+                }
+            return None  # drawing desk owns this turn — do not hijack
+    except Exception:
+        pass
     if is_greeting(message):
         return {"text": greeting_reply(), "skill": "greeting"}
     if is_docs_location_request(message):

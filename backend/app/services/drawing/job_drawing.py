@@ -36,6 +36,7 @@ from app.services.max.job_drawing_intent import (
     DRAWING_DESK_ID,
     extract_job_hint,
     extract_spec_changes,
+    is_layout_revision_request,
     merge_drawing_job_context,
 )
 
@@ -49,9 +50,15 @@ _SUPPLIER_MARKERS = (
 )
 
 _KNOWN_LAYOUT_PRESETS = {
-    "marley": "marleys_u",
-    "marleys": "marleys_u",
-    "marley's": "marleys_u",
+    "marley": "marleys_u_and_l",
+    "marleys": "marleys_u_and_l",
+    "marley's": "marleys_u_and_l",
+}
+
+_KNOWN_JOB_SETS = {
+    "marley": "marleys_u_and_l",
+    "marleys": "marleys_u_and_l",
+    "marley's": "marleys_u_and_l",
 }
 
 
@@ -118,20 +125,42 @@ def resolve_internal_fabric(token: str | None, registry_rows: list[dict] | None 
             rows = load_registry_rows()
         except Exception:
             rows = []
+    from app.services.drawing.mockup_engine.finish import client_facing_label, color_hex_for_name
+
     code_match = re.match(r"^(V\d{3}-[A-Za-z0-9]+)$", raw, re.I)
     if code_match:
         code = code_match.group(1)
         for row in rows:
             if str(row.get("code") or "").lower() == code.lower():
                 color = row.get("color") or code.split("-", 1)[-1]
-                return {"code": row.get("code"), "color": color, "label": f"{row.get('code')} {color}"}
+                mat = row.get("material_type")
+                return {
+                    "code": row.get("code"),
+                    "color": color,
+                    "material_type": mat,
+                    "hex": color_hex_for_name(str(color)),
+                    "label": client_facing_label(code=row.get("code"), color=color, material_type=mat),
+                }
         return {"code": None, "color": None, "label": raw, "unknown_code": code}
     color_key = raw.lower()
     hits = [r for r in rows if str(r.get("color") or "").lower() == color_key]
     if len(hits) == 1:
         row = hits[0]
-        return {"code": row.get("code"), "color": row.get("color"), "label": f"{row.get('code')} {row.get('color')}"}
-    return {"code": None, "color": raw, "label": raw}
+        color = row.get("color")
+        mat = row.get("material_type")
+        return {
+            "code": row.get("code"),
+            "color": color,
+            "material_type": mat,
+            "hex": color_hex_for_name(str(color)),
+            "label": client_facing_label(code=row.get("code"), color=color, material_type=mat),
+        }
+    return {
+        "code": None,
+        "color": raw,
+        "hex": color_hex_for_name(raw),
+        "label": client_facing_label(color=raw, material_type="vinyl"),
+    }
 
 
 def _layout_from_mapping(data: dict[str, Any] | None) -> dict[str, Any]:
@@ -456,11 +485,29 @@ def _piece_spec(layout: dict[str, Any], spec_changes: dict[str, Any], fabrics: d
             overall_width_in=float(width or 0),
             back_thickness_in=float(layout.get("foam_thickness_in") or 2.0),
         )
+    from app.services.drawing.mockup_engine.finish import apply_seat_back_finish, color_hex_for_name
+
     back_label = fabrics.get("back", {}).get("label") or "TBC"
     seat_label = fabrics.get("seat", {}).get("label") or "TBC"
+    back_color = str(fabrics.get("back", {}).get("color") or back_label)
+    seat_color = str(fabrics.get("seat", {}).get("color") or "")
     client = (quote or {}).get("customer_name") or layout.get("client_name") or "Client"
     project = (quote or {}).get("project_name") or layout.get("project_name") or "Job drawing"
     number = (quote or {}).get("quote_number") or layout.get("quote_number") or ""
+    material = MaterialFinishSpec(
+        material_type="vinyl",
+        name=back_label,
+        color_name=back_color,
+        color_hex=fabrics.get("back", {}).get("hex") or color_hex_for_name(back_color),
+        seat_color_name=seat_color,
+        seat_color_hex=(
+            fabrics.get("seat", {}).get("hex")
+            or (color_hex_for_name(seat_color) if seat_color else "#A8693A")
+        ),
+        fabric_code=fabrics.get("back", {}).get("code"),
+        seat_fabric_code=fabrics.get("seat", {}).get("code"),
+    )
+    apply_seat_back_finish(material, back=fabrics.get("back") or {}, seat=fabrics.get("seat") or {})
     return PieceSpec(
         name=project or f"{client} drawing",
         piece_type="banquette",
@@ -480,11 +527,7 @@ def _piece_spec(layout: dict[str, Any], spec_changes: dict[str, Any], fabrics: d
             seat_height_in=float(layout.get("seat_height_in") or 18.0),
             cushion_thickness_in=float(layout.get("cushion_thickness_in") or 4.0),
         ),
-        material=MaterialFinishSpec(
-            material_type="vinyl",
-            name=back_label,
-            color_name=str(fabrics.get("back", {}).get("color") or back_label),
-        ),
+        material=material,
         notes=[
             INTERNAL_STAMP,
             f"Back fabric: {back_label}",
@@ -606,6 +649,78 @@ def _try_mockup_pdf(spec, path: Path) -> bool:
         return False
 
 
+def _normalize_job_key(job_hint: str | None) -> str:
+    key = (job_hint or "").strip().lower().rstrip("s")
+    return key.replace("'", "")
+
+
+def _job_set_name(job_hint: str | None) -> Optional[str]:
+    raw = (job_hint or "").strip().lower()
+    key = _normalize_job_key(job_hint)
+    return _KNOWN_JOB_SETS.get(key) or _KNOWN_JOB_SETS.get(raw)
+
+
+def _apply_revision_to_preset(spec, spec_changes: dict[str, Any], fabrics: dict[str, Any], *, revision: str, sheet_date: str):
+    from app.services.drawing.mockup_engine.finish import apply_seat_back_finish
+
+    piece = spec.model_copy(deep=True)
+    channel = spec_changes.get("channel_width_in")
+    if channel is not None:
+        piece.back.channel_width_in = float(channel)
+        piece.back.style = "channel"
+    apply_seat_back_finish(piece.material, back=fabrics.get("back") or {}, seat=fabrics.get("seat") or {})
+    piece.revision = revision
+    piece.sheet_date = sheet_date
+    back_label = (fabrics.get("back") or {}).get("label")
+    seat_label = (fabrics.get("seat") or {}).get("label")
+    notes = list(piece.notes or [])
+    if back_label:
+        notes.append(f"Back fabric: {back_label}")
+    if seat_label:
+        notes.append(f"Seat fabric: {seat_label}")
+    piece.notes = notes
+    return piece
+
+
+def _job_piece_specs(
+    *,
+    job_hint: str | None,
+    layout: dict[str, Any],
+    spec_changes: dict[str, Any],
+    fabrics: dict[str, Any],
+    quote: dict[str, Any] | None,
+    revision: str,
+    sheet_date: str,
+) -> list:
+    set_name = _job_set_name(job_hint)
+    if set_name == "marleys_u_and_l":
+        from app.services.drawing.mockup_engine.presets import marleys_u_and_l_preset
+        presets = marleys_u_and_l_preset()
+        return [
+            _apply_revision_to_preset(presets["u_bench"], spec_changes, fabrics, revision=revision, sheet_date=sheet_date),
+            _apply_revision_to_preset(presets["l_bench"], spec_changes, fabrics, revision=revision, sheet_date=sheet_date),
+        ]
+    spec = _piece_spec(layout, spec_changes, fabrics, quote)
+    spec.revision = revision
+    spec.sheet_date = sheet_date
+    return [spec]
+
+
+def _next_revision(out_dir: Path, slug: str) -> int:
+    highest = 0
+    if out_dir.exists():
+        for path in out_dir.glob(f"*{slug}*"):
+            match = re.search(r"rev(\d+)", path.name, re.I)
+            if match:
+                highest = max(highest, int(match.group(1)))
+    return highest + 1
+
+
+def _revision_filename(slug: str, revision: int, sheet_date: str, nonce: str) -> str:
+    day = sheet_date.replace("-", "")
+    return f"mockup_{slug}_rev{revision}_{day}_{nonce}.pdf"
+
+
 def generate_job_drawing(
     *,
     message: str = "",
@@ -616,10 +731,34 @@ def generate_job_drawing(
     takeoff: dict[str, Any] | None = None,
     spec_changes: dict[str, Any] | None = None,
     output_dir: str | Path | None = None,
+    conversation_id: str | None = None,
 ) -> dict[str, Any]:
-    """Build a revised internal drawing PDF for a job. Temp data only in tests."""
+    """Build a revised drawing PDF for a job. Always a new file. Temp data only in tests."""
+    from datetime import date as _date
+    import time as _time
+    from app.services.max.drawing_share import (
+        attach_share_proof,
+        is_drawing_ready_followup,
+        last_drawing,
+        remember_drawing,
+        remember_key,
+        verify_generated_file,
+    )
+
     ctx = merge_drawing_job_context(message, history)
     hint = job_hint or ctx.get("job_hint") or extract_job_hint(message)
+    store_key = remember_key(conversation_id, hint, history)
+    if is_drawing_ready_followup(message, history) and not is_layout_revision_request(message):
+        remembered = last_drawing(store_key)
+        if remembered and remembered.get("pdf_path"):
+            proof = verify_generated_file(
+                remembered["pdf_path"],
+                min_mtime=float(remembered.get("pdf_mtime") or 0) - 0.5,
+            )
+            if proof.get("ok"):
+                remembered = dict(remembered)
+                remembered["reused_just_generated"] = True
+                return remembered
     changes = dict(ctx.get("spec_changes") or {})
     if spec_changes:
         changes.update(spec_changes)
@@ -693,27 +832,49 @@ def generate_job_drawing(
     project = (quote or {}).get("project_name") or layout.get("project_name") or f"{client} drawing"
     out_dir = Path(output_dir) if output_dir else _drawings_dir()
     out_dir.mkdir(parents=True, exist_ok=True)
-    slug = re.sub(r"[^a-zA-Z0-9_-]+", "_", f"{hint or 'job'}_{uuid.uuid4().hex[:8]}").strip("_")
-    pdf_path = out_dir / f"job_drawing_{slug}.pdf"
+    sheet_date = _date.today().isoformat()
+    job_slug = re.sub(r"[^a-zA-Z0-9_-]+", "_", (hint or "job")).strip("_").lower() or "job"
+    revision = _next_revision(out_dir, job_slug)
+    nonce = uuid.uuid4().hex[:8]
+    pdf_name = _revision_filename(job_slug, revision, sheet_date, nonce)
+    pdf_path = out_dir / pdf_name
+    if pdf_path.exists():
+        nonce = uuid.uuid4().hex[:10]
+        pdf_name = _revision_filename(job_slug, revision, sheet_date, nonce)
+        pdf_path = out_dir / pdf_name
 
-    spec = None
-    mockup_path = out_dir / f"job_drawing_{slug}_engine.pdf"
+    pieces = _job_piece_specs(
+        job_hint=hint,
+        layout=layout,
+        spec_changes=changes,
+        fabrics=fabrics,
+        quote=quote,
+        revision=str(revision),
+        sheet_date=sheet_date,
+    )
+    t0 = _time.time()
     mockup_ok = False
     try:
-        spec = _piece_spec(layout, changes, fabrics, quote)
-        mockup_ok = _try_mockup_pdf(spec, mockup_path)
+        from app.services.drawing.mockup_engine.generator import render_job_set_mockup_pdf
+        render_job_set_mockup_pdf(
+            pieces, str(pdf_path), date_str=sheet_date, revision=str(revision),
+        )
+        mockup_ok = pdf_path.exists() and pdf_path.stat().st_size > 80
     except Exception:
         mockup_ok = False
-    _write_shop_pdf(
-        path=pdf_path,
-        spec_notes=[INTERNAL_STAMP],
-        layout={**layout, "channel_width_in": channel, "depth_in": depth, "back_height_in": back_h, "width_in": width},
-        cuts=cuts,
-        fabrics=fabrics,
-        conflicts=conflicts,
-        client=client,
-        project=project,
-    )
+    if not mockup_ok:
+        shop_path = out_dir / f"job_drawing_{job_slug}_rev{revision}_{nonce}.pdf"
+        _write_shop_pdf(
+            path=shop_path,
+            spec_notes=[INTERNAL_STAMP],
+            layout={**layout, "channel_width_in": channel, "depth_in": depth, "back_height_in": back_h, "width_in": width},
+            cuts=cuts,
+            fabrics=fabrics,
+            conflicts=conflicts,
+            client=client,
+            project=project,
+        )
+        pdf_path = shop_path
 
     size = pdf_path.stat().st_size if pdf_path.exists() else 0
     if size < 80:
@@ -723,7 +884,7 @@ def generate_job_drawing(
             "desk": DRAWING_DESK_ID,
             "internal_only": True,
         }
-    return {
+    result = {
         "success": True,
         "desk": DRAWING_DESK_ID,
         "desk_label": "Kai (ForgeDesk / Drawing Studio)",
@@ -734,6 +895,10 @@ def generate_job_drawing(
         "project_name": project,
         "quote_number": (quote or {}).get("quote_number"),
         "layout_source": layout.get("source"),
+        "revision": revision,
+        "sheet_date": sheet_date,
+        "piece_count": len(pieces),
+        "piece_names": [getattr(p, "name", "") for p in pieces],
         "dimensions": {
             "width": format_inches(width),
             "depth": format_inches(depth),
@@ -743,25 +908,33 @@ def generate_job_drawing(
         "fabrics": fabrics,
         "cut_list": cuts,
         "estimate_conflicts": conflicts,
-        "pdf_path": str(pdf_path),
+        "pdf_path": str(pdf_path.resolve()),
         "pdf_filename": pdf_path.name,
-        "engine_pdf_path": str(mockup_path) if mockup_ok else None,
+        "generated_at": t0,
         "branding": EMPIRE_BRAND,
         "stamp": INTERNAL_STAMP,
-        "message": (
-            f"New internal shop drawing for {client}: {pdf_path.name}. "
-            f"{INTERNAL_STAMP}"
-            + (f" Conflicts: {'; '.join(conflicts)}" if conflicts else "")
-        ),
     }
+    attach_share_proof(result, pdf_path, min_mtime=t0)
+    link = result.get("share_url") or result.get("markdown_link") or pdf_path.name
+    result["message"] = (
+        f"New drawing for {client}: {link}. "
+        f"REV {revision} · {sheet_date}. {INTERNAL_STAMP}"
+        + (f" Conflicts: {'; '.join(conflicts)}" if conflicts else "")
+    )
+    remember_drawing(store_key, result)
+    return result
 
 
 def founder_drawing_reply(result: dict[str, Any]) -> str:
-    """Short founder-facing line. Never a pipeline dump."""
+    """Short founder-facing line with the just-generated share URL. Never a pipeline dump."""
     if not result:
         return "Drawing desk failed: no result."
     if result.get("success"):
-        return result.get("message") or f"New internal drawing: {result.get('pdf_filename')}"
+        url = result.get("share_url") or ""
+        name = result.get("pdf_filename") or "drawing.pdf"
+        if url:
+            return result.get("message") or f"New drawing: [{name}]({url})"
+        return result.get("message") or f"New drawing: {name}"
     return f"Drawing desk could not finish: {result.get('error') or 'unknown error'}."
 
 
@@ -769,17 +942,20 @@ def run_job_drawing_turn(
     message: str,
     history: Any = None,
     job_hint: str | None = None,
+    conversation_id: str | None = None,
     **kwargs: Any,
 ) -> dict[str, Any]:
     """Chat / stream entry: classify then generate. Used by both /chat doors."""
     from app.services.max.job_drawing_intent import should_route_to_drawing_desk
+    from app.services.max.drawing_share import is_drawing_ready_followup
 
-    if not should_route_to_drawing_desk(message, history):
+    if not should_route_to_drawing_desk(message, history) and not is_drawing_ready_followup(message, history):
         return {"handled": False}
     result = generate_job_drawing(
         message=message,
         history=history,
         job_hint=job_hint,
+        conversation_id=conversation_id,
         **kwargs,
     )
     return {
