@@ -1,11 +1,10 @@
 """Core PDF & PNG preview generator for the parametric mockup engine."""
 from __future__ import annotations
 
-import io
-import os
 import subprocess
+from datetime import date
 from pathlib import Path
-from typing import List, Optional, Tuple, Dict, Any
+from typing import List, Optional, Tuple
 
 from reportlab.lib.pagesizes import letter, landscape
 from reportlab.lib.colors import HexColor
@@ -14,17 +13,7 @@ from reportlab.pdfgen import canvas
 from app.services.drawing.mockup_engine.spec import PieceSpec
 from app.services.drawing.mockup_engine.canvas_helpers import (
     draw_chrome, draw_scale_bar, draw_legend, draw_casework_legend, format_in,
-    INK, PAPER, WHITE, MUT, GOLD
-)
-from app.services.drawing.mockup_engine.renderers import (
-    render_plan_view, render_elevation_segment, render_casework_elevation, render_side_section
-)
-
-
-from app.services.drawing.mockup_engine.spec import PieceSpec
-from app.services.drawing.mockup_engine.canvas_helpers import (
-    draw_chrome, draw_scale_bar, draw_legend, draw_casework_legend, format_in,
-    INK, PAPER, WHITE, MUT, GOLD
+    INK,
 )
 from app.services.drawing.mockup_engine.renderers import (
     render_plan_view, render_elevation_segment, render_casework_elevation, render_side_section
@@ -71,15 +60,50 @@ def _pick_optimal_scale(
     return 0.25 * 72.0 / 12.0, "1/4\" = 1'-0\"  (print at 100%)"
 
 
+def _sheet_date(spec: PieceSpec, override: str | None = None) -> str:
+    return (override or getattr(spec, "drawn_date", None) or "").strip() or date.today().isoformat()
+
+
+def _sheet_rev(spec: PieceSpec, override: str | None = None) -> str:
+    return (override or getattr(spec, "revision", None) or "").strip()
+
+
+def _client_material_line(spec: PieceSpec) -> str:
+    """Back and seat as separate client-safe labels. Never a supplier brand."""
+    back = spec.material.back_client_label()
+    seat = spec.material.seat_client_label()
+    if back.lower() == seat.lower():
+        return back
+    return f"back {back} · seat {seat}"
+
+
+def pages_for_spec(spec: PieceSpec) -> int:
+    return 2
+
+
 def render_piece_mockup_pdf(
     spec: PieceSpec,
     output_pdf_path: str,
+    *,
+    canvas_obj=None,
+    start_page: int = 1,
+    total_pages: int | None = None,
+    date_str: str | None = None,
+    revision: str | None = None,
 ) -> str:
     """Generate a multi-page, true-scale architectural mockup PDF from a PieceSpec."""
     W, H = landscape(letter)
-    c = canvas.Canvas(output_pdf_path, pagesize=landscape(letter))
-    c.setTitle(f"{spec.name} Mockup — {spec.quote_number}")
-    c.setAuthor("Empire Workroom")
+    owns_canvas = canvas_obj is None
+    c = canvas_obj or canvas.Canvas(output_pdf_path, pagesize=landscape(letter))
+    if owns_canvas:
+        c.setTitle(f"{spec.name} Mockup — {spec.quote_number}")
+        c.setAuthor("Empire Workroom")
+        try:
+            c._doc.compression = 0
+        except Exception:
+            pass
+    sheet_date = _sheet_date(spec, date_str)
+    sheet_rev = _sheet_rev(spec, revision)
 
     is_woodcraft = spec.business_unit == "woodcraft" or spec.casework is not None
     chrome_data = sheet_chrome("woodcraft" if is_woodcraft else "workroom")
@@ -93,16 +117,10 @@ def render_piece_mockup_pdf(
     contact_info = f"{phone} · {website}"
 
     shape = spec.footprint.shape
-
-    # Determine total pages needed
-    if spec.casework:
-        total_pages = 2  # Page 1: Plan & Specs; Page 2: Front Elevation of Casework
-    elif shape == "u_shape":
-        total_pages = 2  # Page 1: Plan view; Page 2: Front elevations (U Main, U Left, U Right)
-    elif shape == "l_shape":
-        total_pages = 2  # Page 1: Plan view; Page 2: Front elevations (L Long, L Short)
-    else:
-        total_pages = 2  # Page 1: Plan view; Page 2: Front Elevation & Side Section
+    piece_pages = pages_for_spec(spec)
+    sheet_total = total_pages if total_pages is not None else piece_pages
+    page_1 = start_page
+    page_2 = start_page + 1
 
     # Calculate optimal scales
     # Available area on Page 1: width ~ 450 pt (beside legend) or 680 pt
@@ -159,7 +177,7 @@ def render_piece_mockup_pdf(
         arm_desc = f"  ·  {format_in(spec.arm.arm_width_in)} arms" if getattr(spec, "arm", None) and spec.arm.has_arms else ""
         sub_title = (
             f'Seat depth {format_in(spec.cushion.seat_depth_in)}  ·  net back {format_in(spec.back.net_back_height_in)}  ·  '
-            f'{b_desc}{arm_desc}  ·  {spec.material.name}, {spec.material.color_name}'
+            f'{b_desc}{arm_desc}  ·  {_client_material_line(spec)}'
         )
 
     # ==========================================
@@ -170,8 +188,8 @@ def render_piece_mockup_pdf(
         c, W, H,
         title=page_1_title,
         subtitle=sub_title,
-        page=1,
-        total=total_pages,
+        page=page_1,
+        total=sheet_total,
         company=company,
         tagline=tagline,
         address=address,
@@ -179,7 +197,9 @@ def render_piece_mockup_pdf(
         client_name=spec.client_name,
         client_address=getattr(spec, "client_address", "") or "",
         quote_tag=f"{spec.quote_number} · {spec.status}",
-        footer_text=f"{company} · {spec.project_name} · {spec.material.name if not spec.casework else spec.casework.wood_species} · drawn from quoted dimensions",
+        footer_text=f"{company} · {spec.project_name} · {spec.casework.wood_species if spec.casework else _client_material_line(spec)} · drawn from quoted dimensions",
+        date_str=sheet_date,
+        revision=sheet_rev,
     )
 
     c.setFillColor(INK)
@@ -218,19 +238,21 @@ def render_piece_mockup_pdf(
         seat_c = HexColor(spec.material.seat_color_hex)
 
         b_style = spec.back.style
+        back_face = spec.material.back_client_label()
+        seat_face = spec.material.seat_client_label()
         if b_style == "channel":
-            b_lbl = f'{format_in(spec.back.channel_width_in)} channel back, {spec.material.color_name}'
+            b_lbl = f'{format_in(spec.back.channel_width_in)} channel back, {back_face}'
         elif b_style in ("tufted", "button_tufted"):
-            b_lbl = f'tufted back, {spec.material.color_name}'
+            b_lbl = f'tufted back, {back_face}'
         else:
-            b_lbl = f'{b_style} back, {spec.material.color_name}'
+            b_lbl = f'{b_style} back, {back_face}'
 
         draw_legend(
             c, lx, ly,
             back_color=back_c,
             seat_color=seat_c,
             back_label=b_lbl,
-            seat_label=f"seat cushion, plain {spec.material.color_name}",
+            seat_label=f"seat cushion, {seat_face}",
             runs=runs,
             notes=[
                 f'Back band in plan drawn {format_in(spec.footprint.back_thickness_in)} thick for legibility only.',
@@ -249,18 +271,27 @@ def render_piece_mockup_pdf(
     if spec.casework:
         sub_title_p2 = f'{spec.casework.wood_species} · Custom Built-In Carcass Details · {format_in(spec.casework.overall_height_in)} Overall Height'
     elif spec.back.style == "channel":
-        sub_title_p2 = f'{format_in(spec.back.channel_width_in)} vertical channels on backs · plain seat cushions · {format_in(spec.back.net_back_height_in)} net back'
+        sub_title_p2 = (
+            f'{format_in(spec.back.channel_width_in)} vertical channels on backs ({spec.material.back_client_label()}) · '
+            f'seat cushions {spec.material.seat_client_label()} · {format_in(spec.back.net_back_height_in)} net back'
+        )
     elif spec.back.style in ("tufted", "button_tufted"):
-        sub_title_p2 = f'Diamond tufted back · plain seat cushions · {format_in(spec.back.net_back_height_in)} net back'
+        sub_title_p2 = (
+            f'Diamond tufted back ({spec.material.back_client_label()}) · '
+            f'seat cushions {spec.material.seat_client_label()} · {format_in(spec.back.net_back_height_in)} net back'
+        )
     else:
-        sub_title_p2 = f'{spec.back.style.capitalize()} back · plain seat cushions · {format_in(spec.back.net_back_height_in)} net back'
+        sub_title_p2 = (
+            f'{spec.back.style.capitalize()} back ({spec.material.back_client_label()}) · '
+            f'seat cushions {spec.material.seat_client_label()} · {format_in(spec.back.net_back_height_in)} net back'
+        )
 
     draw_chrome(
         c, W, H,
         title=page_2_title,
         subtitle=sub_title_p2,
-        page=2,
-        total=total_pages,
+        page=page_2,
+        total=sheet_total,
         company=company,
         tagline=tagline,
         address=address,
@@ -268,7 +299,9 @@ def render_piece_mockup_pdf(
         client_name=spec.client_name,
         client_address=getattr(spec, "client_address", "") or "",
         quote_tag=f"{spec.quote_number} · {spec.status}",
-        footer_text=f"{company} · {spec.project_name} · {spec.material.name if not spec.casework else spec.casework.wood_species} · drawn from quoted dimensions",
+        footer_text=f"{company} · {spec.project_name} · {spec.casework.wood_species if spec.casework else _client_material_line(spec)} · drawn from quoted dimensions",
+        date_str=sheet_date,
+        revision=sheet_rev,
     )
 
     if spec.casework:
@@ -322,6 +355,47 @@ def render_piece_mockup_pdf(
         draw_scale_bar(c, 60, 40, s_elev, scale_lbl_elev)
 
     c.showPage()
+    if owns_canvas:
+        c.save()
+    return output_pdf_path
+
+
+def render_job_set_pdf(
+    specs: List[PieceSpec],
+    output_pdf_path: str,
+    *,
+    revision: str | None = None,
+    date_str: str | None = None,
+) -> str:
+    """Render every piece (e.g. U and L) into one new PDF. Never overwrites an older file."""
+    if not specs:
+        raise ValueError("job set requires at least one piece")
+    sheet_date = (date_str or "").strip() or date.today().isoformat()
+    sheet_rev = (revision or "").strip()
+    c = canvas.Canvas(output_pdf_path, pagesize=landscape(letter))
+    try:
+        c._doc.compression = 0
+    except Exception:
+        pass
+    title = " / ".join(s.name for s in specs)
+    c.setTitle(f"{title} — {sheet_rev or 'job set'} {sheet_date}")
+    c.setAuthor("Empire Workroom")
+    total = sum(pages_for_spec(s) for s in specs)
+    page = 1
+    for spec in specs:
+        if sheet_rev:
+            spec.revision = sheet_rev
+        spec.drawn_date = sheet_date
+        render_piece_mockup_pdf(
+            spec,
+            output_pdf_path,
+            canvas_obj=c,
+            start_page=page,
+            total_pages=total,
+            date_str=sheet_date,
+            revision=sheet_rev,
+        )
+        page += pages_for_spec(spec)
     c.save()
     return output_pdf_path
 

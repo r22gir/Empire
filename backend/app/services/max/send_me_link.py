@@ -222,15 +222,27 @@ def _client_hint(text: str) -> str:
     return ""
 
 
-def _modified_key(match: dict[str, Any]) -> str:
-    return str(match.get("modified") or match.get("mtime") or "")
+def _modified_key(match: dict[str, Any]) -> float:
+    try:
+        from app.services.max.latest_job_file import _mtime_of
+        return _mtime_of(match)
+    except Exception:
+        raw = match.get("mtime")
+        if isinstance(raw, (int, float)):
+            return float(raw)
+        return 0.0
 
 
 def pick_latest_match(matches: list[dict[str, Any]]) -> Optional[dict[str, Any]]:
+    """Newest mtime for that job — never the first list item."""
     if not matches:
         return None
-    ranked = sorted(matches, key=_modified_key, reverse=True)
-    return ranked[0]
+    try:
+        from app.services.max.latest_job_file import pick_newest_file
+        return pick_newest_file(matches)
+    except Exception:
+        ranked = sorted(matches, key=_modified_key, reverse=True)
+        return ranked[0]
 
 
 def find_latest_document(query: str, history: Any = None) -> dict[str, Any]:

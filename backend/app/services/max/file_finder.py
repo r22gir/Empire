@@ -297,7 +297,8 @@ TYPE_WORDS = {
     "estimate": ("est", "estimate", "quote", "proposal"), "estimates": ("est", "estimate", "quote", "proposal"),
     "quote": ("est", "estimate", "quote", "proposal"), "quotes": ("est", "estimate", "quote", "proposal"),
     "invoice": ("inv", "invoice"), "invoices": ("inv", "invoice"), "presentation": ("presentation", "pres"),
-    "drawing": ("drawing", "elevation", "shop"), "drawings": ("drawing", "elevation", "shop"),
+    "drawing": ("drawing", "elevation", "shop", "mockup"), "drawings": ("drawing", "elevation", "shop", "mockup"),
+    "mockup": ("mockup", "drawing", "elevation"),
     "photo": ("jpg", "jpeg", "png", "heic", "photo"), "photos": ("jpg", "jpeg", "png", "heic", "photo"),
     "pdf": ("pdf",), "pdfs": ("pdf",), "spreadsheet": ("xlsx", "xls", "csv"), "contract": ("contract", "agreement"),
 }
@@ -615,13 +616,16 @@ def find_files(query: str, *, limit: int = 15, index: Optional[FileIndex] = None
             continue
         row = {
             "file_id": _remember(e.path), "name": e.name, "path": _display_path(e.path),
+            "abs_path": e.path,
             "folder": _display_path(os.path.dirname(e.path)), "size": _human_size(e.size),
             "modified": time.strftime("%Y-%m-%d %H:%M", time.localtime(e.mtime)),
+            "mtime": float(e.mtime),
             "score": round(sc, 1), "why": why, "other_copies": 0, "copy_paths": [],
             "is_final": "final" in e.tokens,
         }
         seen[key] = row
         matches.append(row)
+    matches = _newest_first_same_job(matches)
     total = len(matches)
     out = {"query": query, "parsed": _parsed(q), "total": total, "found": total > 0,
            "matches": matches[:max(1, min(int(limit or 15), 50))], "indexing": pending,
@@ -629,6 +633,65 @@ def find_files(query: str, *, limit: int = 15, index: Optional[FileIndex] = None
     if not total:
         out["closest"] = closest(query, entries, q)
     return out
+
+
+def _name_stem(name: str) -> str:
+    base = os.path.splitext(os.path.basename(name or ""))[0].lower()
+    return re.sub(r"[_-][0-9a-f]{6,}$", "", base)
+
+
+def _newest_first_same_job(matches: list[dict]) -> list[dict]:
+    """When several files are the same drawing family, newest mtime ranks first.
+
+    Stops an older Oct-8 / morning mockup from beating a same-day revision
+    because find_files scored them equally and the model took the first hit.
+    """
+    if len(matches) < 2:
+        return matches
+    groups: dict[str, list[int]] = {}
+    for i, m in enumerate(matches):
+        groups.setdefault(_name_stem(str(m.get("name") or "")), []).append(i)
+    newest_bonus: dict[int, float] = {}
+    for idxs in groups.values():
+        if len(idxs) < 2:
+            continue
+        ordered = sorted(idxs, key=lambda i: float(matches[i].get("mtime") or 0), reverse=True)
+        for rank, i in enumerate(ordered):
+            newest_bonus[i] = 8.0 if rank == 0 else -2.0 * rank
+    for i, bonus in newest_bonus.items():
+        matches[i]["score"] = round(float(matches[i].get("score") or 0) + bonus, 1)
+        if bonus > 0:
+            matches[i].setdefault("why", []).append("newest for this job")
+    matches.sort(key=lambda m: (float(m.get("score") or 0), float(m.get("mtime") or 0)), reverse=True)
+    return matches
+
+
+def index_generated_file(path: str) -> None:
+    """Insert a just-written drawing into the live index so the next search sees it."""
+    real = os.path.realpath(os.path.expanduser(path or ""))
+    if not real or not os.path.isfile(real):
+        return
+    try:
+        st = os.stat(real)
+    except OSError:
+        return
+    name = os.path.basename(real)
+    parent = os.path.dirname(real)
+    entry = Entry(
+        path=real, name=name, size=int(st.st_size), mtime=float(st.st_mtime),
+        root=parent,
+        tokens=tuple(_tokens(os.path.splitext(name)[0])) + tuple(_tokens(os.path.splitext(name)[1])),
+        dir_tokens=tuple(_tokens(parent)),
+    )
+    with INDEX._lock:
+        bucket = INDEX._by_root.setdefault(parent, [])
+        bucket[:] = [e for e in bucket if e.path != real]
+        bucket.append(entry)
+        # Also drop into every root that contains this path so the next search sees it.
+        for key in list(INDEX._by_root):
+            if real.startswith(key.rstrip("/") + "/") or key == parent:
+                rows = INDEX._by_root[key]
+                INDEX._by_root[key] = [e for e in rows if e.path != real] + [entry]
 
 
 def _parsed(q: dict) -> dict:

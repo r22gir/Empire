@@ -18,6 +18,7 @@ def test_docs_location_typo_tolerant():
 
 
 def test_docs_location_reply_links(monkeypatch):
+    monkeypatch.setenv("EMPIRE_EDITION", "workroom")
     monkeypatch.setattr(q, "latest_final_docs", lambda limit=5: [
         {"id": "abc", "title": "Dahlia final estimate", "client": "Dahlia Design", "modified": "2026-10-02T20:00"}])
     web = q.docs_location_reply("web")

@@ -1,7 +1,7 @@
 """Structured piece specification for parametric furniture and casework mockups."""
 from __future__ import annotations
 
-from typing import List, Optional, Literal, Dict, Any
+from typing import List, Optional, Literal, Dict, Any, Tuple
 from pydantic import BaseModel, Field
 
 
@@ -136,15 +136,42 @@ class CushionSpec(BaseModel):
 
 
 class MaterialFinishSpec(BaseModel):
-    """Fabric, vinyl, leather, or wood finish details."""
+    """Fabric, vinyl, leather, or wood finish details.
+
+    Seat and back are separate inputs. Client sheets never print supplier/brand
+    names — use fabric_code / seat_fabric_code (V###-Color) or color + type.
+    """
     material_type: Literal["fabric", "vinyl", "leather", "wood", "mdf", "metal", "com"] = "vinyl"
-    name: str = "Apex (Spradling Softside) vinyl"
-    color_name: str = "cognac"
-    color_hex: str = "#9A5B2E"        # Primary back / upholstery color
-    seat_color_hex: str = "#A8693A"   # Seat cushion color
-    seam_color_hex: str = "#5E3518"   # Seam/accent color
+    name: str = "vinyl"
+    color_name: str = "cognac"           # Back color
+    seat_color_name: str = ""            # Seat color; empty = same as back (legacy)
+    color_hex: str = "#9A5B2E"           # Primary back / upholstery color
+    seat_color_hex: str = "#A8693A"      # Seat cushion color
+    seam_color_hex: str = "#5E3518"      # Seam/accent color
+    fabric_code: str = ""                # Back Empire code, e.g. V100-Cognac
+    seat_fabric_code: str = ""           # Seat Empire code, e.g. V101-Black
     wood_species: Optional[str] = None  # e.g. "Walnut", "White Oak", "Maple"
     wood_finish: Optional[str] = None   # e.g. "Natural matte", "Satin lacquer"
+
+    def back_color_label(self) -> str:
+        return (self.color_name or "").strip() or "TBC"
+
+    def seat_color_label(self) -> str:
+        return (self.seat_color_name or self.color_name or "").strip() or "TBC"
+
+    def back_client_label(self) -> str:
+        if (self.fabric_code or "").strip():
+            return self.fabric_code.strip()
+        color = self.back_color_label()
+        mat = (self.material_type or "").strip()
+        return f"{color} {mat}".strip() if color and mat and color.lower() != mat.lower() else (color or mat or "TBC")
+
+    def seat_client_label(self) -> str:
+        if (self.seat_fabric_code or "").strip():
+            return self.seat_fabric_code.strip()
+        color = self.seat_color_label()
+        mat = (self.material_type or "").strip()
+        return f"{color} {mat}".strip() if color and mat and color.lower() != mat.lower() else (color or mat or "TBC")
 
 
 class CarcassBoxSpec(BaseModel):
@@ -210,6 +237,8 @@ class PieceSpec(BaseModel):
     project_name: str = "Project"
     quote_number: str = "EST-2026-000"
     status: str = "NOT SENT"
+    revision: str = ""
+    drawn_date: Optional[str] = None  # YYYY-MM-DD; empty = today at render
     business_unit: Literal["workroom", "woodcraft"] = "workroom"
     billed_by: Optional[str] = None
     notes: List[str] = Field(default_factory=list)

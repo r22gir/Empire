@@ -720,9 +720,17 @@ def is_find_in_app_request(text: str) -> bool:
     t = (text or "").strip()
     if not t or len(t) > 160:
         return False
+    try:
+        from app.services.max.latest_job_file import is_show_link_request
+        if is_show_link_request(t):
+            return False
+    except Exception:
+        pass
     if not _FIND_CUE.search(t):
         return False
     if _DOC_WORDS.search(t):
+        return False
+    if re.search(r"(?i)\b(?:drawing|drawings|mockup|pdf|banquette)\b", t):
         return False
     if _NOT_APP_FEATURE.search(t) and not lookup_feature(t):
         return False

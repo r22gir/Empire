@@ -31,7 +31,12 @@ _PURE_CAPABILITY = re.compile(
 
 # "can you send / check / look up …" is an action, not a capability yes.
 _ACTION_TOOLS: tuple[tuple[re.Pattern[str], str], ...] = (
-    (re.compile(r"(?i)\b(?:send|email|whatsapp|m[aá]nda|env[ií]a)\b.+\b(?:drawing|dibujo|link|enlace|doc|file|3\s*-?\s*d)\b"
+    (re.compile(r"(?i)\b(?:whatsapp|whats\s+app|email|gmail)\b.+\b(?:drawing|dibujo|link|enlace|doc|file|3\s*-?\s*d)\b"
+                r"|\b(?:send|m[aá]nda|env[ií]a)\b.+\b(?:whatsapp|email|gmail)\b"),
+     "send_me_this_link"),
+    (re.compile(r"(?i)\b(?:studio|link|enlace)\b"),
+     "share_file"),
+    (re.compile(r"(?i)\b(?:send|email|whatsapp|m[aá]nda|env[ií]a)\b.+\b(?:drawing|dibujo|doc|file|3\s*-?\s*d)\b"
                 r"|\b(?:3\s*-?\s*d|drawing|dibujo).+\b(?:whatsapp|email|send)\b"),
      "send_me_this_link"),
     (re.compile(r"(?i)\b(?:check|see|show|list|look\s*up)\b.+\b(?:calendar|schedule|agenda|horario|calendario)\b"
@@ -61,8 +66,8 @@ VOICE_CAPABILITY_LIST: tuple[dict[str, object], ...] = (
             "mándame el enlace", "mandame el enlace", "envíame el link", "enviame el link",
         ),
         "can": True,
-        "en": "Yes. I can send a link or document only to your WhatsApp and empirebox2026@gmail.com. Not to clients, the brothers, or rafa22giraldo@gmail.com.",
-        "es": "Sí. Puedo mandar un enlace o documento solo a tu WhatsApp y a empirebox2026@gmail.com. Nunca a clientes, a los hermanos, ni a rafa22giraldo@gmail.com.",
+        "en": "Yes. If you say studio or link I return a studio share link. WhatsApp or email only when you ask to send that way, and only to your WhatsApp and empirebox2026@gmail.com.",
+        "es": "Sí. Si dices studio o link te doy un enlace de studio. WhatsApp o email solo si lo pides, y solo a tu WhatsApp y a empirebox2026@gmail.com.",
     },
     {
         "id": "find_files",
@@ -139,12 +144,14 @@ VOICE_CAPABILITY_LIST: tuple[dict[str, object], ...] = (
 
 _SUMMARY_EN = (
     "In voice I can check today's calendar and Organizer, look up quotes and files, "
-    "and send a link only to your WhatsApp and empirebox2026@gmail.com. "
+    "and return a studio share link when you say studio or link. "
+    "WhatsApp or email only when you ask to send that way, and only to your WhatsApp and empirebox2026@gmail.com. "
     "I cannot email clients or rafa22giraldo@gmail.com."
 )
 _SUMMARY_ES = (
     "En voz puedo revisar el calendario y el Organizer de hoy, buscar quotes y archivos, "
-    "y mandar un enlace solo a tu WhatsApp y a empirebox2026@gmail.com. "
+    "y darte un enlace de studio si dices studio o link. "
+    "WhatsApp o email solo si lo pides, y solo a tu WhatsApp y a empirebox2026@gmail.com. "
     "No puedo escribir a clientes ni a rafa22giraldo@gmail.com."
 )
 
