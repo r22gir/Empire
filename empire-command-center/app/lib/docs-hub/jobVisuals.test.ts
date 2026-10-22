@@ -5,6 +5,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { isSyntheticDocId, viewerHref } from './types.ts';
+import { srcAllowed } from './server.ts';
 import { docViewerTarget, invoicePdfSrc, normalizePhotoSrc, quotePdfSrc, visualsFromJob } from './jobVisuals.ts';
 
 test('sets job visuals from photos, drawings, and mockups JSON', () => {
@@ -32,6 +33,17 @@ test('opens quotes and invoices on the real PDF routes', () => {
   const t = docViewerTarget({ url: '/api/v1/drawings/files/plan.pdf', filename: 'plan.pdf' });
   assert.equal(t.src, '/api/v1/drawings/files/plan.pdf');
   assert.equal(t.kind, 'pdf');
+});
+
+test('job upload download urls stay viewer-ready', () => {
+  const t = docViewerTarget({
+    url: '/api/v1/files/download/jobs/job-midi/le-midi-plan.pdf',
+    filename: 'le-midi-plan.pdf',
+  });
+  assert.equal(t.src, '/api/v1/files/download/jobs/job-midi/le-midi-plan.pdf');
+  assert.equal(t.kind, 'pdf');
+  assert.equal(srcAllowed(t.src), true);
+  assert.equal(srcAllowed('/api/v1/files/download/jobs/job-midi/../secret.pdf'), false);
 });
 
 test('synthetic job ids open the file src, not the docs-hub index', () => {

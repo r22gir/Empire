@@ -598,6 +598,8 @@ export const SRC_ALLOW = [
   /^\/api\/v1\/photos\/[\w./-]+\.(png|jpe?g|webp|gif)$/i,
   /^\/api\/v1\/patterns\/saved\/[\w-]+\/pdf$/,
   /^\/api\/v1\/drawings\/files\/[\w.-]+$/,
+  /^\/api\/v1\/files\/download\/jobs\/[\w-]+\/[\w.-]+$/,
+  /^\/api\/v1\/jobs\/[\w-]+\/files\/[\w.-]+$/,
 ];
 export const srcAllowed = (src: string) => !src.includes('..') && SRC_ALLOW.some(re => re.test(src));
 
