@@ -72,6 +72,9 @@ def test_chat_tools_confirm_and_never_echo_secrets(monkeypatch, tmp_path):
     assert "/amp/whatsapp" in wa.result["setup_path"]
     assert wa.result["secrets_in_chat"] is False
     assert "juan-token" not in json.dumps(wa.result)
+    from app.services.edition_facts import list_facts
+    stored = {row["key"]: row["value"] for row in list_facts()}
+    assert stored.get("pendiente_whatsapp_famp") == "secure_screen"
 
     refused = tools["whatsapp_setup_guide"]({"text": "EAA1234567890supersecrettokenvalue"})
     assert refused.result["refused"] is True

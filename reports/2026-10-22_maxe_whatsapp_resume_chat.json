@@ -1,0 +1,50 @@
+{
+  "path": "POST /api/v1/max/chat  and  POST /api/v1/max/chat/stream",
+  "instance": "Max-e (EMPIRE_EDITION=amp)",
+  "facts_key": "pendiente_whatsapp_famp",
+  "saved_step_before": "webhook",
+  "request": {
+    "message": "hola",
+    "history": [],
+    "conversation_id": "new-session-capture",
+    "channel": "dashboard",
+    "usage_source": "web"
+  },
+  "chat_status": 200,
+  "chat": {
+    "model_used": "whatsapp-setup-guide",
+    "response": "En WhatsApp → Configuration pega el webhook de ESTA instancia y pulsa Verify and save. Yo te digo la URL. El verify token lo verás en la pantalla segura, no aquí. ¿Listo? Webhook: https://amp.empirebox.store/api/v1/whatsapp/webhook. Pantalla segura: /amp/whatsapp. Nunca pegues el token aquí.",
+    "tool_results": [
+      {
+        "tool": "whatsapp_setup_guide",
+        "success": true,
+        "result": {
+          "flow": "whatsapp",
+          "step": "webhook",
+          "question": "En WhatsApp → Configuration pega el webhook de ESTA instancia y pulsa Verify and save. Yo te digo la URL. El verify token lo verás en la pantalla segura, no aquí. ¿Listo?",
+          "next_step": "secure_screen",
+          "setup_path": "/amp/whatsapp",
+          "secrets_in_chat": false,
+          "juan_number_not_rafael": true,
+          "done": false,
+          "webhook_url": "https://amp.empirebox.store/api/v1/whatsapp/webhook",
+          "channel_status": "disabled",
+          "configured": false,
+          "message": "En WhatsApp → Configuration pega el webhook de ESTA instancia y pulsa Verify and save. Yo te digo la URL. El verify token lo verás en la pantalla segura, no aquí. ¿Listo? Webhook: https://amp.empirebox.store/api/v1/whatsapp/webhook. Pantalla segura: /amp/whatsapp. Nunca pegues el token aquí."
+        }
+      }
+    ]
+  },
+  "stream_model_used": "whatsapp-setup-guide",
+  "stream_response": "En WhatsApp → Configuration pega el webhook de ESTA instancia y pulsa Verify and save. Yo te digo la URL. El verify token lo verás en la pantalla segura, no aquí. ¿Listo? Webhook: https://amp.empirebox.store/api/v1/whatsapp/webhook. Pantalla segura: /amp/whatsapp. Nunca pegues el token aquí.",
+  "facts_after": [
+    {
+      "key": "pendiente_whatsapp_famp",
+      "value": "webhook",
+      "text": "WhatsApp guía pendiente en webhook"
+    }
+  ],
+  "data_dir": "/tmp/maxe-wa-resume-9k3bes9d",
+  "live_send": false,
+  "real_contacts": false
+}

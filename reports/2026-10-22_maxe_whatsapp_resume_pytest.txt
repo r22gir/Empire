@@ -1,0 +1,48 @@
+============================= test session starts ==============================
+platform linux -- Python 3.12.3, pytest-9.1.1, pluggy-1.7.0 -- /usr/bin/python3
+cachedir: .pytest_cache
+live-data firewall: temp root /tmp/empire_test_pid3330_2y__lwnf
+live-data firewall: env redirected: CHAT_BACKUP_DIR, COST_TRACKER_DB, EMPIRE_BRAIN_DIR, EMPIRE_DATA_DIR, EMPIRE_MAX_JOURNAL_ARCHIVE, EMPIRE_MAX_JOURNAL_DB, EMPIRE_TEST_GUARD_LOG, MAX_IMPROVE_SPEC_DIR, MAX_MEMORY_PATH, OPENCLAW_DB_PATH, VOICE_DOC_SESSIONS_PATH
+rootdir: /workspace
+plugins: asyncio-1.4.0, anyio-4.15.1
+asyncio: mode=Mode.STRICT, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collecting ... collected 9 items
+
+backend/tests/test_maxe_whatsapp_resume.py::test_new_session_first_reply_is_saved_step_and_persists PASSED [ 11%]
+backend/tests/test_maxe_whatsapp_resume.py::test_stream_new_session_same_spanish_step PASSED [ 22%]
+backend/tests/test_maxe_whatsapp_resume.py::test_frontend_style_first_turn_history_still_resumes PASSED [ 33%]
+backend/tests/test_maxe_whatsapp_resume.py::test_enabled_whatsapp_does_not_hijack_greeting PASSED [ 44%]
+backend/tests/test_maxe_whatsapp_resume.py::test_owner_greeting_is_the_step_question PASSED [ 55%]
+backend/tests/test_maxe_whatsapp_resume.py::test_tool_persists_step_and_refuses_keys PASSED [ 66%]
+backend/tests/test_maxe_whatsapp_resume.py::test_use_chat_opens_new_session_on_edition_guide PASSED [ 77%]
+backend/tests/test_maxe_guides.py::test_chat_tools_confirm_and_never_echo_secrets PASSED [ 88%]
+backend/tests/test_maxe_guides.py::test_juan_whatsapp_never_sends_rafael_help_alert PASSED [100%][live-data firewall] module constants redirected to temp: 11
+
+
+=============================== warnings summary ===============================
+backend/tests/test_maxe_whatsapp_resume.py::test_new_session_first_reply_is_saved_step_and_persists
+  /workspace/backend/app/schemas/license.py:13: PydanticDeprecatedSince20: Support for class-based `config` is deprecated, use ConfigDict instead. Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.14/migration/
+    class LicenseResponse(LicenseBase):
+
+backend/tests/test_maxe_whatsapp_resume.py::test_new_session_first_reply_is_saved_step_and_persists
+  /workspace/backend/app/schemas/shipment.py:42: PydanticDeprecatedSince20: Support for class-based `config` is deprecated, use ConfigDict instead. Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.14/migration/
+    class ShipmentLabel(BaseModel):
+
+backend/tests/test_maxe_whatsapp_resume.py::test_new_session_first_reply_is_saved_step_and_persists
+  /workspace/backend/app/schemas/listing.py:44: PydanticDeprecatedSince20: Support for class-based `config` is deprecated, use ConfigDict instead. Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.14/migration/
+    class ListingResponse(ListingBase):
+
+backend/tests/test_maxe_whatsapp_resume.py::test_new_session_first_reply_is_saved_step_and_persists
+  /workspace/backend/app/schemas/message.py:10: PydanticDeprecatedSince20: Support for class-based `config` is deprecated, use ConfigDict instead. Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.14/migration/
+    class MessageResponse(BaseModel):
+
+backend/tests/test_maxe_whatsapp_resume.py::test_new_session_first_reply_is_saved_step_and_persists
+  /workspace/backend/app/core/config.py:5: PydanticDeprecatedSince20: Support for class-based `config` is deprecated, use ConfigDict instead. Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.14/migration/
+    class Settings(BaseSettings):
+
+backend/tests/test_maxe_whatsapp_resume.py::test_new_session_first_reply_is_saved_step_and_persists
+  /home/ubuntu/.local/lib/python3.12/site-packages/passlib/utils/__init__.py:854: DeprecationWarning: 'crypt' is deprecated and slated for removal in Python 3.13
+    from crypt import crypt as _crypt
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+======================== 9 passed, 6 warnings in 1.28s =========================

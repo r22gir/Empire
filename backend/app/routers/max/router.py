@@ -2359,6 +2359,39 @@ def _provider_identity_response(request: ChatRequest) -> ChatResponse:
     )
 
 
+def _maybe_resume_whatsapp_guide(request: ChatRequest) -> ChatResponse | None:
+    """Family greeting / first turn of a new Max-e chat: resume pending WhatsApp setup."""
+    if request.desk:
+        return None
+    try:
+        from app.edition import is_amp
+        from app.services.maxe_guides import maybe_resume_whatsapp_guide
+
+        if not is_amp():
+            return None
+        guide = maybe_resume_whatsapp_guide(
+            request.message or "",
+            list(request.history or []),
+            persist=True,
+        )
+    except Exception as exc:
+        logger.debug("whatsapp setup resume skipped: %s", exc)
+        return None
+    if not guide:
+        return None
+    return ChatResponse(
+        response=guide.get("message") or guide.get("question") or "",
+        model_used="whatsapp-setup-guide",
+        fallback_used=False,
+        tool_results=[{
+            "tool": "whatsapp_setup_guide",
+            "success": True,
+            "result": guide,
+        }],
+        metadata=_response_metadata(request.channel, skill_used="whatsapp_setup_guide"),
+    )
+
+
 def _maybe_handle_direct_route_request(request: ChatRequest) -> ChatResponse | None:
     # Family editions: "pide ayuda a Max" / "ask Max for help" becomes a ticket.
     try:
@@ -2401,6 +2434,10 @@ def _maybe_handle_direct_route_request(request: ChatRequest) -> ChatResponse | N
         )
     except Exception as exc:
         logger.debug("family help intent skipped: %s", exc)
+
+    wa_resume = _maybe_resume_whatsapp_guide(request)
+    if wa_resume is not None:
+        return wa_resume
 
     # 2026-10-04: greetings, "where are my docs" and existing-quote status answer directly
     # (no tools, no status dumps, no internal-doc citations). Image messages go to the model.

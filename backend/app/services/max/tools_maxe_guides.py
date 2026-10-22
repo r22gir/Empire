@@ -102,8 +102,7 @@ def register_tools(tool, ToolResult):
         """Walk Juan through his own Meta/WhatsApp. Never collect secrets."""
         try:
             from app.edition import is_amp
-            from app.services.maxe_guides import looks_like_secret, secret_refusal, whatsapp_guide_next
-            from app.services.whatsapp_cloud import channel_status, webhook_public_url
+            from app.services.maxe_guides import looks_like_secret, run_whatsapp_setup_guide, secret_refusal
 
             if not is_amp():
                 return ToolResult(tool="whatsapp_setup_guide", success=False, error="Solo en Max-e")
@@ -116,15 +115,7 @@ def register_tools(tool, ToolResult):
                     result={"refused": True, "message": secret_refusal(), "setup_path": "/amp/whatsapp"},
                 )
             step = str(args.get("step") or "")
-            guide = whatsapp_guide_next(step)
-            status = channel_status()
-            guide["webhook_url"] = webhook_public_url()
-            guide["channel_status"] = status.get("status")
-            guide["configured"] = bool(status.get("enabled"))
-            guide["message"] = (
-                f"{guide['question']} Webhook: {guide['webhook_url']}. "
-                "Pantalla segura: /amp/whatsapp. Nunca pegues el token aquí."
-            )
+            guide = run_whatsapp_setup_guide(step, persist=True)
             return ToolResult(tool="whatsapp_setup_guide", success=True, result=guide)
         except Exception as exc:
             return ToolResult(tool="whatsapp_setup_guide", success=False, error=str(exc)[:300])
