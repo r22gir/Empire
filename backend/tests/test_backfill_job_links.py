@@ -105,6 +105,49 @@ def test_write_csv_and_apply_only_job_and_customer(tmp_path):
     conn.close()
 
 
+def test_shared_client_est_292_293_never_auto(tmp_path):
+    """Known bad case: EST-2026-292/293 auto-linked to Le Midi via f230cd42ff61aea9."""
+    conn = sqlite3.connect(tmp_path / "willard.db")
+    conn.executescript(
+        """
+        CREATE TABLE jobs (
+            id TEXT PRIMARY KEY, title TEXT, customer_id TEXT, quote_id TEXT, job_number TEXT,
+            client_name TEXT, created_at TEXT, metadata TEXT
+        );
+        CREATE TABLE quotes_v2 (
+            id TEXT PRIMARY KEY, quote_number TEXT, job_id TEXT, customer_id TEXT,
+            customer_name TEXT, project_name TEXT, created_at TEXT
+        );
+        CREATE TABLE job_clients (
+            job_id TEXT NOT NULL, customer_id TEXT NOT NULL, role TEXT NOT NULL DEFAULT 'primary',
+            PRIMARY KEY (job_id, customer_id)
+        );
+        """
+    )
+    shared = "f230cd42ff61aea9"
+    conn.execute("INSERT INTO jobs VALUES ('job-willard','Willard Est 838',?,'q-willard','JOB-W',\"Maggie O'Neill\",'2026-01-10','{}')", (shared,))
+    conn.execute("INSERT INTO jobs VALUES ('job-midi','Le Midi banquettes',?,NULL,'JOB-M',\"Maggie O'Neill\",'2026-03-01','{}')", (shared,))
+    conn.execute("INSERT INTO job_clients VALUES ('job-willard', ?, 'primary')", (shared,))
+    conn.execute("INSERT INTO job_clients VALUES ('job-midi', ?, 'primary')", (shared,))
+    conn.execute("INSERT INTO quotes_v2 VALUES ('q-willard','EST-2026-0100',NULL,?,'Maggie','Willard','2026-01-11')", (shared,))
+    conn.execute("INSERT INTO quotes_v2 VALUES ('q-292','EST-2026-292',NULL,?,'Maggie','Willard Est 838 addendum','2026-01-20')", (shared,))
+    conn.execute("INSERT INTO quotes_v2 VALUES ('q-293','EST-2026-293',NULL,?,'Maggie','Willard Est 838 addendum 2','2026-01-21')", (shared,))
+    conn.commit()
+    rows = propose_links(conn)
+    by_ref = {r.record_ref: r for r in rows}
+    assert by_ref["EST-2026-0100"].confidence == "auto"
+    assert by_ref["EST-2026-0100"].match_by == "quote_id"
+    assert by_ref["EST-2026-292"].confidence == "review"
+    assert by_ref["EST-2026-293"].confidence == "review"
+    assert by_ref["EST-2026-292"].match_by != "quote_id"
+    counts = apply_links(conn, rows, only_auto=True)
+    conn.commit()
+    assert conn.execute("SELECT job_id FROM quotes_v2 WHERE id='q-292'").fetchone()[0] in (None, "")
+    assert conn.execute("SELECT job_id FROM quotes_v2 WHERE id='q-293'").fetchone()[0] in (None, "")
+    assert counts["quotes"] >= 1
+    conn.close()
+
+
 def test_apply_refuses_ci_flag(monkeypatch):
     monkeypatch.setenv("CI", "true")
     assert in_ci() is True

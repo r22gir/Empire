@@ -180,8 +180,29 @@ export function jobDisplayName(job: JobLike): string {
   return String(job.title || job.job_number || job.name || `JOB-${job.id || ''}`).trim();
 }
 
+export function jobClientNames(job: JobLike): string[] {
+  const names: string[] = [];
+  const seen = new Set<string>();
+  const push = (raw?: string | null) => {
+    const name = String(raw || '').trim();
+    if (!name) return;
+    const key = name.toLowerCase();
+    if (seen.has(key)) return;
+    seen.add(key);
+    names.push(name);
+  };
+  const clients = Array.isArray(job?.clients) ? job.clients : [];
+  clients.forEach((c: any) => push(c?.name || c?.customer_name));
+  if (!names.length) {
+    push(job?.client_name);
+    push(job?.customer_name);
+  }
+  return names;
+}
+
 export function jobClientName(job: JobLike): string {
-  return String(job.client_name || job.customer_name || 'Client').trim();
+  const names = jobClientNames(job);
+  return names.length ? names.join(' · ') : 'Client';
 }
 
 export function toHomeJobCard(job: JobLike, hrefFor: (id: string) => string): HomeJobCard | null {
@@ -257,12 +278,12 @@ export function movedToast(jobName: string, fromStage: string, toStage: string):
   return `Moved ${jobName} from ${stageLabel(fromStage)} to ${stageLabel(toStage)}`;
 }
 
-export function jobContacts(job: JobLike, customer?: JobLike | null): { name: string; role?: string; phone?: string; email?: string; address?: string }[] {
-  const rows: { name: string; role?: string; phone?: string; email?: string; address?: string }[] = [];
+export function jobContacts(job: JobLike, customer?: JobLike | null, extraClients?: JobLike[] | null): { name: string; role?: string; phone?: string; email?: string; address?: string; customer_id?: string }[] {
+  const rows: { name: string; role?: string; phone?: string; email?: string; address?: string; customer_id?: string }[] = [];
   const seen = new Set<string>();
-  const push = (c: { name?: string; role?: string; phone?: string; email?: string; address?: string }) => {
+  const push = (c: { name?: string; role?: string; phone?: string; email?: string; address?: string; customer_id?: string }) => {
     const name = String(c.name || '').trim();
-    const key = `${name}|${c.email || ''}|${c.phone || ''}`;
+    const key = `${c.customer_id || ''}|${name}|${c.email || ''}|${c.phone || ''}`;
     if (!name && !c.email && !c.phone) return;
     if (seen.has(key)) return;
     seen.add(key);
@@ -272,15 +293,32 @@ export function jobContacts(job: JobLike, customer?: JobLike | null): { name: st
       phone: c.phone,
       email: c.email,
       address: c.address,
+      customer_id: c.customer_id,
     });
   };
-  push({
-    name: job.client_name || job.customer_name || customer?.name,
-    role: 'Client',
-    phone: job.client_phone || customer?.phone,
-    email: job.client_email || customer?.email,
-    address: job.client_address || customer?.address,
-  });
+  const linked = [
+    ...(Array.isArray(extraClients) ? extraClients : []),
+    ...(Array.isArray(job.clients) ? job.clients : []),
+  ];
+  if (linked.length) {
+    linked.forEach((c: any) => push({
+      name: c.name || c.customer_name,
+      role: c.role || 'contact',
+      phone: c.phone,
+      email: c.email,
+      address: c.address,
+      customer_id: String(c.customer_id || c.id || ''),
+    }));
+  } else {
+    push({
+      name: job.client_name || job.customer_name || customer?.name,
+      role: 'Client',
+      phone: job.client_phone || customer?.phone,
+      email: job.client_email || customer?.email,
+      address: job.client_address || customer?.address,
+      customer_id: String(job.customer_id || customer?.id || ''),
+    });
+  }
   const extra = Array.isArray(job.contacts) ? job.contacts : [];
   extra.forEach((c: any) => push({
     name: c.name || c.full_name,

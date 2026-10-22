@@ -7,6 +7,7 @@ import test from 'node:test';
 import {
   activeJobCards,
   canonicalizeStage,
+  jobClientName,
   jobContacts,
   jobNextDate,
   jobTotal,
@@ -143,4 +144,24 @@ test('contacts reuse the job + customer record and skip empty rows', () => {
   assert.equal(contacts[0].role, 'Client');
   assert.equal(contacts[1].role, 'PM');
   assert.doesNotMatch(JSON.stringify(contacts), /Nelma|McLean/);
+});
+
+test('job cards and contacts list every linked client without splitting records', () => {
+  const job = {
+    id: 'job-midi',
+    title: 'Le Midi banquettes',
+    client_name: "Maggie O'Neill",
+    clients: [
+      { customer_id: 'cust-maggie', name: "Maggie O'Neill", role: 'primary' },
+      { customer_id: 'cust-lauren', name: 'Lauren Bassett', role: 'designer' },
+    ],
+  };
+  assert.equal(jobClientName(job), "Maggie O'Neill · Lauren Bassett");
+  const card = toHomeJobCard({ ...job, pipeline_stage: 'in_production' }, hrefFor);
+  assert.equal(card?.client, "Maggie O'Neill · Lauren Bassett");
+  const contacts = jobContacts(job);
+  assert.equal(contacts.length, 2);
+  assert.equal(contacts[0].name, "Maggie O'Neill");
+  assert.equal(contacts[1].name, 'Lauren Bassett');
+  assert.equal(contacts[1].role, 'designer');
 });

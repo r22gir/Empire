@@ -88,6 +88,25 @@ async def upload_from_path(req: PathRequest):
     log_access("upload", source.name, "founder", f"from={req.path}")
     return {"status": "success", "filename": save_path.name, "category": category, "size": save_path.stat().st_size}
 
+@router.get("/download/jobs/{job_id}/{filename}")
+async def download_job_upload(job_id: str, filename: str):
+    """Serve a job upload from ~/empire-data/uploads/jobs/<id>/. Path-traversal protected."""
+    from app.services.job_uploads import resolve_job_upload
+    path = resolve_job_upload(job_id, filename)
+    if path is None:
+        raise HTTPException(404, "File not found")
+    log_access("download_job", path.name, "founder", f"job={job_id}")
+    risky = path.suffix.lower() in (".html", ".htm", ".xhtml", ".svg", ".xml", ".js", ".mjs")
+    resp = FileResponse(
+        path,
+        filename=path.name,
+        media_type="application/octet-stream" if risky else None,
+        content_disposition_type="attachment" if risky else "inline",
+    )
+    resp.headers["X-Content-Type-Options"] = "nosniff"
+    return resp
+
+
 @router.get("/found")
 async def view_found_file(t: str, download: int = 0):
     """Serve a file Max found for Rafael (share_file studio link). Read-only.
@@ -153,7 +172,7 @@ async def list_files(category: Optional[str] = None):
 @router.get("/{category}/{filename}")
 async def view_file(category: str, filename: str):
     # Prevent matching other named routes (list, logs, browse, upload, etc.)
-    if category in ("list", "logs", "browse", "upload", "upload-from-path", "delete"):
+    if category in ("list", "logs", "browse", "upload", "upload-from-path", "delete", "download", "found"):
         raise HTTPException(404, "File not found")
     safe = Path(filename).name
     # Chat previews historically always used /files/view/images/<name>, even for

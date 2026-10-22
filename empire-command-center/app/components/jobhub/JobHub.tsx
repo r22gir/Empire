@@ -21,12 +21,14 @@ import PhaseToast from '../../studio/PhaseToast';
 import { formatInches } from '../../lib/formatInches';
 import {
   businessLabel,
+  jobClientName,
   jobContacts,
   movedToast,
   phaseHistoryFromEvents,
   stageLabel,
   stagePatchRequest,
 } from '../../studio/jobStages';
+import { autoRelatedInvoices, autoRelatedQuotes, reviewRelatedInvoices, reviewRelatedQuotes } from '../../lib/docs-hub/jobRelatedDisplay';
 import './jobhub.css';
 
 type Any = Record<string, any>;
@@ -89,16 +91,15 @@ function useHub(target: { job: string | null; quote: string | null }, reload: nu
         if (!job && quote) { const js: Any[] = (await getJson(`${API}/jobs?limit=500`))?.jobs ?? []; job = js.find(j => j.quote_id === quote!.id) ?? null; }
       }
       const cid = job?.customer_id || quote?.customer_id || null;
-      const [byJob, byCust, timeline, cust, org] = await Promise.all([
+      const [byJob, timeline, cust, org] = await Promise.all([
         job ? getJson(`${API}/invoices?job_id=${encodeURIComponent(job.id)}&limit=100`) : null,
-        cid ? getJson(`${API}/invoices?customer_id=${encodeURIComponent(cid)}&limit=100`) : null,
         job ? getJson(`${API}/jobs/${encodeURIComponent(job.id)}/timeline`) : null,
         cid ? getJson(`${API}/crm/customers/${encodeURIComponent(cid)}`) : null,
         job ? getJson(`${API}/organizer/jobs/${encodeURIComponent(job.id)}/todos`) : null,
       ]);
       const inv = new Map<string, Any>();
-      [...(byJob?.invoices ?? []), ...(byCust?.invoices ?? []), ...(job?.invoices ?? [])].forEach((i: Any) => inv.set(i.id, i));
-      const quotes = allQuotes.filter(q => (cid && q.customer_id === cid) || (quote && q.id === quote.id) || (job && q.job_id === job.id))
+      [...(byJob?.invoices ?? []), ...(job?.invoices ?? [])].forEach((i: Any) => inv.set(i.id, i));
+      const quotes = allQuotes.filter(q => (quote && q.id === quote.id) || (job && q.job_id === job.id) || (job && q.id && q.id === job.quote_id))
         .sort((a, b) => String(b.created_at || '').localeCompare(String(a.created_at || '')));
       const events = timeline?.events ?? job?.events ?? [];
       const todos = org?.todos ?? org?.items ?? [];
@@ -145,7 +146,7 @@ function JobPicker({ onPick }: { onPick: (t: { job?: string; quote?: string }) =
           {rows.map(j => (
             <a key={j.id} href={jobHubHref({ job: j.id })} className="v3-card jh-row" onClick={e => { e.preventDefault(); onPick({ job: j.id }); }}>
               <Briefcase size={15} />
-              <span className="b"><b>{j.client_name || j.customer_name || j.title || 'Job'}</b><span>{[j.job_number, label(j.business_unit), j.title].filter(Boolean).join(' · ')}</span></span>
+              <span className="b"><b>{jobClientName(j)}</b><span>{[j.job_number, label(j.business_unit), j.title].filter(Boolean).join(' · ')}</span></span>
               <span className={`v3-pill ${pillTone(j.status)}`}>{label(j.pipeline_stage || j.status)}</span>
               <ArrowRight size={14} />
             </a>
@@ -183,6 +184,10 @@ export default function JobHub({ initial }: { initial?: { job?: string | null; q
   const jobKey = d?.job?.job_number || d?.job?.id || target.job || null;
   const docs = useQuoteDocs(quoteId, jobKey);
   const [related, setRelated] = useState<Any | null>(null);
+  const [addOpen, setAddOpen] = useState(false);
+  const [addQ, setAddQ] = useState('');
+  const [addHits, setAddHits] = useState<Any[]>([]);
+  const [addBusy, setAddBusy] = useState(false);
   useEffect(() => {
     const id = d?.job?.id || target.job;
     if (!id) { setRelated(null); return; }
@@ -190,6 +195,17 @@ export default function JobHub({ initial }: { initial?: { job?: string | null; q
     getJson(`${API}/jobs/${encodeURIComponent(id)}/related`).then((r) => { if (!dead) setRelated(r); });
     return () => { dead = true; };
   }, [d?.job?.id, target.job, reload]);
+  useEffect(() => {
+    if (!addOpen) { setAddHits([]); return; }
+    const q = addQ.trim();
+    if (q.length < 2) { setAddHits([]); return; }
+    let dead = false;
+    const t = setTimeout(async () => {
+      const r = await getJson(`${API}/crm/customers?search=${encodeURIComponent(q)}&limit=12`);
+      if (!dead) setAddHits(r?.customers ?? []);
+    }, 200);
+    return () => { dead = true; clearTimeout(t); };
+  }, [addOpen, addQ]);
   const visualGroups = visualsToGroups(visualsFromJob(d?.job));
   const groups = [...(docs.data?.groups ?? [])];
   const seenKeys = new Set(groups.map(g => g.key));
@@ -208,8 +224,10 @@ export default function JobHub({ initial }: { initial?: { job?: string | null; q
   const drawings = groups.filter(g => g.type === 'drawing');
   const photos = groups.filter(g => g.type === 'photo').flatMap(g => [g.final, ...g.older]);
   const otherDocs = groups.filter(g => g.type !== 'drawing' && g.type !== 'photo');
-  const quotes = (d?.quotes?.length ? d.quotes : related?.quotes) || [];
-  const invoices = (d?.invoices?.length ? d.invoices : related?.invoices) || [];
+  const quotes = related ? autoRelatedQuotes(related) : (d?.quotes || []);
+  const invoices = related ? autoRelatedInvoices(related) : (d?.invoices || []);
+  const reviewQuotes = reviewRelatedQuotes(related);
+  const reviewInvoices = reviewRelatedInvoices(related);
 
   const timeline = useMemo(() => {
     if (!d) return [];
@@ -260,7 +278,28 @@ export default function JobHub({ initial }: { initial?: { job?: string | null; q
   const phone = quote?.customer_phone || job?.client_phone || d?.customer?.phone || '';
   const email = quote?.customer_email || job?.client_email || d?.customer?.email || '';
   const tel = phone.replace(/[^\d+]/g, ''); const wa = (() => { const x = phone.replace(/\D/g, ''); return x.length === 10 ? `1${x}` : x; })();
-  const contacts = job || d?.customer ? jobContacts(job || {}, d?.customer) : [];
+  const contacts = job || d?.customer ? jobContacts(job || {}, d?.customer, related?.clients) : [];
+  const addClient = async (customerId: string, role = 'contact') => {
+    const jobId = job?.id || target.job;
+    if (!jobId || addBusy) return;
+    setAddBusy(true);
+    try {
+      const r = await fetch(`${API}/jobs/${encodeURIComponent(jobId)}/clients`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ customer_id: customerId, role }),
+      });
+      if (!r.ok) throw new Error('add failed');
+      setAddQ('');
+      setAddOpen(false);
+      setReload((n) => n + 1);
+    } catch {
+      setToast('Could not add that client. Try again.');
+      setTimeout(() => setToast(null), 4000);
+    } finally {
+      setAddBusy(false);
+    }
+  };
   const calendarRows = [
     ...(d?.calendar || []).map((c: Any) => ({ at: c.start_time || c.due_at || c.date, title: c.title || label(c.kind || c.type), detail: c.location_address || c.notes })),
     ...(job
@@ -280,7 +319,7 @@ export default function JobHub({ initial }: { initial?: { job?: string | null; q
       <JobHeader quote={quoteId} job={quoteId ? null : (job?.id || target.job)} className="jh-head" hubLink={false} />
       <div className="jh-top">
         <button type="button" className="v3-btn sm" onClick={() => pick({})}><X size={12} /> All jobs</button>
-        <h1 className="v3-disp">{job?.client_name || quote?.project_name || quote?.customer_name || 'Job'}</h1>
+        <h1 className="v3-disp" data-testid="jh-clients">{job ? jobClientName({ ...job, clients: job.clients?.length ? job.clients : related?.clients }) : (quote?.project_name || quote?.customer_name || 'Job')}</h1>
         <span className="v3-kick">{[job?.job_number, quote?.quote_number, businessLabel(job?.business_unit || quote?.business_unit)].filter(Boolean).join(' · ')}</span>
         {job && <span className={`v3-pill ${pillTone(job.status)}`} data-testid="job-current-phase">{stageLabel(job.canonical_stage || job.pipeline_stage || job.status)}</span>}
         <a className="v3-btn sm" href="/?screen=jobs" onClick={(e) => { e.preventDefault(); window.location.assign('/?screen=jobs'); }}><LayoutGrid size={12} /> Board</a>
@@ -305,11 +344,28 @@ export default function JobHub({ initial }: { initial?: { job?: string | null; q
             <div className="jh-col">
               <Sec id="client" icon={<Users size={15} />} title="Client & contacts" count={contacts.length}>
                 {contacts.length === 0 ? <div className="jh-mut">No client on this job yet.</div> : contacts.map((c, i) => (
-                  <div key={i} className="jh-note">
+                  <div key={c.customer_id || i} className="jh-note" data-testid={`jh-client-${c.customer_id || i}`}>
                     <span className="v3-kick">{c.role || 'Contact'}</span>
                     <p><b>{c.name}</b>{c.phone ? ` · ${c.phone}` : ''}{c.email ? ` · ${c.email}` : ''}{c.address ? `\n${c.address}` : ''}</p>
                   </div>
                 ))}
+                {job?.id && (
+                  <div className="jh-add-client">
+                    <button type="button" className="v3-btn sm" data-testid="jh-add-client" onClick={() => setAddOpen((v) => !v)}>Add client</button>
+                    {addOpen && (
+                      <div className="jh-add-pop">
+                        <input className="v3-input" value={addQ} onChange={(e) => setAddQ(e.target.value)} placeholder="Search existing customers" aria-label="Search existing customers" data-testid="jh-add-client-search" autoFocus />
+                        {addHits.length === 0 && addQ.trim().length >= 2 ? <div className="jh-mut">No matching customers.</div> : null}
+                        {addHits.map((c: Any) => (
+                          <button key={c.id} type="button" className="jh-add-hit" data-testid={`jh-add-hit-${c.id}`} disabled={addBusy} onClick={() => addClient(c.id, contacts.length ? 'contact' : 'primary')}>
+                            <b>{c.name}</b>
+                            <span>{[c.email, c.phone].filter(Boolean).join(' · ')}</span>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
                 {d.items.length > 0 && (
                   <div style={{ marginTop: 10 }}>
                     <span className="v3-kick">Items</span>
@@ -340,6 +396,24 @@ export default function JobHub({ initial }: { initial?: { job?: string | null; q
                   </tbody></table>
                 )}
               </Sec>
+              {(reviewQuotes.length > 0 || reviewInvoices.length > 0) && (
+                <Sec id="review" icon={<FileText size={15} />} title="Possibly related (review)" count={reviewQuotes.length + reviewInvoices.length}>
+                  <div className="jh-mut">Same client is on more than one job. Confirm before treating these as this job&apos;s documents.</div>
+                  {reviewQuotes.map((q: Any) => (
+                    <div key={q.id} className="jh-tl" data-testid={`jh-review-quote-${q.quote_number || q.id}`}>
+                      <span className="v3-mono">Quote</span>
+                      <b>{q.quote_number || q.id}</b>
+                      <span>{q.project_name || q.customer_name || 'Review'}</span>
+                    </div>
+                  ))}
+                  {reviewInvoices.map((i: Any) => (
+                    <div key={i.id} className="jh-tl" data-testid={`jh-review-invoice-${i.invoice_number || i.id}`}>
+                      <span className="v3-mono">Invoice</span>
+                      <b>{i.invoice_number || i.id}</b>
+                    </div>
+                  ))}
+                </Sec>
+              )}
               <Sec id="invoices" icon={<Receipt size={15} />} title="Invoices" count={invoices.length}>
                 {invoices.length === 0 ? <div className="jh-mut">No invoices yet.</div> : (
                   <table className="v3-table"><thead><tr><th>Invoice</th><th>Status</th><th className="num">Total</th><th className="num">Balance</th></tr></thead><tbody>
