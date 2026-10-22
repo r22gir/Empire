@@ -693,6 +693,20 @@ def _draw_schedule_page(c: canvas.Canvas, job: BanquetteJob, page: int, total: i
     extra = job.allowance_in
     extra_txt = inch_text(extra) if extra is not None else "TBC"
     foam_txt = inch_text(job.foam_thickness_in) if job.foam_thickness_in else "TBC"
+    c.setFont("Helvetica-Bold", 8.5)
+    c.setFillColor(INK)
+    if extra is not None and job.foam_thickness_in:
+        twice = inch_text(2 * extra)
+        formula = (
+            f"FOAM THICKNESS {foam_txt}.  ALLOWANCE {extra_txt} each side.  "
+            f"FABRIC = wood + 2 × {extra_txt} = wood + {twice}."
+        )
+    else:
+        formula = (
+            f"FOAM THICKNESS {foam_txt}.  ALLOWANCE {extra_txt} each side.  "
+            f"FABRIC = wood + 2 × allowance (needs foam / allowance)."
+        )
+    c.drawString(36, PH - 76, formula)
     cols = [
         ("Part", 92),
         ("Run", 90),
@@ -703,7 +717,7 @@ def _draw_schedule_page(c: canvas.Canvas, job: BanquetteJob, page: int, total: i
         (f"FABRIC cut W x L (wood + 2 x {extra_txt})", 200),
         ("Notes", PW - 72 - 875),
     ]
-    y = PH - 90
+    y = PH - 98
     x = 36
     c.setFillColor(BR)
     c.rect(36, y - 4, PW - 72, 15, fill=1, stroke=0)

@@ -26,6 +26,11 @@ _OV = 1.0
 _CH = float(Fraction(107, 4))       # 26 3/4
 _FOAM = 2.0
 _CH_W = 12.0
+# Current Marley's spec (Rafael): Black seats = V001-Raven, Cognac backs = V003-Cognac.
+MARLEYS_SEAT_CODE = "V001-Raven"
+MARLEYS_SEAT_COLOR = "Black"
+MARLEYS_BACK_CODE = "V003-Cognac"
+MARLEYS_BACK_COLOR = "Cognac"
 _UM = float(Fraction(999, 4))       # 249 3/4
 _UL = float(Fraction(151, 4))       # 37 3/4
 _UR = float(Fraction(97, 2))        # 48 1/2
@@ -157,19 +162,18 @@ def marleys_standard_job(
     drawn_date: str = "",
     extra_conflicts: list[str] | None = None,
 ) -> BanquetteJob:
-    """Full U+L job matching the 2026-10-21 reference sheet content."""
+    """Full U+L job. Default seat is V001-Raven (Black), backs V003-Cognac."""
     seat = seat_fabric or FabricFace(
-        code="V008-Bittersweet",
-        color="Bittersweet",
-        label="V008-Bittersweet",
-        hex="#3b2a20",
-        plan_hex="#3b2a20",
-        notes="dark espresso",
+        code=MARLEYS_SEAT_CODE,
+        color=MARLEYS_SEAT_COLOR,
+        label=MARLEYS_SEAT_CODE,
+        hex="#1C1C1C",
+        plan_hex="#1C1C1C",
     )
     back = back_fabric or FabricFace(
-        code="V003-Cognac",
-        color="Cognac",
-        label="V003-Cognac",
+        code=MARLEYS_BACK_CODE,
+        color=MARLEYS_BACK_COLOR,
+        label=MARLEYS_BACK_CODE,
         hex="#9A5B2E",
         plan_hex="#c98b55",
     )
@@ -186,7 +190,7 @@ def marleys_standard_job(
         allowance_label='2" foam — wrap both faces + 1" sew (confirm with Rafael)',
         conflicts=list(extra_conflicts or []) + [
             "EST-2026-299 rev B priced seat cushions at 18\" deep — this drawing uses 20 9/16\" (pricing not updated).",
-            "EST-2026-299 rev B listed seat cushions in Cognac — seats are V008-Bittersweet; vinyl line / yardage will change.",
+            "EST-2026-299 rev B listed seat cushions in Cognac — seats are V001-Raven (Black); vinyl line / yardage will change.",
             "Arm / short-leg seats were priced at full back-run length; actual seat boards butt the main / long seat.",
             "Oct 6 layout showed basketweave-square back modules — this rev is all 12\" channel backs, Option A odd channels.",
             "No estimate or client document was changed. This sheet is internal only.",
@@ -195,7 +199,7 @@ def marleys_standard_job(
             "Channel height: 26 3/4\" (cut list / estimate) vs 30\" (L) to 30 1/4\" (U) on the field sketch.",
             "Seat depth: 20 9/16\" (seat runs under backs, this drawing) vs 18\" alternate.",
             "Allowance: 2\" foam = 5\" per side (fabric = wood + 10\") — CONFIRM.",
-            "V008-Bittersweet reads dark espresso, not true black. Check the sample if the seats must be black.",
+            "Seat vinyl is V001-Raven (Black). Channel backs are V003-Cognac.",
             "Open-end positions & one L end near the wall / fire alarm — verify on site.",
         ],
         revision=revision,
@@ -205,6 +209,14 @@ def marleys_standard_job(
     if not job.open_items:
         job.open_items = default_open_items(job)
     return job
+
+
+def job_default_fabrics(job_hint: str | None) -> dict[str, str]:
+    """Seat/back codes for a named job when the turn does not change them."""
+    key = (job_hint or "").strip().lower().replace("'", "")
+    if "marley" in key:
+        return {"seat": MARLEYS_SEAT_CODE, "back": MARLEYS_BACK_CODE}
+    return {}
 
 
 def known_job_layouts(job_hint: str | None) -> list[dict[str, Any]]:

@@ -113,6 +113,26 @@ def test_nightlab_phrases_parse_and_route():
         assert not should_route_to_drawing_desk(phrase, []), phrase
 
 
+def test_marleys_defaults_to_raven_unless_seat_changed(drawings_dir):
+    bare = generate_job_drawing(
+        message="make a drawing for the Marley's job",
+        job_hint="marleys",
+        quote=MOCK_QUOTE,
+    )
+    assert bare["success"]
+    assert bare["fabrics"]["seat"]["code"] == "V001-Raven"
+    assert bare["fabrics"]["back"]["code"] == "V003-Cognac"
+    assert bare["dimensions"]["channel_width"] == '12"'
+    changed = generate_job_drawing(
+        message="revise the drawing: seat cushions on V008-Bittersweet",
+        history=HISTORY,
+        job_hint="marleys",
+        quote=MOCK_QUOTE,
+    )
+    assert changed["fabrics"]["seat"]["code"] == "V008-Bittersweet"
+    assert changed["fabrics"]["back"]["code"] == "V003-Cognac"
+
+
 def test_black_and_cognac_resolve_to_workroom_codes():
     black = resolve_internal_fabric("Black")
     assert black["code"] == "V001-Raven"
@@ -159,7 +179,7 @@ def test_ten_inch_revision_via_chat_path(drawings_dir):
     assert first["fabrics"]["back"]["code"] == "V003-Cognac"
 
     turn = run_job_drawing_turn(
-        "revise the drawing: channel width 10 inch, seat cushions on V008-Bittersweet",
+        "change it to 10 inch channels",
         history=HISTORY,
         job_hint="marleys",
         quote=MOCK_QUOTE,
@@ -170,8 +190,13 @@ def test_ten_inch_revision_via_chat_path(drawings_dir):
     assert result["specs_honored"] is True
     assert result["revision"] == "B"
     assert result["dimensions"]["channel_width"] == '10"'
-    assert result["fabrics"]["seat"]["code"] == "V008-Bittersweet"
+    assert result["fabrics"]["seat"]["code"] == "V001-Raven"
+    assert result["fabrics"]["seat"]["color"].lower() == "black"
     assert result["fabrics"]["back"]["code"] == "V003-Cognac"
+    assert result.get("foam_thickness_in") == 2.0
+    assert result.get("allowance_in") == 5.0
+    assert "allowance 5" in turn["response"].lower()
+    assert "foam 2" in turn["response"].lower()
     assert "New drawing" in turn["response"]
     assert "I will not call this a new drawing" not in turn["response"]
     channel_wood = [
@@ -182,8 +207,11 @@ def test_ten_inch_revision_via_chat_path(drawings_dir):
     pages = extract_pages(result["pdf_path"])
     blob = "\n".join(pages)
     assert "@ 10" in blob or '10"' in blob
-    assert "V008-Bittersweet" in blob
+    assert "V001-Raven" in blob
     assert "V003-Cognac" in blob
+    assert "FOAM THICKNESS 2" in blob
+    assert "ALLOWANCE 5" in blob
+    assert "FABRIC = wood + 2" in blob
     assert "Spradling" not in blob
     assert "Apex" not in blob
     assert re.findall(r"\d+\.\d+\"", blob) == []
@@ -219,6 +247,8 @@ def test_change_it_to_ten_inch_channels_routes_and_applies(drawings_dir):
     assert turn["handled"] is True
     result = turn["result"]
     assert result["dimensions"]["channel_width"] == '10"'
+    assert result["fabrics"]["seat"]["code"] == "V001-Raven"
+    assert result["fabrics"]["back"]["code"] == "V003-Cognac"
     assert result["specs_honored"] is True
     assert result["revision"] == "B"
     assert "New drawing" in turn["response"]

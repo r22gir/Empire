@@ -869,6 +869,16 @@ def generate_job_drawing(
         unused = unused[1:]
     if unused and not seat_token:
         seat_token = unused[0]
+    if not seat_token or not back_token:
+        try:
+            from app.services.drawing.templates.banquette_fixtures import job_default_fabrics
+            defaults = job_default_fabrics(hint)
+        except Exception:
+            defaults = {}
+        if not seat_token:
+            seat_token = defaults.get("seat")
+        if not back_token:
+            back_token = defaults.get("back")
     fabrics = {
         "back": resolve_internal_fabric(back_token),
         "seat": resolve_internal_fabric(seat_token),
@@ -987,11 +997,22 @@ def generate_job_drawing(
         if asked.get(k) not in (None, "")
     }
     mismatches = _requested_vs_applied(requested, channel, fabrics)
+    allow_row = lookup_fabric_allowance(foam)
+    allow_in = allow_row.get("allowance_in")
+    foam_txt = format_inches(foam) if foam else "TBC"
     applied_bits = [
         f"channels {format_inches(channel)}",
         f"seat {fabrics['seat'].get('label') or 'TBC'}",
         f"back {fabrics['back'].get('label') or 'TBC'}",
+        f"foam {foam_txt}",
     ]
+    if allow_in is not None:
+        applied_bits.append(
+            f"allowance {format_inches(allow_in)} each side "
+            f"(fabric = wood + 2 × {format_inches(allow_in)})"
+        )
+    else:
+        applied_bits.append(allow_row.get("label") or NEEDS_FOAM_THICKNESS)
     if mismatches:
         message = (
             f"Requested change was not applied: {'; '.join(mismatches)}. "
@@ -1038,6 +1059,8 @@ def generate_job_drawing(
         "stamp": INTERNAL_STAMP,
         "specs_honored": not mismatches,
         "spec_mismatches": mismatches,
+        "foam_thickness_in": foam,
+        "allowance_in": allow_in,
         "message": message,
     }
 

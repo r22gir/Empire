@@ -121,7 +121,8 @@ def test_marleys_fixture_is_u_and_l_not_renderer_hardcode():
     assert layouts[1]["shape"] == "l_shape"
     assert layouts[0]["depth_in"] == pytest.approx(20.5625)
     job = marleys_standard_job()
-    assert job.seat_fabric.code == "V008-Bittersweet"
+    assert job.seat_fabric.code == "V001-Raven"
+    assert job.seat_fabric.color == "Black"
     assert job.back_fabric.code == "V003-Cognac"
     assert "Spradling" not in job.seat_fabric.sheet_label
     assert pages_for_job(job) == 5
@@ -142,7 +143,10 @@ def test_marleys_pdf_matches_reference_language(tmp_path):
     assert today in blob
     assert f"{today} · C" in blob
     assert "V003-Cognac" in blob
-    assert "V008-Bittersweet" in blob
+    assert "V001-Raven" in blob
+    assert "FOAM THICKNESS" in blob
+    assert "ALLOWANCE" in blob
+    assert "FABRIC = wood + 2" in blob
     assert "Spradling" not in blob
     assert "Apex" not in blob
     assert "Kravet" not in blob
