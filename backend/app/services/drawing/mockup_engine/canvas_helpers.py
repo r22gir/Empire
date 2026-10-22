@@ -2,10 +2,11 @@
 from __future__ import annotations
 
 import math
-from datetime import date
 from typing import Tuple
 from reportlab.lib.colors import HexColor, Color
 from reportlab.pdfgen import canvas
+
+from app.services.drawing.shop_date import shop_today
 
 # Palette defaults
 INK = HexColor("#1F2420")
@@ -77,7 +78,7 @@ def draw_chrome(
     revision: str = "",
 ) -> None:
     """Draw professional top and bottom chrome bands adhering to the Empire Drawing Standard."""
-    date_str = (date_str or "").strip() or date.today().isoformat()
+    date_str = (date_str or "").strip() or shop_today()
     rev = (revision or "").strip()
     # Paper background
     c.setFillColor(PAPER)

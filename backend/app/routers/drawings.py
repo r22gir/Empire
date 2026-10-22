@@ -205,9 +205,9 @@ async def generate_mockup_drawing(req: MockupFromSpecRequest):
     if not piece_spec:
         raise HTTPException(status_code=400, detail="Must provide spec, preset, quote_id, or job_id")
 
-    from datetime import date as _date
     from app.services.drawing.client_material import strip_supplier_names
-    piece_spec.drawn_date = _date.today().isoformat()
+    from app.services.drawing.shop_date import shop_today
+    piece_spec.drawn_date = shop_today()
     if req.revision:
         piece_spec.revision = str(req.revision).strip()
     if not strip_supplier_names(piece_spec.material.name):
@@ -234,7 +234,7 @@ async def generate_mockup_drawing(req: MockupFromSpecRequest):
         }
 
     # Generate PDF — always a new filename; never reuse an older file.
-    today = _date.today().isoformat()
+    today = shop_today()
     rev = (req.revision or piece_spec.revision or "").strip()
     pdf_filename = (
         f"mockup_{clean_name}_REV{rev}_{today.replace('-', '')}_{file_id}.pdf"

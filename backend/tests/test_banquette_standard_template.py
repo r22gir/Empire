@@ -6,7 +6,6 @@ from __future__ import annotations
 
 import os
 import re
-from datetime import date
 from pathlib import Path
 
 import pytest
@@ -15,10 +14,15 @@ from app.services.drawing.templates.banquette_fixtures import (
     marleys_job_layouts,
     marleys_standard_job,
 )
+from app.services.drawing.shop_date import shop_today
 from app.services.drawing.templates.banquette_job import (
     MAX_SEAT_LENGTH_IN,
     channel_option_a,
+    fabric_from_resolved,
+    hex_luminance,
     inch_text,
+    is_dark_hex,
+    label_ink_for_fill,
     result_cut_list,
     return_seat_length_in,
     schedule_rows,
@@ -124,7 +128,7 @@ def test_marleys_fixture_is_u_and_l_not_renderer_hardcode():
 
 
 def test_marleys_pdf_matches_reference_language(tmp_path):
-    today = date.today().isoformat()
+    today = shop_today()
     job = marleys_standard_job(revision="C", drawn_date=today)
     path = tmp_path / "marleys_standard.pdf"
     render_banquette_job_pdf(job, path)
@@ -188,7 +192,7 @@ def test_straight_bench_job_from_layout(tmp_path):
         conflicts=["Channel width 12\" conflicts with estimate 10\" — flagged, prices not changed."],
         quote=None,
         revision="A",
-        drawn_date=date.today().isoformat(),
+        drawn_date=shop_today(),
         job_hint="TempBanquette",
     )
     assert job.benches[0].shape == "straight"
@@ -232,7 +236,7 @@ def test_generate_job_drawing_uses_standard_template(tmp_path, monkeypatch):
     assert "REV" in pdf.name
     assert pdf.stat().st_size > 2000
     text = extract_pdf_text(str(pdf))
-    assert date.today().isoformat() in text
+    assert shop_today() in text
     assert "EMPIRE WORKROOM" in text
     assert "V003-Cognac" in text
     assert "V008-Bittersweet" in text
@@ -256,3 +260,102 @@ def test_generate_job_drawing_uses_standard_template(tmp_path, monkeypatch):
     )
     assert looked["found"]
     assert looked["match"]["name"] == Path(second["pdf_path"]).name
+
+
+def test_dark_seats_use_actual_color_not_light_tint():
+    light_stand_in = "#b9a596"
+    assert hex_luminance(light_stand_in) > 0.45
+    job = marleys_standard_job()
+    assert job.seat_fabric.fill_hex.lower() != light_stand_in
+    assert is_dark_hex(job.seat_fabric.fill_hex)
+    assert hex_luminance(job.seat_fabric.fill_hex) < 0.25
+    assert label_ink_for_fill(job.seat_fabric.fill_hex) == "#FFFFFF"
+    sweet = fabric_from_resolved(
+        {"code": "V008-Bittersweet", "color": "Bittersweet", "label": "V008-Bittersweet"},
+        role="seat",
+    )
+    black = fabric_from_resolved(
+        {"code": "V101-Black", "color": "Black", "label": "V101-Black"},
+        role="seat",
+    )
+    for face in (sweet, black):
+        assert face.fill_hex.lower() != light_stand_in
+        assert is_dark_hex(face.fill_hex)
+        assert label_ink_for_fill(face.fill_hex) == "#FFFFFF"
+
+
+def _raster_pages(pdf_path, tmp_path, prefix, first=1, last=3):
+    import subprocess
+    dest = tmp_path / prefix
+    subprocess.run(
+        ["pdftoppm", "-png", "-r", "72", "-f", str(first), "-l", str(last), str(pdf_path), str(dest)],
+        check=True,
+    )
+    return sorted(tmp_path.glob(f"{prefix}*.png"))
+
+
+def _pixel_luma(rgb):
+    r, g, b = rgb[:3]
+    return (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255.0
+
+
+def _assert_dark_seat_swatch(img, x, y, *, label):
+    r, g, b = img.getpixel((int(x), int(y)))
+    luma = _pixel_luma((r, g, b))
+    assert luma < 0.35, f"{label} luma {luma:.3f} rgb=({r},{g},{b})"
+    assert r < 90 and g < 80 and b < 80, f"{label} too light rgb=({r},{g},{b})"
+    # Old "tint for plan legibility" was #b9a596 — seats must not be that.
+    assert abs(r - 185) > 40 or abs(g - 165) > 40
+
+
+def test_rendered_seat_fill_is_dark_and_labels_white(tmp_path):
+    from PIL import Image
+    from app.services.drawing.templates.banquette_standard import _seat_label_color
+    from reportlab.lib import colors
+
+    job = marleys_standard_job(revision="A", drawn_date="2026-10-21")
+    path = tmp_path / "dark_seats.pdf"
+    render_banquette_job_pdf(job, path)
+    pngs = _raster_pages(path, tmp_path, "seat_preview", first=1, last=3)
+    assert len(pngs) == 3
+
+    u_plan = Image.open(pngs[0]).convert("RGB")
+    # US2 mid-cushion on the U plan (wall at top).
+    _assert_dark_seat_swatch(u_plan, u_plan.width * 0.48, u_plan.height * 0.28, label="U plan seat")
+    # Legend seat swatch: (PW-330+7, 174) → 72dpi y from top = 792-174.
+    _assert_dark_seat_swatch(u_plan, 901, 618, label="U plan legend swatch")
+
+    l_plan = Image.open(pngs[1]).convert("RGB")
+    _assert_dark_seat_swatch(l_plan, l_plan.width * 0.38, l_plan.height * 0.30, label="L plan seat")
+
+    elevations = Image.open(pngs[2]).convert("RGB")
+    # U-main elevation seat band: x≈275, y_pdf≈576 → y_from_top ≈ 216.
+    _assert_dark_seat_swatch(elevations, 275, 216, label="elevation seat band")
+
+    assert _seat_label_color(job) == colors.HexColor("#FFFFFF")
+
+
+def test_sheet_date_is_america_new_york_not_utc():
+    from datetime import datetime, timezone
+    from app.services.drawing.shop_date import shop_today as stamped
+
+    # 03:00 UTC on Oct 22 is still Oct 21 evening in America/New_York.
+    utc_morning = datetime(2026, 10, 22, 3, 0, tzinfo=timezone.utc)
+    assert stamped(utc_morning) == "2026-10-21"
+    naive_utc = datetime(2026, 10, 22, 3, 0)  # treated as UTC
+    assert stamped(naive_utc) == "2026-10-21"
+    utc_afternoon = datetime(2026, 10, 22, 16, 0, tzinfo=timezone.utc)
+    assert stamped(utc_afternoon) == "2026-10-22"
+
+
+def test_render_stamps_shop_local_date(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        "app.services.drawing.templates.banquette_standard.shop_today",
+        lambda: "2026-10-21",
+    )
+    job = marleys_standard_job(revision="A", drawn_date="")
+    path = tmp_path / "et_date.pdf"
+    render_banquette_job_pdf(job, path)
+    text = extract_pdf_text(str(path))
+    assert "2026-10-21" in text
+    assert "REV 2026-10-21" in text

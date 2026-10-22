@@ -21,7 +21,6 @@ import json
 import os
 import re
 import uuid
-from datetime import date
 from pathlib import Path
 from typing import Any, Optional
 
@@ -32,6 +31,7 @@ from app.config.fabric_cut_allowance import (
     lookup_fabric_allowance,
 )
 from app.services.drawing.inches import format_inches
+from app.services.drawing.shop_date import shop_today
 from app.services.vision.bench_cut_list import WOOD_LABEL, FOAM_LABEL, FABRIC_LABEL, format_cut_inches
 from app.services.max.job_drawing_intent import (
     DRAWING_DESK_ID,
@@ -799,7 +799,7 @@ def generate_job_drawing(
     out_dir = Path(output_dir) if output_dir else _drawings_dir()
     out_dir.mkdir(parents=True, exist_ok=True)
     job_slug = re.sub(r"[^a-zA-Z0-9_-]+", "_", hint or client or "job").strip("_") or "job"
-    today = date.today().isoformat()
+    today = shop_today()
     revision = next_revision_letter(out_dir, job_slug)
     shop_name = f"job_drawing_{job_slug}_{uuid.uuid4().hex[:8]}.pdf"
     shop_path = out_dir / shop_name
@@ -847,17 +847,6 @@ def generate_job_drawing(
     except Exception:
         standard_job = None
 
-    job_set_ok = False
-    if standard_job is not None:
-        job_set_ok = _try_standard_banquette_pdf(standard_job, set_path)
-    if not job_set_ok and specs:
-        job_set_ok = _try_job_set_pdf(specs, set_path, revision=revision, date_str=today)
-    mockup_ok = False
-    mockup_path = None
-    if not job_set_ok and specs:
-        mockup_path = out_dir / f"job_drawing_{job_slug}_{uuid.uuid4().hex[:8]}_engine.pdf"
-        mockup_ok = _try_mockup_pdf(specs[0], mockup_path)
-
     _write_shop_pdf(
         path=shop_path,
         spec_notes=[INTERNAL_STAMP],
@@ -868,6 +857,17 @@ def generate_job_drawing(
         client=client,
         project=project,
     )
+
+    job_set_ok = False
+    if standard_job is not None:
+        job_set_ok = _try_standard_banquette_pdf(standard_job, set_path)
+    if not job_set_ok and specs:
+        job_set_ok = _try_job_set_pdf(specs, set_path, revision=revision, date_str=today)
+    mockup_ok = False
+    mockup_path = None
+    if not job_set_ok and specs:
+        mockup_path = out_dir / f"job_drawing_{job_slug}_{uuid.uuid4().hex[:8]}_engine.pdf"
+        mockup_ok = _try_mockup_pdf(specs[0], mockup_path)
 
     primary = set_path if job_set_ok else (mockup_path if mockup_ok else shop_path)
     if primary is None or not Path(primary).exists() or Path(primary).stat().st_size < 80:

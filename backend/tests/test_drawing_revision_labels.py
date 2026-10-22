@@ -6,7 +6,6 @@ from __future__ import annotations
 
 import os
 import re
-from datetime import date
 from pathlib import Path
 
 import pytest
@@ -18,6 +17,7 @@ from app.services.drawing.client_material import (
     strip_supplier_names,
 )
 from app.services.drawing.job_drawing import generate_job_drawing
+from app.services.drawing.shop_date import shop_today
 from app.services.drawing.mockup_engine import (
     marleys_u_and_l_preset,
     render_job_set_pdf,
@@ -57,7 +57,7 @@ def test_client_label_never_prints_supplier():
 
 
 def test_revision_pdf_has_separate_labels_and_today(tmp_path):
-    today = date.today().isoformat()
+    today = shop_today()
     presets = marleys_u_and_l_preset()
     u = presets["u_bench"].model_copy(deep=True)
     l = presets["l_bench"].model_copy(deep=True)
@@ -111,12 +111,12 @@ def test_generate_job_drawing_revision_is_new_file(tmp_path, monkeypatch):
     assert first["success"]
     first_path = Path(first["pdf_path"])
     assert first_path.exists()
-    assert first["drawn_date"] == date.today().isoformat()
+    assert first["drawn_date"] == shop_today()
     assert first["revision"]
     assert first_path.name != "mockup_marley_s_u_bench_f904d55bb684.pdf"
     assert "REV" in first_path.name
     text = extract_pdf_text(str(first_path))
-    assert date.today().isoformat() in text
+    assert shop_today() in text
     assert "V100-Cognac" in text
     assert "V101-Black" in text
     assert "SecretBrand" not in text
@@ -146,7 +146,7 @@ def test_single_piece_still_uses_today_not_oct8(tmp_path):
     path = tmp_path / "u_only.pdf"
     render_piece_mockup_pdf(spec, str(path))
     text = extract_pdf_text(str(path))
-    assert date.today().isoformat() in text
+    assert shop_today() in text
     assert "2026-10-08" not in text
     assert "Apex" not in text
     assert "Spradling" not in text

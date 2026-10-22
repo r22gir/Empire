@@ -10,7 +10,6 @@ renderer reads BanquetteJob — it does not hardcode a client.
 """
 from __future__ import annotations
 
-from datetime import date
 from fractions import Fraction
 from pathlib import Path
 from typing import Iterable
@@ -19,6 +18,7 @@ from reportlab.lib import colors
 from reportlab.lib.pagesizes import elevenSeventeen, landscape
 from reportlab.pdfgen import canvas
 
+from app.services.drawing.shop_date import shop_today
 from app.services.drawing.templates.banquette_job import (
     BanquetteJob,
     BenchSpec,
@@ -27,6 +27,7 @@ from app.services.drawing.templates.banquette_job import (
     SeatBoard,
     estimate_yardage,
     inch_text,
+    label_ink_for_fill,
     schedule_rows,
 )
 
@@ -35,7 +36,7 @@ PW, PH = TAB
 BR = colors.HexColor("#3a2c1c")
 RED = colors.HexColor("#b02020")
 DIM = colors.HexColor("#1f4e8c")
-SEATF = colors.HexColor("#b9a596")
+SEATF = colors.HexColor("#3b2a20")
 CHF = colors.HexColor("#c98b55")
 ODDF = colors.HexColor("#e8b070")
 SHELL = colors.HexColor("#555555")
@@ -123,7 +124,7 @@ class Plan:
 
 
 def _header(c: canvas.Canvas, job: BanquetteJob, title: str, page: int, total: int) -> None:
-    today = job.drawn_date or date.today().isoformat()
+    today = job.drawn_date or shop_today()
     c.setFillColor(BR)
     c.setFont("Helvetica-Bold", 16)
     c.drawString(36, PH - 40, job.branding)
@@ -157,7 +158,7 @@ def _legend(c: canvas.Canvas, job: BanquetteJob, x: float, y: float, bench: Benc
     if seat.notes:
         seat_note += f", {seat.notes}"
     items = [
-        (colors.HexColor(seat.plan_hex), seat_note),
+        (colors.HexColor(seat.fill_hex), seat_note),
         (colors.HexColor(back.plan_hex), f"Channel back {inch_text(job.benches[0].channel_width_in)} — {back.sheet_label}"),
         (ODDF, f"ODD channel — {back.sheet_label}"),
         (None, "Base footprint (existing millwork, dashed)"),
@@ -241,7 +242,11 @@ def _draw_channels(
 
 
 def _seat_fill(job: BanquetteJob):
-    return colors.HexColor(job.seat_fabric.plan_hex)
+    return colors.HexColor(job.seat_fabric.fill_hex)
+
+
+def _seat_label_color(job: BanquetteJob):
+    return colors.HexColor(label_ink_for_fill(job.seat_fabric.fill_hex))
 
 
 def _ch_fill(job: BanquetteJob):
@@ -278,20 +283,22 @@ def _draw_u_plan(c: canvas.Canvas, job: BanquetteJob, bench: BenchSpec) -> Plan:
     for seat in main_seats:
         L = _frac(seat.length_in)
         p.rect(x0, 0, x0 + L, d, fill=_seat_fill(job))
-        p.text(x0 + L / 2, d * _frac(2, 3), seat.label, size=9, bold=True)
-        p.text(x0 + L / 2, d * _frac(2, 3) + 3.2, seat.size_text, size=7)
+        ink = _seat_label_color(job)
+        p.text(x0 + L / 2, d * _frac(2, 3), seat.label, size=9, bold=True, col=ink)
+        p.text(x0 + L / 2, d * _frac(2, 3) + 3.2, seat.size_text, size=7, col=ink)
         x0 += L
     # return seats
     left_seat = next(s for s in bench.seats if s.run_id == left.run_id)
     right_seat = next(s for s in bench.seats if s.run_id == right.run_id)
+    ink = _seat_label_color(job)
     p.rect(0, d, d, eul, fill=_seat_fill(job))
-    p.text(d / 2 + 2, (d + eul) / 2 - 3, left_seat.label, size=9, bold=True)
-    p.text(d / 2 + 2, (d + eul) / 2 + 1.5, f"{inch_text(d)} x", size=6.5)
-    p.text(d / 2 + 2, (d + eul) / 2 + 4.5, inch_text(left_seat.length_in), size=6.5)
+    p.text(d / 2 + 2, (d + eul) / 2 - 3, left_seat.label, size=9, bold=True, col=ink)
+    p.text(d / 2 + 2, (d + eul) / 2 + 1.5, f"{inch_text(d)} x", size=6.5, col=ink)
+    p.text(d / 2 + 2, (d + eul) / 2 + 4.5, inch_text(left_seat.length_in), size=6.5, col=ink)
     p.rect(m - d, d, m, eur, fill=_seat_fill(job))
-    p.text(m - d / 2 - 2, (d + eur) / 2 - 3, right_seat.label, size=9, bold=True)
-    p.text(m - d / 2 - 2, (d + eur) / 2 + 1.5, f"{inch_text(d)} x", size=6.5)
-    p.text(m - d / 2 - 2, (d + eur) / 2 + 4.5, inch_text(right_seat.length_in), size=6.5)
+    p.text(m - d / 2 - 2, (d + eur) / 2 - 3, right_seat.label, size=9, bold=True, col=ink)
+    p.text(m - d / 2 - 2, (d + eur) / 2 + 1.5, f"{inch_text(d)} x", size=6.5, col=ink)
+    p.text(m - d / 2 - 2, (d + eur) / 2 + 4.5, inch_text(right_seat.length_in), size=6.5, col=ink)
     # base footprint
     p.rect(0, 0, m, d - ov, dash=(3, 2), lw=0.7)
     p.rect(0, d - ov, d - ov, eul, dash=(3, 2), lw=0.7)
@@ -351,14 +358,15 @@ def _draw_l_plan(c: canvas.Canvas, job: BanquetteJob, bench: BenchSpec) -> Plan:
     x0 = _frac(0)
     for seat in long_seats:
         L = _frac(seat.length_in)
+        ink = _seat_label_color(job)
         p.rect(x0, 0, x0 + L, d, fill=_seat_fill(job))
-        p.text(x0 + L / 2, d * _frac(2, 3), seat.label, size=10, bold=True)
-        p.text(x0 + L / 2, d * _frac(2, 3) + 3, seat.size_text, size=8)
+        p.text(x0 + L / 2, d * _frac(2, 3), seat.label, size=10, bold=True, col=ink)
+        p.text(x0 + L / 2, d * _frac(2, 3) + 3, seat.size_text, size=8, col=ink)
         x0 += L
     short_seat = next(s for s in bench.seats if s.run_id == short.run_id)
     p.rect(0, d, d, els, fill=_seat_fill(job))
-    p.text(d / 2 + 1, (d + els) / 2 - 2, short_seat.label, size=10, bold=True)
-    p.text(d / 2 + 1, (d + els) / 2 + 2, short_seat.size_text, size=7.5)
+    p.text(d / 2 + 1, (d + els) / 2 - 2, short_seat.label, size=10, bold=True, col=ink)
+    p.text(d / 2 + 1, (d + els) / 2 + 2, short_seat.size_text, size=7.5, col=ink)
     p.rect(0, 0, lx, d - ov, dash=(3, 2), lw=0.7)
     p.rect(0, d - ov, d - ov, els, dash=(3, 2), lw=0.7)
     band = min(bk, _frac(5, 2))
@@ -407,9 +415,10 @@ def _draw_straight_plan(c: canvas.Canvas, job: BanquetteJob, bench: BenchSpec) -
     x0 = _frac(0)
     for seat in bench.seats:
         L = _frac(seat.length_in)
+        ink = _seat_label_color(job)
         p.rect(x0, 0, x0 + L, d, fill=_seat_fill(job))
-        p.text(x0 + L / 2, d * _frac(2, 3), seat.label, size=10, bold=True)
-        p.text(x0 + L / 2, d * _frac(2, 3) + 3, seat.size_text, size=8)
+        p.text(x0 + L / 2, d * _frac(2, 3), seat.label, size=10, bold=True, col=ink)
+        p.text(x0 + L / 2, d * _frac(2, 3) + 3, seat.size_text, size=8, col=ink)
         x0 += L
     p.rect(0, 0, w, d - ov, dash=(3, 2), lw=0.7)
     band = min(bk, _frac(5, 2))
@@ -467,7 +476,7 @@ def _elevation_run(
     w = run.back_run_in * s
     back_h = bench.channel_height_in * s
     seat_h = 4.0 * s
-    c.setFillColor(colors.HexColor(job.seat_fabric.plan_hex))
+    c.setFillColor(colors.HexColor(job.seat_fabric.fill_hex))
     c.setStrokeColor(INK)
     c.setLineWidth(0.6)
     c.rect(x, y, w, seat_h, stroke=1, fill=1)
@@ -515,7 +524,7 @@ def _side_section(c: canvas.Canvas, job: BanquetteJob, bench: BenchSpec, x: floa
     c.rect(x, y, d - ov, sh - seat_t, fill=0, stroke=1)
     c.setDash()
     # seat
-    c.setFillColor(colors.HexColor(job.seat_fabric.plan_hex))
+    c.setFillColor(colors.HexColor(job.seat_fabric.fill_hex))
     c.rect(x, y + sh - seat_t, d, seat_t, fill=1, stroke=1)
     # back
     c.setFillColor(colors.HexColor(job.back_fabric.plan_hex))
@@ -715,7 +724,7 @@ def render_banquette_job_pdf(job: BanquetteJob, output_path: str | Path) -> Path
     path = Path(output_path)
     path.parent.mkdir(parents=True, exist_ok=True)
     if not job.drawn_date:
-        job.drawn_date = date.today().isoformat()
+        job.drawn_date = shop_today()
     c = canvas.Canvas(str(path), pagesize=TAB)
     try:
         c._doc.compression = 0

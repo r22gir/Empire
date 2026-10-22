@@ -127,6 +127,11 @@ class FabricFace:
             return color
         return self.label or "TBC — CONFIRM BEFORE CUT"
 
+    @property
+    def fill_hex(self) -> str:
+        """Actual color on the sheet. Never a lightened stand-in."""
+        return (self.plan_hex or self.hex or "#5C4033").strip() or "#5C4033"
+
 
 @dataclass
 class BenchSpec:
@@ -505,6 +510,25 @@ def joint_notes(bench: BenchSpec) -> list[str]:
     return lines
 
 
+def hex_luminance(hex_color: str) -> float:
+    raw = (hex_color or "").strip().lstrip("#")
+    if len(raw) != 6:
+        return 1.0
+    r = int(raw[0:2], 16) / 255.0
+    g = int(raw[2:4], 16) / 255.0
+    b = int(raw[4:6], 16) / 255.0
+    return 0.2126 * r + 0.7152 * g + 0.0722 * b
+
+
+def is_dark_hex(hex_color: str, threshold: float = 0.45) -> bool:
+    return hex_luminance(hex_color) < threshold
+
+
+def label_ink_for_fill(hex_color: str) -> str:
+    """White type on dark fills so seat labels stay readable."""
+    return "#FFFFFF" if is_dark_hex(hex_color) else "#20241f"
+
+
 def fabric_from_resolved(resolved: dict[str, Any] | None, *, role: str) -> FabricFace:
     from app.services.drawing.client_material import color_hex_for
 
@@ -513,11 +537,10 @@ def fabric_from_resolved(resolved: dict[str, Any] | None, *, role: str) -> Fabri
     color = src.get("color")
     label = src.get("label") or "TBC — CONFIRM BEFORE CUT"
     hex_v = color_hex_for(color or code or "", default="#9A5B2E" if role == "back" else "#5C4033")
+    # Use the real color on plan / elevation / legend. Dark seats stay dark.
     plan = hex_v
-    if role == "seat":
-        plan = "#b9a596" if (color or "").lower() in {"bittersweet", "espresso", "black", "dark espresso"} else hex_v
-    elif role == "back":
-        plan = "#c98b55" if "cognac" in (color or code or "").lower() else hex_v
+    if role == "back" and "cognac" in f"{color or ''} {code or ''}".lower():
+        plan = hex_v
     return FabricFace(
         code=code,
         color=color,

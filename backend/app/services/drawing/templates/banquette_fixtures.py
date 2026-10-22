@@ -163,8 +163,8 @@ def marleys_standard_job(
         color="Bittersweet",
         label="V008-Bittersweet",
         hex="#3b2a20",
-        plan_hex="#b9a596",
-        notes="dark espresso (tint lightened for plan legibility)",
+        plan_hex="#3b2a20",
+        notes="dark espresso",
     )
     back = back_fabric or FabricFace(
         code="V003-Cognac",
