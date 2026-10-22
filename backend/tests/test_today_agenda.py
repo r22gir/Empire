@@ -22,6 +22,9 @@ def test_today_phrases_english_and_spanish_hit_calendar_and_organizer():
         "mi agenda",
         "qué hay en la agenda",
         "horario de hoy",
+        "Resúmeme el día",
+        "resumeme el dia",
+        "summarize the day",
     ):
         tools = _tools(msg)
         assert tools[:3] == ["get_today_agenda", "list_schedule", "get_tasks"], msg

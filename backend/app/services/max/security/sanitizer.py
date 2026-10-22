@@ -33,7 +33,12 @@ from typing import Any, Dict, List, Optional, Tuple
 
 logger = logging.getLogger("max.security.sanitizer")
 
-AUDIT_DIR = Path.home() / "empire-repo" / "backend" / "data" / "security"
+_data_root = os.environ.get("EMPIRE_DATA_DIR")
+AUDIT_DIR = (
+    Path(_data_root) / "security"
+    if _data_root
+    else Path.home() / "empire-repo" / "backend" / "data" / "security"
+)
 AUDIT_DIR.mkdir(parents=True, exist_ok=True)
 
 

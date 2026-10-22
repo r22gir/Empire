@@ -1,0 +1,37 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Max RED-1 chat path proof</title>
+<style>
+body { font-family: Georgia, serif; background:#f7f3ea; color:#20241f; margin:32px; max-width:860px; }
+h1 { font-size:22px; letter-spacing:.04em; }
+h2 { font-size:16px; margin-top:28px; }
+.card { background:#fff; border:1px solid #d8d0c0; padding:18px 22px; margin:18px 0; }
+.before { color:#8a1f1f; white-space:pre-wrap; }
+.after { color:#1b5e20; white-space:pre-wrap; font-size:18px; }
+label { display:block; font-size:12px; text-transform:uppercase; letter-spacing:.08em; color:#6b6458; margin:8px 0 4px; }
+code { font-size:13px; }
+</style>
+<h1>Max · real chat doors after RED-1 fix</h1>
+<p>Endpoints the Command Center hits: <code>POST /api/v1/max/chat</code> and <code>POST /api/v1/max/chat/stream</code>. Model is stubbed with the Oct 21 leak. No live data, no real sends. Studio only — not merged from amp or maxine.</p>
+
+<h2>1. Oct 21 reasoning leak → clean reply</h2>
+<div class="card">
+<label>Model payload (what MiniMax emitted)</label>
+<div class="before">The assistant reviewed the request. The developer says not ask tokens/secrets. Tools absent from current prompt. I should answer without exposing internal rules.
+&lt;/mm:think&gt;
+Claro, Juan. Aquí tienes lo que pediste.</div>
+<label>POST /api/v1/max/chat response</label>
+<div class="after">Claro, Juan. Aquí tienes lo que pediste.</div>
+<label>POST /api/v1/max/chat/stream decoded text</label>
+<div class="after">Claro, Juan. Aquí tienes lo que pediste.</div>
+</div>
+
+<h2>2. Resúmeme el día → tools run, no markup</h2>
+<div class="card">
+<label>Model first payload</label>
+<div class="before">[Tool call: get_today_agenda] [Tool call: list_schedule] [Tool call: get_tasks]</div>
+<label>Tools executed</label>
+<div class="after">get_today_agenda, list_schedule, get_tasks</div>
+<label>User-visible reply</label>
+<div class="after">Hoy tienes: Sesión AMP a las 10am.</div>
+</div>

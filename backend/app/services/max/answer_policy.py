@@ -385,7 +385,9 @@ _TODAY_AGENDA = re.compile(
     r"qu[eé]\s+(?:hay|tengo)\s+(?:hoy|para\s+hoy)|"
     r"qu[eé]\s+hay\s+en\s+(?:la\s+|el\s+)?(?:agenda|calendario|horario)|"
     r"(?:mi|la)\s+(?:agenda|horario|calendario)(?:\s+de\s+hoy)?|"
-    r"agenda\s+de\s+hoy|horario\s+de\s+hoy|calendario\s+de\s+hoy"
+    r"agenda\s+de\s+hoy|horario\s+de\s+hoy|calendario\s+de\s+hoy|"
+    r"res[uú]me(?:me)?\s+(?:el\s+)?d[ií]a|"
+    r"summarize\s+(?:my\s+|the\s+)?day"
     r")",
     re.I,
 )

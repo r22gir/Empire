@@ -126,7 +126,12 @@ from pathlib import Path as _Path
 
 # ── Chat history persistence ─────────────────────────────────────────────────
 # Must go 4 parents up: router.py → max → routers → app → backend
-_ROUTER_CHATS_DIR = _Path(__file__).parent.parent.parent.parent / "data" / "chats"
+_data_root = os.environ.get("EMPIRE_DATA_DIR")
+_ROUTER_CHATS_DIR = (
+    _Path(_data_root) / "chats"
+    if _data_root
+    else _Path(__file__).parent.parent.parent.parent / "data" / "chats"
+)
 _ROUTER_CHATS_DIR.mkdir(parents=True, exist_ok=True)
 
 try:
@@ -1841,9 +1846,13 @@ def _sanitize_internal_leakage_text(text: str | None) -> str:
     """Remove internal tool/reasoning leakage from visible responses."""
     if not text:
         return ""
-    cleaned = strip_tool_blocks(text)
+    from app.services.max.thinking import strip_thinking
+
+    cleaned = strip_thinking(text)
+    cleaned = strip_tool_blocks(cleaned)
     cleaned = re.sub(r"```(?:tool|json|actions?)?\s*", "", cleaned, flags=re.IGNORECASE)
     cleaned = re.sub(r"```", "", cleaned)
+    cleaned = re.sub(r"\[\s*Tool\s+call\s*:[^\]]*\]", "", cleaned, flags=re.IGNORECASE)
     cleaned = re.sub(r"\bI should check\b[^\n.]*[.\n]?", "", cleaned, flags=re.IGNORECASE)
     cleaned = re.sub(r"\bruntime check required\b[^\n.]*[.\n]?", "", cleaned, flags=re.IGNORECASE)
     cleaned = re.sub(r"\bdelegation check required\b[^\n.]*[.\n]?", "", cleaned, flags=re.IGNORECASE)
