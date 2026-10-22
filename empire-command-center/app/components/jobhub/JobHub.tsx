@@ -365,15 +365,15 @@ export default function JobHub({ initial }: { initial?: { job?: string | null; q
                 )}
               </Sec>
               <Sec id="drawings" icon={<PenTool size={15} />} title="Drawings" count={drawings.length}>
-                {!docs.data && !docs.err ? <div className="jh-mut">Loading…</div> : drawings.length === 0 ? <div className="jh-mut">No drawings saved for this job.</div> : drawings.map(g => <DocCard key={g.key} group={g} phone={phone} email={email} />)}
+                {!docs.data && !docs.err && drawings.length === 0 ? <div className="jh-mut">Loading…</div> : drawings.length === 0 ? <div className="jh-mut">No drawings saved for this job.</div> : drawings.map(g => <DocCard key={g.key} group={g} phone={phone} email={email} />)}
               </Sec>
               <Sec id="photos" icon={<ImageIcon size={15} />} title="Photos" count={photos.length}>
-                {!docs.data && !docs.err ? <div className="jh-mut">Loading…</div> : photos.length === 0 ? <div className="jh-mut">No photos saved for this job.</div> : (
+                {!docs.data && !docs.err && photos.length === 0 ? <div className="jh-mut">Loading…</div> : photos.length === 0 ? <div className="jh-mut">No photos saved for this job.</div> : (
                   <div className="jh-photos">{photos.map(p => <button key={p.id} type="button" style={{ backgroundImage: `url("${thumbUrl(p)}")` }} onClick={() => openDocViewer(toRef(p))} aria-label={`Open ${p.title}`} title={p.filename} />)}</div>
                 )}
               </Sec>
               <Sec id="docs" icon={<FileText size={15} />} title="Documents" count={otherDocs.length + (d.documents?.length || 0)}>
-                {docs.err ? <div className="jh-mut">{docs.err}</div> : !docs.data ? <div className="jh-mut">Loading…</div> : otherDocs.length === 0 && !d.documents.length ? <div className="jh-mut">No estimates, presentations or invoice PDFs saved yet.</div> : otherDocs.map(g => <DocCard key={g.key} group={g} phone={phone} email={email} />)}
+                {docs.err && otherDocs.length === 0 && !d.documents.length ? <div className="jh-mut">{docs.err}</div> : !docs.data && otherDocs.length === 0 && !d.documents.length ? <div className="jh-mut">Loading…</div> : otherDocs.length === 0 && !d.documents.length ? <div className="jh-mut">No estimates, presentations or invoice PDFs saved yet.</div> : otherDocs.map(g => <DocCard key={g.key} group={g} phone={phone} email={email} />)}
                 {d.documents.map((doc: Any) => {
                   const target = docViewerTarget(doc);
                   return (
