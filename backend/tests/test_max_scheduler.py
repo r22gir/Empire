@@ -1,10 +1,11 @@
 import asyncio
+from datetime import datetime
 
 
 def test_family_max_scheduler_still_registers_morning_brief(monkeypatch, tmp_path):
     monkeypatch.setenv("EMPIRE_EDITION", "amp")
     monkeypatch.setenv("EMPIRE_DATA_DIR", str(tmp_path))
-    from app.services.max.scheduler import MaxScheduler
+    from app.services.max.scheduler import MORNING_BRIEF_TZ, MaxScheduler
 
     scheduler = MaxScheduler()
 
@@ -29,14 +30,18 @@ def test_family_max_scheduler_still_registers_morning_brief(monkeypatch, tmp_pat
             assert "daily_brief" in ids
             names = {job.name for job in scheduler.scheduler.get_jobs()}
             assert "Daily Morning Brief" in names
+            brief = scheduler.scheduler.get_job("daily_brief")
+            assert brief.next_run_time is not None
+            assert brief.next_run_time > datetime.now(MORNING_BRIEF_TZ)
         finally:
             scheduler.scheduler.shutdown(wait=False)
 
     asyncio.run(_run())
 
 
-def test_max_scheduler_starts_and_registers_jobs(monkeypatch):
-    from app.services.max.scheduler import MaxScheduler
+def test_max_scheduler_starts_and_registers_jobs(tmp_path, monkeypatch):
+    monkeypatch.setenv("EMPIRE_DATA_DIR", str(tmp_path))
+    from app.services.max.scheduler import MORNING_BRIEF_TZ, MaxScheduler
 
     scheduler = MaxScheduler()
 
@@ -67,6 +72,9 @@ def test_max_scheduler_starts_and_registers_jobs(monkeypatch):
                 "expire_crypto_payments",
                 "nightly_drive_export",
             }
+            brief = scheduler.scheduler.get_job("daily_brief")
+            assert brief.next_run_time is not None
+            assert brief.next_run_time > datetime.now(MORNING_BRIEF_TZ)
         finally:
             scheduler.scheduler.shutdown(wait=False)
 
