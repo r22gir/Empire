@@ -28,9 +28,10 @@ class _Upload:
 def test_catalog_lists_reserved_codes_and_hides_supplier():
     rows = asyncio.run(fabric_code_catalog())
     codes = [r["code"] for r in rows]
-    assert codes[:7] == [
-        "V001-Assigned", "V002-Assigned", "V003-Assigned",
-        "V004-Assigned", "V005-Assigned", "V006-Assigned", "V007-Assigned",
+    assert codes[:8] == [
+        "V001-Raven", "V002-Cherrywood", "V003-Cognac",
+        "V004-Cognac", "V005-Copper", "V006-Bourbon", "V007-Tannery",
+        "V008-Bittersweet",
     ]
     blob = str(rows)
     assert "brand" not in blob
@@ -49,7 +50,7 @@ def test_list_codes_does_not_write_live_db(tmp_path, monkeypatch):
     assert live.stat().st_size == 0
 
 
-def test_assign_starts_at_v008_on_isolated_db(tmp_path, monkeypatch):
+def test_assign_starts_at_next_after_csv_on_isolated_db(tmp_path, monkeypatch):
     db = tmp_path / "registry.db"
     monkeypatch.setattr("app.db.database.DB_PATH", str(db))
     row = asyncio.run(assign_fabric_code(FabricCodeAssign(
@@ -60,11 +61,11 @@ def test_assign_starts_at_v008_on_isolated_db(tmp_path, monkeypatch):
         supplier="HiddenSupplier",
         supplier_sku="HS-99",
     )))
-    assert row["code"] == "V008-Cognac"
-    assert row["sequence"] == 8
+    assert row["code"] == "V009-Cognac"
+    assert row["sequence"] == 9
     conn = sqlite3.connect(db)
     conn.row_factory = sqlite3.Row
-    assert next_sequence(conn, "V") == 9
+    assert next_sequence(conn, "V") == 10
     conn.close()
 
 
@@ -74,7 +75,7 @@ def test_import_endpoint_skips_existing(tmp_path, monkeypatch):
     csv_text = Path(DEFAULT_CSV).read_text(encoding="utf-8")
     first = asyncio.run(import_fabric_codes(_Upload(csv_text)))
     again = asyncio.run(import_fabric_codes(_Upload(csv_text)))
-    assert first["inserted"] == 7
+    assert first["inserted"] == 8
     assert again["inserted"] == 0
-    assert again["skipped"] == 7
-    assert again["highest"]["V"] == 7
+    assert again["skipped"] == 8
+    assert again["highest"]["V"] == 8

@@ -1,8 +1,9 @@
 """Read-only view of the shared fabric code registry.
 
 Source of truth: docs/FABRIC_CODES.csv (PR #128).
-V001–V007 are reserved; the next vinyl code is V008 and is assigned
-only by the sequential registry — never invented here.
+V001–V008 are the assigned Workroom vinyls (V001-Raven = Black seat,
+V003-Cognac = channel backs). The next vinyl code is V009 and is
+assigned only by the sequential registry — never invented here.
 
 Client-facing rows expose code, color, and specs. Brand and supplier
 never leave this module on a share / client path.
@@ -148,5 +149,5 @@ def next_vinyl_hint() -> str:
         code = row.get("code") or ""
         if code.startswith("V") and len(code) >= 4 and code[1:4].isdigit():
             highest = max(highest, int(code[1:4]))
-    nxt = max(highest + 1, 8)
+    nxt = max(highest + 1, 9)
     return f"V{nxt:03d}"

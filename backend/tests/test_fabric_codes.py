@@ -35,13 +35,13 @@ def test_csv_header_matches_fabric_codes_file():
     assert header == CSV_HEADER
 
 
-def test_import_reserves_v001_through_v007_then_assigns_v008():
+def test_import_reserves_v001_through_v008_then_assigns_v009():
     conn = _conn()
     result = import_csv(conn, path=DEFAULT_CSV)
     assert result["errors"] == []
-    assert result["inserted"] == 7
-    assert result["highest"]["V"] == 7
-    assert next_sequence(conn, "V") == 8
+    assert result["inserted"] == 8
+    assert result["highest"]["V"] == 8
+    assert next_sequence(conn, "V") == 9
 
     row = assign_code(
         conn,
@@ -52,12 +52,12 @@ def test_import_reserves_v001_through_v007_then_assigns_v008():
         supplier="HiddenSupplier",
         supplier_sku="HS-99",
     )
-    assert row["code"] == "V008-Cognac"
-    assert row["sequence"] == 8
+    assert row["code"] == "V009-Cognac"
+    assert row["sequence"] == 9
     assert row["supplier"] == "HiddenSupplier"
 
     client = client_view(row)
-    assert client["code"] == "V008-Cognac"
+    assert client["code"] == "V009-Cognac"
     assert client["color"] == "Cognac"
     assert client["specs"] == "marine-grade vinyl"
     assert "brand" not in client
@@ -67,7 +67,7 @@ def test_import_reserves_v001_through_v007_then_assigns_v008():
     assert "HiddenSupplier" not in str(client)
 
     line = format_client_material(row)
-    assert "V008-Cognac" in line
+    assert "V009-Cognac" in line
     assert "Cognac" in line
     assert "HiddenBrand" not in line
     assert "HiddenSupplier" not in line
@@ -94,7 +94,7 @@ def test_soft_gold_stays_camel_case_like_sprint_m():
     conn = _conn()
     import_csv(conn, path=DEFAULT_CSV)
     row = assign_code(conn, color="Soft Gold", material_type="vinyl")
-    assert row["code"] == "V008-SoftGold"
+    assert row["code"] == "V009-SoftGold"
     again = assign_code(conn, color="SoftGold", material_type="fabric")
     assert again["code"] == "F001-SoftGold"
 
@@ -105,7 +105,7 @@ def test_leather_and_vinyl_prefixes_are_independent():
     leather = assign_code(conn, color="Cognac", material_type="leather")
     vinyl = assign_code(conn, color="Cognac", material_type="vinyl")
     assert leather["code"] == "L001-Cognac"
-    assert vinyl["code"] == "V008-Cognac"
+    assert vinyl["code"] == "V009-Cognac"
 
 
 def test_import_skips_existing_codes_does_not_overwrite():
@@ -113,8 +113,8 @@ def test_import_skips_existing_codes_does_not_overwrite():
     import_csv(conn, path=DEFAULT_CSV)
     again = import_csv(conn, path=DEFAULT_CSV)
     assert again["inserted"] == 0
-    assert again["skipped"] == 7
-    assert highest_sequence(conn, "V") == 7
+    assert again["skipped"] == 8
+    assert highest_sequence(conn, "V") == 8
 
 
 def test_import_rejects_wrong_header():
@@ -132,13 +132,13 @@ def test_blank_code_row_allocates_after_highest_existing():
         + ",Sand,vinyl,54,0,0,,54in vinyl,,,,new incoming\n"
     )
     result = import_csv(conn, csv_text=extra)
-    # First 7 already present → skipped; blank-code row allocates V008-Sand
+    # First 8 already present → skipped; blank-code row allocates V009-Sand
     assert result["inserted"] == 1
-    assert result["highest"]["V"] == 8
+    assert result["highest"]["V"] == 9
     row = conn.execute(
-        "SELECT code, color FROM fabric_code_registry WHERE sequence = 8 AND prefix = 'V'"
+        "SELECT code, color FROM fabric_code_registry WHERE sequence = 9 AND prefix = 'V'"
     ).fetchone()
-    assert row["code"] == "V008-Sand"
+    assert row["code"] == "V009-Sand"
     assert row["color"] == "Sand"
 
 

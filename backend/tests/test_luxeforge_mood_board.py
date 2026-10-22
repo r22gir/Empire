@@ -22,10 +22,11 @@ def test_catalog_is_csv_only_and_hides_supplier():
     catalog = client_catalog()
     codes = [row["code"] for row in catalog]
     assert codes == [
-        "V001-Assigned", "V002-Assigned", "V003-Assigned",
-        "V004-Assigned", "V005-Assigned", "V006-Assigned", "V007-Assigned",
+        "V001-Raven", "V002-Cherrywood", "V003-Cognac",
+        "V004-Cognac", "V005-Copper", "V006-Bourbon", "V007-Tannery",
+        "V008-Bittersweet",
     ]
-    assert next_vinyl_hint() == "V008"
+    assert next_vinyl_hint() == "V009"
     blob = json.dumps(catalog)
     assert "brand" not in blob
     assert "supplier" not in blob
@@ -40,7 +41,7 @@ def test_catalog_is_csv_only_and_hides_supplier():
 def test_lookup_rejects_invented_codes_allows_uncoded():
     assert lookup_code(None) is None
     assert lookup_code("") is None
-    assert lookup_code("V001-Assigned")["code"] == "V001-Assigned"
+    assert lookup_code("V001-Raven")["code"] == "V001-Raven"
     with pytest.raises(ValueError, match="not in the shared registry"):
         lookup_code("V142-Navy")
     with pytest.raises(ValueError, match="not in the shared registry"):
@@ -53,8 +54,8 @@ def test_swatch_from_registry_or_uncoded(tmp_path, monkeypatch):
     _iso(tmp_path, monkeypatch)
     board = boards.create_board("Henderson suite", designer="Maya", client_name="Henderson")
 
-    coded = boards.add_swatch(board["id"], "V001-Assigned", hex_color="#1d3557")
-    assert coded["swatches"][0]["fabric_code"] == "V001-Assigned"
+    coded = boards.add_swatch(board["id"], "V001-Raven", hex_color="#1d3557")
+    assert coded["swatches"][0]["fabric_code"] == "V001-Raven"
     assert coded["swatches"][0]["uncoded"] is False
     assert "brand" not in coded["swatches"][0]
     assert "supplier" not in coded["swatches"][0]
@@ -70,7 +71,7 @@ def test_swatch_from_registry_or_uncoded(tmp_path, monkeypatch):
 def test_share_projection_strips_brand_and_supplier(tmp_path, monkeypatch):
     _iso(tmp_path, monkeypatch)
     board = boards.create_board("Share me")
-    boards.add_swatch(board["id"], "V002-Assigned")
+    boards.add_swatch(board["id"], "V002-Cherrywood")
     loaded = boards.get_board(board["id"])
     loaded["swatches"][0]["brand"] = "HiddenBrand"
     loaded["swatches"][0]["supplier"] = "HiddenSupplier"
@@ -82,9 +83,9 @@ def test_share_projection_strips_brand_and_supplier(tmp_path, monkeypatch):
     assert "HS-99" not in blob
     assert "supplier" not in blob
     assert "brand" not in blob
-    assert public["swatches"][0]["fabric_code"] == "V002-Assigned"
+    assert public["swatches"][0]["fabric_code"] == "V002-Cherrywood"
     assert public["read_only"] is True
-    view = client_view({"code": "V001-Assigned", "color": "Assigned", "brand": "X", "supplier": "Y"})
+    view = client_view({"code": "V001-Raven", "color": "Black", "brand": "X", "supplier": "Y"})
     assert "brand" not in view
     assert "supplier" not in view
 

@@ -97,6 +97,47 @@ def _parse_inches(raw: Any) -> Optional[float]:
     return value if value > 0 else None
 
 
+def _fabric_token_matches(token: str, resolved: dict[str, Any] | None) -> bool:
+    raw = (token or "").strip().lower()
+    if not raw:
+        return True
+    src = resolved or {}
+    blob = " ".join(
+        str(src.get(k) or "") for k in ("code", "color", "label")
+    ).lower()
+    if raw in blob:
+        return True
+    aliases = {
+        "black": ("raven", "v001-raven"),
+        "raven": ("black", "v001-raven"),
+    }
+    return any(alias in blob for alias in aliases.get(raw, ()))
+
+
+def _requested_vs_applied(
+    requested: dict[str, Any],
+    channel_in: float,
+    fabrics: dict[str, Any],
+) -> list[str]:
+    misses: list[str] = []
+    req_ch = requested.get("channel_width_in")
+    if req_ch is not None:
+        try:
+            if abs(float(channel_in) - float(req_ch)) > 0.05:
+                misses.append(
+                    f"channel width {format_inches(req_ch)} was not applied "
+                    f"(drawing has {format_inches(channel_in)})"
+                )
+        except (TypeError, ValueError):
+            misses.append(f"channel width {req_ch} was not applied")
+    for role, key in (("seat", "seat_fabric"), ("back", "back_fabric")):
+        token = requested.get(key)
+        if token and not _fabric_token_matches(str(token), fabrics.get(role)):
+            shown = (fabrics.get(role) or {}).get("label") or "TBC"
+            misses.append(f"{role} {token} was not applied (drawing has {shown})")
+    return misses
+
+
 def _strip_supplier_names(text: str | None) -> str:
     cleaned = str(text or "").strip()
     if not cleaned:
@@ -105,6 +146,26 @@ def _strip_supplier_names(text: str | None) -> str:
     if any(marker in low for marker in _SUPPLIER_MARKERS):
         return ""
     return cleaned
+
+
+# Spoken color / nickname → registered code. Only used when that code exists.
+_FABRIC_COLOR_ALIASES = {
+    "black": "V001-Raven",
+    "raven": "V001-Raven",
+    "cognac": "V003-Cognac",
+    "bittersweet": "V008-Bittersweet",
+    "cherrywood": "V002-Cherrywood",
+    "copper": "V005-Copper",
+    "bourbon": "V006-Bourbon",
+    "tannery": "V007-Tannery",
+}
+
+
+def _fabric_row_payload(row: dict[str, Any]) -> dict[str, Any]:
+    code = row.get("code")
+    color = row.get("color") or (str(code).split("-", 1)[-1] if code else None)
+    label = f"{code} {color}".strip() if code else (color or "TBC — CONFIRM BEFORE CUT")
+    return {"code": code, "color": color, "label": label}
 
 
 def resolve_internal_fabric(token: str | None, registry_rows: list[dict] | None = None) -> dict[str, Any]:
@@ -124,14 +185,25 @@ def resolve_internal_fabric(token: str | None, registry_rows: list[dict] | None 
         code = code_match.group(1)
         for row in rows:
             if str(row.get("code") or "").lower() == code.lower():
-                color = row.get("color") or code.split("-", 1)[-1]
-                return {"code": row.get("code"), "color": color, "label": f"{row.get('code')} {color}"}
+                return _fabric_row_payload(row)
         return {"code": None, "color": None, "label": raw, "unknown_code": code}
     color_key = raw.lower()
     hits = [r for r in rows if str(r.get("color") or "").lower() == color_key]
     if len(hits) == 1:
-        row = hits[0]
-        return {"code": row.get("code"), "color": row.get("color"), "label": f"{row.get('code')} {row.get('color')}"}
+        return _fabric_row_payload(hits[0])
+    if len(hits) > 1:
+        hits.sort(key=lambda r: str(r.get("code") or ""))
+        return _fabric_row_payload(hits[0])
+    alias = _FABRIC_COLOR_ALIASES.get(color_key)
+    if alias:
+        for row in rows:
+            if str(row.get("code") or "").lower() == alias.lower():
+                return _fabric_row_payload(row)
+    for row in rows:
+        code = str(row.get("code") or "")
+        suffix = code.split("-", 1)[-1].lower() if "-" in code else ""
+        if suffix and suffix == color_key:
+            return _fabric_row_payload(row)
     return {"code": None, "color": raw, "label": raw}
 
 
@@ -690,17 +762,29 @@ def _try_standard_banquette_pdf(job, path: Path) -> bool:
         return False
 
 
+_JOB_SET_REV = re.compile(r"^job_set_(.+)_REV([A-Z])(?:_|$)", re.I)
+
+
 def next_revision_letter(out_dir: Path, job_slug: str) -> str:
-    """A, B, C… based on how many prior files exist for this job. Never reuse a filename."""
-    n = 0
-    needle = (job_slug or "").lower()
+    """A, B, C… from existing job_set_<slug>_REV* files only. Shop PDFs do not count."""
+    slug = re.sub(r"[^a-zA-Z0-9_-]+", "_", job_slug or "job").strip("_") or "job"
+    slug_l = slug.lower()
+    ranks: list[int] = []
     try:
         for name in os.listdir(out_dir):
-            if needle and needle in name.lower() and name.lower().endswith(".pdf"):
-                n += 1
+            match = _JOB_SET_REV.match(name)
+            if not match:
+                continue
+            file_slug = match.group(1).lower()
+            if file_slug == slug_l or slug_l in file_slug or file_slug in slug_l:
+                letter = match.group(2).upper()
+                if letter.isalpha():
+                    ranks.append(ord(letter) - ord("A"))
     except OSError:
-        n = 0
-    return chr(ord("A") + min(n, 25))
+        ranks = []
+    if not ranks:
+        return "A"
+    return chr(ord("A") + min(max(ranks) + 1, 25))
 
 
 def new_revision_filename(job_slug: str, revision: str, today: str) -> str:
@@ -778,10 +862,23 @@ def generate_job_drawing(
     back_token = changes.get("back_fabric")
     seat_token = changes.get("seat_fabric")
     codes = list(changes.get("fabric_codes") or [])
-    if codes and not back_token:
-        back_token = codes[0]
-    if len(codes) > 1 and not seat_token:
-        seat_token = codes[1]
+    used = {str(back_token or "").lower(), str(seat_token or "").lower()}
+    unused = [c for c in codes if c.lower() not in used]
+    if unused and not back_token and not seat_token:
+        back_token = unused[0]
+        unused = unused[1:]
+    if unused and not seat_token:
+        seat_token = unused[0]
+    if not seat_token or not back_token:
+        try:
+            from app.services.drawing.templates.banquette_fixtures import job_default_fabrics
+            defaults = job_default_fabrics(hint)
+        except Exception:
+            defaults = {}
+        if not seat_token:
+            seat_token = defaults.get("seat")
+        if not back_token:
+            back_token = defaults.get("back")
     fabrics = {
         "back": resolve_internal_fabric(back_token),
         "seat": resolve_internal_fabric(seat_token),
@@ -893,6 +990,41 @@ def generate_job_drawing(
         share_url = ""
     mtime = primary.stat().st_mtime
     link_line = f" [{primary.name}]({share_url})" if share_url else f" {primary.name}"
+    asked = extract_spec_changes(message)
+    requested = {
+        k: asked[k]
+        for k in ("channel_width_in", "seat_fabric", "back_fabric")
+        if asked.get(k) not in (None, "")
+    }
+    mismatches = _requested_vs_applied(requested, channel, fabrics)
+    allow_row = lookup_fabric_allowance(foam)
+    allow_in = allow_row.get("allowance_in")
+    foam_txt = format_inches(foam) if foam else "TBC"
+    applied_bits = [
+        f"channels {format_inches(channel)}",
+        f"seat {fabrics['seat'].get('label') or 'TBC'}",
+        f"back {fabrics['back'].get('label') or 'TBC'}",
+        f"foam {foam_txt}",
+    ]
+    if allow_in is not None:
+        applied_bits.append(
+            f"allowance {format_inches(allow_in)} each side "
+            f"(fabric = wood + 2 × {format_inches(allow_in)})"
+        )
+    else:
+        applied_bits.append(allow_row.get("label") or NEEDS_FOAM_THICKNESS)
+    if mismatches:
+        message = (
+            f"Requested change was not applied: {'; '.join(mismatches)}. "
+            f"I will not call this a new drawing. File kept for review:{link_line}. "
+            f"{INTERNAL_STAMP}"
+        )
+    else:
+        message = (
+            f"New drawing for {client} (REV {revision}, {today}):{link_line}. "
+            f"{'; '.join(applied_bits)}. {INTERNAL_STAMP}"
+            + (f" Conflicts: {'; '.join(conflicts)}" if conflicts else "")
+        )
     return {
         "success": True,
         "desk": DRAWING_DESK_ID,
@@ -925,11 +1057,11 @@ def generate_job_drawing(
         "pieces": [s.name for s in specs],
         "branding": EMPIRE_BRAND,
         "stamp": INTERNAL_STAMP,
-        "message": (
-            f"New drawing for {client} (REV {revision}, {today}):{link_line}. "
-            f"{INTERNAL_STAMP}"
-            + (f" Conflicts: {'; '.join(conflicts)}" if conflicts else "")
-        ),
+        "specs_honored": not mismatches,
+        "spec_mismatches": mismatches,
+        "foam_thickness_in": foam,
+        "allowance_in": allow_in,
+        "message": message,
     }
 
 

@@ -351,11 +351,9 @@ def import_csv(
             if existing:
                 skipped += 1
                 continue
-            color = normalize_color(row.get("color") or color_from_code)
-            expected = format_code(prefix, seq, color)
-            if expected != code and normalize_color(color_from_code) != color:
-                # Allow V003-Cognac when color column is Cognac
-                code = expected
+            # Keep the stated code (V001-Raven stays V001-Raven even when
+            # the color column is Black). Color is an independent field.
+            color = (row.get("color") or color_from_code).strip() or color_from_code
             conn.execute(
                 """INSERT INTO fabric_code_registry
                    (code, prefix, sequence, color, material_type, width_inches,
