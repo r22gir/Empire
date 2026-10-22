@@ -100,12 +100,16 @@ def _extract_topic_anchor(history: list[dict[str, Any]] | None) -> str | None:
 
     Looks at the last 4 turns (user + assistant) and returns the most prominent
     proper noun / country / named event. Returns None if no clear anchor.
+    MiniMax thinking text is stripped first so English self-talk cannot
+    become the search query (Juan, 2026-10-21).
     """
     if not history:
         return None
+    from app.services.max.thinking import sanitize_history_messages
+
     # Concatenate the last 4 messages, preferring the most recent user turn.
     recent: list[str] = []
-    for h in history[-4:]:
+    for h in sanitize_history_messages(history[-4:]):
         content = (h.get("content") or "").strip()
         if content:
             recent.append(content)
@@ -222,7 +226,9 @@ def build_search_query(message: str, history: list[dict[str, Any]] | None = None
             context_injected: True if carry-forward was applied.
             context_terms: list of terms injected (for auditability).
     """
-    raw = (message or "").strip()
+    from app.services.max.thinking import strip_thinking
+
+    raw = strip_thinking(message or "").strip()
     if not raw:
         return {"query": "", "context_injected": False, "context_terms": []}
 

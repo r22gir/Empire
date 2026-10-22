@@ -118,7 +118,9 @@ def _mmx_subprocess_env() -> dict[str, str]:
 
 def _strip_think_blocks(text: str) -> str:
     """Strip <think>...</think> and similar chain-of-thought artifacts from text."""
-    text = re.sub(r"<think>[\s\S]*?</think>", "", text)
+    from app.services.max.thinking import strip_thinking
+
+    text = strip_thinking(text)
     text = re.sub(r"<!--\s*撮要.*?-->", "", text, flags=re.DOTALL)
     return text.strip()
 
