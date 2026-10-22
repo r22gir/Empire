@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import subprocess
-from datetime import date
 from pathlib import Path
 from typing import List, Optional, Tuple
 
@@ -20,6 +19,7 @@ from app.services.drawing.mockup_engine.renderers import (
 )
 from app.config.workroom_billing import get_workroom_billing, client_facing_website
 from app.services.drawing.bench_quote_bridge import sheet_chrome
+from app.services.drawing.shop_date import shop_today
 
 
 def _pick_optimal_scale(
@@ -61,7 +61,7 @@ def _pick_optimal_scale(
 
 
 def _sheet_date(spec: PieceSpec, override: str | None = None) -> str:
-    return (override or getattr(spec, "drawn_date", None) or "").strip() or date.today().isoformat()
+    return (override or getattr(spec, "drawn_date", None) or "").strip() or shop_today()
 
 
 def _sheet_rev(spec: PieceSpec, override: str | None = None) -> str:
@@ -370,7 +370,7 @@ def render_job_set_pdf(
     """Render every piece (e.g. U and L) into one new PDF. Never overwrites an older file."""
     if not specs:
         raise ValueError("job set requires at least one piece")
-    sheet_date = (date_str or "").strip() or date.today().isoformat()
+    sheet_date = (date_str or "").strip() or shop_today()
     sheet_rev = (revision or "").strip()
     c = canvas.Canvas(output_pdf_path, pagesize=landscape(letter))
     try:

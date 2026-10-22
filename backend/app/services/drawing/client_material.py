@@ -17,6 +17,8 @@ SUPPLIER_MARKERS = (
 
 COLOR_HEX = {
     "cognac": "#9A5B2E",
+    "bittersweet": "#3b2a20",
+    "espresso": "#3b2a20",
     "black": "#1C1C1C",
     "navy": "#1B3A4B",
     "emerald": "#1B4D3E",

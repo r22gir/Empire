@@ -36,6 +36,13 @@ from app.services.drawing.templates.catalog_namespace import (
 from app.services.drawing.templates.printer import (
     render_spec, render_spec_to_bytes,
 )
+from app.services.drawing.templates.banquette_job import (
+    BanquetteJob,
+    build_banquette_job,
+)
+from app.services.drawing.templates.banquette_standard import (
+    render_banquette_job_pdf,
+)
 
 
 __all__ = [
@@ -55,4 +62,7 @@ __all__ = [
     "resolve_catalog_style",
     "render_spec",
     "render_spec_to_bytes",
+    "BanquetteJob",
+    "build_banquette_job",
+    "render_banquette_job_pdf",
 ]
