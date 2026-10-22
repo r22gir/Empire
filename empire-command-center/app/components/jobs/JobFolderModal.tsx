@@ -2,6 +2,8 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { API } from '../../lib/api';
 import { formatInches } from '../../lib/formatInches';
+import { openDocViewer } from '../docs/viewerBus';
+import { docViewerTarget } from '../../lib/docs-hub/jobVisuals';
 import { useJob, Job } from '../../hooks/useJob';
 import JobHeader from '../docs/JobHeader';
 import DocsTab from '../docs/DocsTab';
@@ -1324,8 +1326,15 @@ export default function JobFolderModal({
 
 function DocumentCard({ doc, isImage }: { doc: any; isImage?: boolean }) {
   const fileUrl = doc.file_path ? `${API}/files/${encodeURIComponent(doc.file_path)}` : doc.url;
+  const target = docViewerTarget({ ...doc, url: fileUrl || doc.url });
+  const open = () => { if (target.src) openDocViewer(target); };
   return (
     <div
+      role="button"
+      tabIndex={0}
+      data-testid={`folder-doc-${doc.id || doc.filename}`}
+      onClick={open}
+      onKeyDown={(e) => { if (e.key === 'Enter') open(); }}
       style={{
         background: '#fff',
         border: '1px solid #ece8e0',
@@ -1335,6 +1344,7 @@ function DocumentCard({ doc, isImage }: { doc: any; isImage?: boolean }) {
         flexDirection: 'column',
         justifyContent: 'space-between',
         gap: 8,
+        cursor: target.src ? 'pointer' : 'default',
       }}
     >
       <div>

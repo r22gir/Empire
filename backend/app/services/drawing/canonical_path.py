@@ -156,14 +156,50 @@ def repo_legacy_drawings_dir() -> Path:
     return backend_root() / "data" / "drawings"
 
 
+def extra_drawing_search_roots() -> list[Path]:
+    """Additional places historical /api/v1/drawings/files/<name> URLs actually live."""
+    roots = [
+        _empire_data_dir() / "drawings",
+        _empire_data_dir() / "documents",
+        Path(os.getenv("EMPIRE_JOBS_DIR") or (Path.home() / "jobs")),
+    ]
+    return roots
+
+
+def _walk_for_filename(root: Path, safe: str, *, max_depth: int = 3, max_files: int = 400) -> Path | None:
+    if not root.is_dir():
+        return None
+    examined = 0
+    for dirpath, dirnames, filenames in os.walk(root):
+        dirnames[:] = [d for d in dirnames if not d.startswith(".") and d not in ("__pycache__", "node_modules")]
+        rel = Path(dirpath).relative_to(root)
+        depth = 0 if str(rel) == "." else len(rel.parts)
+        if depth > max_depth:
+            dirnames[:] = []
+            continue
+        if safe in filenames:
+            found = Path(dirpath) / safe
+            if found.is_file():
+                return found
+        examined += len(filenames)
+        if examined >= max_files:
+            break
+    return None
+
+
 def resolve_existing_drawing_file(filename: str) -> Path | None:
-    """Find a drawing in the canonical dir, then the legacy repo folder."""
+    """Find a drawing in the canonical dir, legacy repo folder, empire-data, or ~/jobs."""
     safe = Path(filename).name
+    if not safe or safe in {".", ".."} or "/" in filename.replace("\\", "/") and Path(filename).name != safe:
+        # only a bare filename is served — refuse path segments
+        safe = Path(filename).name
     candidates = [
         Path(canonical_drawings_dir()) / safe,
         repo_legacy_drawings_dir() / safe,
         Path.home() / "empire-repo" / "uploads" / "arch_drawings" / safe,
         Path.home() / "empire-repo" / "backend" / "data" / "drawings" / safe,
+        _empire_data_dir() / "drawings" / safe,
+        _empire_data_dir() / "documents" / safe,
     ]
     seen: set[str] = set()
     for candidate in candidates:
@@ -173,6 +209,10 @@ def resolve_existing_drawing_file(filename: str) -> Path | None:
         seen.add(key)
         if candidate.is_file():
             return candidate
+    jobs_root = Path(os.getenv("EMPIRE_JOBS_DIR") or (Path.home() / "jobs"))
+    walked = _walk_for_filename(jobs_root, safe)
+    if walked is not None:
+        return walked
     return None
 
 

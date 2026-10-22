@@ -1,0 +1,9 @@
+kind,record_id,record_ref,job_id,job_ref,customer_id,match_by,confidence,reason,proposed_job_id,proposed_customer_id,current_job_id,current_customer_id
+quotes,q-willard,EST-2026-0100,job-willard,JOB-W,cust-shared,quote_id,auto,quote_id q-willard matches job.quote_id,job-willard,cust-shared,,
+quotes,q-midi,EST-2026-0300,job-midi,JOB-M,cust-shared,client_name_ambiguous,review,"shared client 'shared client' matches 2 jobs (JOB-W, JOB-M)",job-midi,cust-shared,,
+quotes,q-solo,EST-2026-0200,job-solo,JOB-S,cust-solo,quote_id,auto,quote_id q-solo matches job.quote_id,job-solo,cust-solo,,
+invoices,inv-midi,INV-2026-0300,job-midi,JOB-M,cust-shared,client_name_ambiguous,review,"shared client 'shared client' matches 2 jobs (JOB-W, JOB-M)",job-midi,cust-shared,,
+invoices,inv-solo,INV-2026-0200,job-solo,JOB-S,cust-solo,client_name+date,auto,unique client 'solo client' within 45 days,job-solo,cust-solo,,
+job_documents,jd-midi,le-midi.pdf,job-midi,JOB-M,cust-shared,client_name_ambiguous,review,"shared client 'shared client' matches 2 jobs (JOB-W, JOB-M)",job-midi,cust-shared,,
+folder-to-job,le-midi,~/jobs/le-midi,job-willard,JOB-W,cust-shared,client_name_ambiguous,review,"folder quote EST-2026-0300: shared client 'shared client' matches 2 jobs (JOB-W, JOB-M)",job-willard,cust-shared,,
+folder-to-job,solo-client,~/jobs/solo-client,job-solo,JOB-S,cust-solo,quote_id,auto,folder quote EST-2026-0200,job-solo,cust-solo,,

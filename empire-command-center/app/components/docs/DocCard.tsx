@@ -7,7 +7,7 @@ import { openDocViewer, type DocRef } from './viewerBus';
 import './docs.css';
 
 export const fmtShort = (iso?: string) => { if (!iso) return ''; const d = new Date(iso); return isNaN(d.getTime()) ? '' : d.toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }); };
-export const toRef = (d: DocEntry): DocRef => ({ id: d.id, title: d.title, kind: d.kind, filename: d.filename });
+export const toRef = (d: DocEntry): DocRef => ({ id: d.id, src: d.src, title: d.title, kind: d.kind, filename: d.filename });
 export const thumbUrl = (d: DocEntry) => d.kind === 'image' ? (d.src || `${DOCS_API}/render?id=${encodeURIComponent(d.id)}`) : `${DOCS_API}/render?id=${encodeURIComponent(d.id)}&page=1&w=160`;
 
 export default function DocCard({ group, showClient = false, phone, email }: { group: DocGroup; showClient?: boolean; phone?: string | null; email?: string | null }) {

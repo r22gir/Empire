@@ -73,6 +73,13 @@ export interface JobContext {
 export const DOCS_API = '/api/v1/docs-hub';
 
 export function viewerHref(d: { id?: string; src?: string; title?: string }): string {
+  const synthetic = !d.id || d.id.startsWith('job-') || d.id.startsWith('related-');
+  if (d.src && synthetic) {
+    const p = new URLSearchParams();
+    p.set('src', d.src);
+    if (d.title) p.set('title', d.title);
+    return `/docs/view?${p.toString()}`;
+  }
   if (d.id) return `/docs/view?id=${encodeURIComponent(d.id)}`;
   const p = new URLSearchParams();
   if (d.src) p.set('src', d.src);

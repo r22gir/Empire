@@ -3,6 +3,9 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { API } from '../../../lib/api';
 import { useJob } from '../../../hooks/useJob';
 import JobFolderModal from '../../jobs/JobFolderModal';
+import { openDocViewer } from '../../docs/viewerBus';
+import { quotePdfSrc } from '../../../lib/docs-hub/jobVisuals';
+import { jobHubHref } from '../../jobhub/href';
 import {
   ClipboardList, Clock, Play, CheckCircle2, Plus, X, Loader2,
   AlertCircle, LayoutGrid, List, ChevronRight, Save,
@@ -46,6 +49,7 @@ export interface JobCardData {
   due_date?: string;
   notes?: string;
   address?: string;
+  quote_id?: string;
 }
 
 interface KanbanApiResponse {
@@ -630,6 +634,52 @@ export default function JobBoard({ business }: { business?: string } = {}) {
                             >
                               Move
                             </button>
+                            {job.quote_id && (
+                              <button
+                                type="button"
+                                data-testid={`kanban-estimate-${job.id}`}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  openDocViewer({ src: quotePdfSrc(String(job.quote_id)), title: 'Estimate', kind: 'pdf' });
+                                }}
+                                style={{
+                                  alignSelf: 'flex-start',
+                                  fontSize: 11,
+                                  fontWeight: 700,
+                                  background: '#fff',
+                                  color: '#b8960c',
+                                  border: '1px solid #b8960c',
+                                  borderRadius: 6,
+                                  padding: '6px 10px',
+                                  cursor: 'pointer',
+                                  minHeight: 36,
+                                }}
+                              >
+                                Estimate
+                              </button>
+                            )}
+                            <a
+                              href={jobHubHref({ job: String(job.id) })}
+                              data-testid={`kanban-hub-${job.id}`}
+                              onClick={(e) => e.stopPropagation()}
+                              style={{
+                                alignSelf: 'flex-start',
+                                fontSize: 11,
+                                fontWeight: 700,
+                                background: '#fff',
+                                color: '#1a1a1a',
+                                border: '1px solid #ece8e0',
+                                borderRadius: 6,
+                                padding: '6px 10px',
+                                cursor: 'pointer',
+                                minHeight: 36,
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                textDecoration: 'none',
+                              }}
+                            >
+                              Job hub
+                            </a>
                             <button
                               type="button"
                               onClick={(e) => {

@@ -1473,6 +1473,21 @@ def get_job(job_id: str):
         }
 
 
+@router.get("/jobs/{job_id}/related")
+def get_job_related(job_id: str):
+    """Everything tied to a job: quotes, invoices, documents, photos, drawings, folder files.
+
+    Matches on job id, any quote_ids, customer_id, and jobs.metadata.job_folder_slug.
+    """
+    from app.services.job_related import gather_related
+
+    with get_db() as conn:
+        payload = gather_related(conn, job_id)
+    if not payload:
+        raise HTTPException(status_code=404, detail="Job not found")
+    return payload
+
+
 def _growth_hook(name: str, *args):
     """Growth hooks (deposit paid -> lead won, finished job -> social-proof drafts). Never raises."""
     try:

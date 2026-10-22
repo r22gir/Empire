@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useCallback } from 'react';
 import { API } from '../../lib/api';
+import { jobHubHref } from '../../components/jobhub/href';
 
 const STAGES = [
   'pending',
@@ -229,8 +230,25 @@ export default function ProductionBoardPage() {
                   {items.map((item) => (
                     <div
                       key={item.id}
+                      role="button"
+                      tabIndex={0}
+                      data-testid={`production-card-${item.id}`}
+                      onClick={() => {
+                        const q = item.customer_name || item.work_order_number;
+                        window.location.href = q
+                          ? `/?product=workroom&section=jobhub&q=${encodeURIComponent(q)}`
+                          : jobHubHref({});
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          const q = item.customer_name || item.work_order_number;
+                          window.location.href = q
+                            ? `/?product=workroom&section=jobhub&q=${encodeURIComponent(q)}`
+                            : jobHubHref({});
+                        }
+                      }}
                       className={`rounded-lg p-3 shadow-sm border-l-4 ${URGENCY_BORDER[item.urgency_color] ?? 'border-l-gray-400'}`}
-                      style={{ backgroundColor: '#fff', border: '1px solid #ece8e0', borderLeftWidth: 4 }}
+                      style={{ backgroundColor: '#fff', border: '1px solid #ece8e0', borderLeftWidth: 4, cursor: 'pointer' }}
                     >
                       {/* Customer */}
                       <p className="text-sm font-bold truncate" style={{ color: '#1a1a2e' }}>
@@ -269,7 +287,7 @@ export default function ProductionBoardPage() {
                         {/* Advance Button — hide on complete */}
                         {stage !== 'complete' && (
                           <button
-                            onClick={() => advanceItem(item.work_order_id, item.id)}
+                            onClick={(e) => { e.stopPropagation(); advanceItem(item.work_order_id, item.id); }}
                             disabled={advancing === item.id}
                             className="text-xs font-semibold px-2.5 py-1 rounded-md transition-opacity hover:opacity-80 disabled:opacity-50"
                             style={{ backgroundColor: '#b8960c', color: '#fff' }}

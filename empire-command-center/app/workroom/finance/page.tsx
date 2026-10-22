@@ -2,6 +2,8 @@
 
 import { useEffect, useState } from "react";
 import { API } from "../../lib/api";
+import { openDocViewer } from "../../components/docs/viewerBus";
+import { invoicePdfSrc } from "../../lib/docs-hub/jobVisuals";
 
 /* ── types ─────────────────────────────────────────────── */
 
@@ -442,7 +444,13 @@ export default function FinanceDashboard() {
                 {dashboard.recent_invoices.map((inv) => {
                   const sc = statusColor[inv.status.toLowerCase()] || statusColor.draft;
                   return (
-                    <tr key={inv.id} className="border-b last:border-0" style={{ borderColor: "#f0ede6" }}>
+                    <tr
+                      key={inv.id}
+                      className="border-b last:border-0"
+                      data-testid={`workroom-invoice-${inv.id}`}
+                      style={{ borderColor: "#f0ede6", cursor: "pointer" }}
+                      onClick={() => openDocViewer({ src: invoicePdfSrc(inv.id), title: inv.number || "Invoice", kind: "pdf" })}
+                    >
                       <td className="py-2 font-mono text-xs" style={{ color: "#1a1a2e" }}>{inv.number}</td>
                       <td className="py-2 font-medium" style={{ color: "#1a1a2e" }}>{inv.client_name}</td>
                       <td className="py-2 text-right">{fmt(inv.amount)}</td>
