@@ -231,11 +231,14 @@ def persist_exchange(
 
     Same file the frontend PUT uses. Never writes ``<8-char-id>.json``.
     """
+    from app.services.max.thinking import strip_thinking
+
     owner = owner_key_for_request(request, claimed_user_id)
     cid = safe_chat_id(chat_id)
     path = chat_path(owner, cid, workroom_dir=workroom_dir)
     existing = _read_json(path) if path.exists() else {}
     messages = list(existing.get("messages") or [])
+    assistant_message = strip_thinking(assistant_message)
     already = (
         messages
         and messages[-1].get("role") == "user"
@@ -272,12 +275,15 @@ def upsert_chat(
     workroom_dir: Optional[Path] = None,
     generate_id: bool = False,
 ) -> tuple[dict, str]:
+    from app.services.max.thinking import sanitize_history_messages
+
     owner = owner_key_for_request(request, claimed_user_id)
     cid = safe_chat_id(chat_id, generate=generate_id)
     path = chat_path(owner, cid, workroom_dir=workroom_dir)
     existing = _read_json(path) if path.exists() else {}
     stamp = now_iso()
     status = "updated" if existing else "created"
+    messages = sanitize_history_messages(messages)
     data = {
         "id": cid,
         "owner": owner,

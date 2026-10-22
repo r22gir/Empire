@@ -595,10 +595,12 @@ class AIRouter:
         return result
 
     def _sanitize_minimax_content(self, text: str) -> str:
-        cleaned = (text or "").strip()
-        cleaned = re.sub(r"<think>[\s\S]*?</think>\s*", "", cleaned, flags=re.IGNORECASE).strip()
-        cleaned = re.sub(r"<thinking>[\s\S]*?</thinking>\s*", "", cleaned, flags=re.IGNORECASE).strip()
-        cleaned = re.sub(r"</?think(?:ing)?>", "", cleaned, flags=re.IGNORECASE).strip()
+        from app.services.max.thinking import strip_thinking, visible_text_from_provider_payload
+
+        if isinstance(text, dict) or isinstance(text, list):
+            cleaned = visible_text_from_provider_payload(text)
+        else:
+            cleaned = strip_thinking(text)
         if not cleaned:
             return ""
 
@@ -2399,7 +2401,10 @@ class AIRouter:
             )
             raise Exception(f"MiniMax HTTP {resp.status_code}: {resp.text[:200]}")
         self._record_provider_success("minimax")
-        content = self._sanitize_minimax_content(resp.json()["choices"][0]["message"]["content"])
+        from app.services.max.thinking import visible_text_from_provider_payload
+
+        message = (resp.json().get("choices") or [{}])[0].get("message") or {}
+        content = self._sanitize_minimax_content(visible_text_from_provider_payload(message))
         warning = getattr(reservation, "warning", "") or ""
         if warning:
             content = f"{warning}\n\n{content}"
@@ -2437,7 +2442,13 @@ class AIRouter:
                             error_body = await response.aread()
                             raise Exception(f"MiniMax HTTP {response.status_code}: {error_body.decode()[:200]}")
                         self._record_provider_success("minimax")
+                        from app.services.max.thinking import (
+                            ThinkingStreamFilter,
+                            raw_visible_text_from_provider_payload,
+                        )
+
                         collected = []
+                        think_filter = ThinkingStreamFilter()
                         async for line in response.aiter_lines():
                             if not line.startswith("data: "):
                                 continue
@@ -2449,9 +2460,12 @@ class AIRouter:
                             except json.JSONDecodeError:
                                 continue
                             delta = data.get("choices", [{}])[0].get("delta", {})
-                            text = delta.get("content", "")
+                            # Raw content only — never reasoning_content.
+                            # Filter split <think> tags across deltas.
+                            text = raw_visible_text_from_provider_payload(delta)
                             if text:
-                                collected.append(text)
+                                collected.append(think_filter.feed(text))
+                        collected.append(think_filter.flush())
                         cleaned = self._sanitize_minimax_content("".join(collected))
                         if cleaned:
                             yield cleaned

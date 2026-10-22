@@ -24,7 +24,7 @@ from app.services.max.telegram_bot import telegram_bot, _auto_save_exchange_to_m
 from app.services.max.guardrails import (
     check_input,
     sanitize_output,
-    sanitize_output_streaming,
+    new_thinking_stream_sanitizer,
     SAFE_REFUSAL,
     is_founder_message,
     check_gpu_safety,
@@ -1594,7 +1594,10 @@ def _sanitize_internal_leakage_text(text: str | None) -> str:
     """Remove internal tool/reasoning leakage from visible responses."""
     if not text:
         return ""
-    cleaned = strip_tool_blocks(text)
+    from app.services.max.thinking import strip_thinking
+
+    cleaned = strip_thinking(text)
+    cleaned = strip_tool_blocks(cleaned)
     cleaned = re.sub(r"```(?:tool|json|actions?)?\s*", "", cleaned, flags=re.IGNORECASE)
     cleaned = re.sub(r"```", "", cleaned)
     cleaned = re.sub(r"\bI should check\b[^\n.]*[.\n]?", "", cleaned, flags=re.IGNORECASE)
@@ -4490,6 +4493,7 @@ async def _chat_stream_impl(request: ChatRequest, http_request: Request | None =
                 desk=request.desk, system_prompt=enriched_prompt,
                 source=_usage_source, conversation_id=request.conversation_id or "",
             ).__aiter__()
+            _push_think, _finish_think = new_thinking_stream_sanitizer()
             while True:
                 try:
                     chunk, m_used = await asyncio.wait_for(_initial_iter.__anext__(), timeout=15)
@@ -4499,7 +4503,8 @@ async def _chat_stream_impl(request: ChatRequest, http_request: Request | None =
                     yield f"data: {_safe_dumps({'type': 'heartbeat', 'phase': 'model'})}\n\n"
                     continue
                 model_used = m_used
-                full_response += sanitize_output_streaming(chunk)
+                full_response += _push_think(chunk)
+            full_response += _finish_think()
 
             # Multi-turn tool loop: execute tools, allow follow-up tools (max 3 rounds)
             tool_results_list = list(_stream_finance_entries)
@@ -4573,6 +4578,7 @@ async def _chat_stream_impl(request: ChatRequest, http_request: Request | None =
                             system_prompt=enriched_prompt, source=_usage_source,
                             conversation_id=request.conversation_id or "",
                         ).__aiter__()
+                        _push_think, _finish_think = new_thinking_stream_sanitizer()
                         while True:
                             try:
                                 chunk, m_used = await asyncio.wait_for(_action_followup_iter.__anext__(), timeout=15)
@@ -4582,7 +4588,8 @@ async def _chat_stream_impl(request: ChatRequest, http_request: Request | None =
                                 yield f"data: {_safe_dumps({'type': 'heartbeat', 'phase': 'followup'})}\n\n"
                                 continue
                             model_used = m_used
-                            followup_text += sanitize_output_streaming(chunk)
+                            followup_text += _push_think(chunk)
+                        followup_text += _finish_think()
                         current_text = followup_text
                         full_response = followup_text
                         continue
@@ -4752,6 +4759,7 @@ async def _chat_stream_impl(request: ChatRequest, http_request: Request | None =
                     system_prompt=enriched_prompt, source=_usage_source,
                     conversation_id=request.conversation_id or "",
                 ).__aiter__()
+                _push_think, _finish_think = new_thinking_stream_sanitizer()
                 while True:
                     try:
                         chunk, m_used = await asyncio.wait_for(_followup_iter.__anext__(), timeout=15)
@@ -4761,7 +4769,8 @@ async def _chat_stream_impl(request: ChatRequest, http_request: Request | None =
                         yield f"data: {_safe_dumps({'type': 'heartbeat', 'phase': 'followup'})}\n\n"
                         continue
                     model_used = m_used
-                    followup_text += sanitize_output_streaming(chunk)
+                    followup_text += _push_think(chunk)
+                followup_text += _finish_think()
 
                 current_text = followup_text
                 # Only keep the FINAL round's response — previous rounds are context for the AI, not for the user

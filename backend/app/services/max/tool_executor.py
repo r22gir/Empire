@@ -355,9 +355,12 @@ def parse_tool_blocks_with_errors(text: str) -> tuple[list[dict], list[dict]]:
 
     Block-parse policy: see parse_tool_blocks docstring.
     """
+    from app.services.max.thinking import sanitize_tool_call, strip_thinking
+
     results: list[dict] = []
     errors: list[dict] = []
     seen_payloads: set[str] = set()
+    text = strip_thinking(text or "")
 
     for match in TOOL_BLOCK_RE.finditer(text):
         candidate = match.group(1).strip()
@@ -366,14 +369,14 @@ def parse_tool_blocks_with_errors(text: str) -> tuple[list[dict], list[dict]]:
         seen_payloads.add(candidate)
 
         block_actions, block_errors = _parse_ndjson_block(candidate)
-        results.extend(block_actions)
+        results.extend(sanitize_tool_call(action) for action in block_actions)
         errors.extend(block_errors)
 
     stripped = text.strip()
     if not results and stripped and stripped[0] in "{[":
         # Single raw JSON message (no fences) — same NDJSON-tolerant parser.
         raw_actions, raw_errors = _parse_ndjson_block(stripped)
-        results.extend(raw_actions)
+        results.extend(sanitize_tool_call(action) for action in raw_actions)
         errors.extend(raw_errors)
     elif not results and stripped and '"tool"' not in stripped and "'tool'" not in stripped:
         # Prose-only assistant replies (email bodies, narratives) — not tool blocks.
@@ -637,6 +640,9 @@ def execute_tool(tool_call: dict, desk: Optional[str] = None, access_context: Op
                  column will be NULL until the router plumbing is
                  updated (Phase 3 backlog).
     """
+    from app.services.max.thinking import sanitize_tool_call
+
+    tool_call = sanitize_tool_call(tool_call)
     tool_name = tool_call.get("tool", "")
     try:
         # 2026-09-29: auto-correction now runs BEFORE access control and the
@@ -4768,7 +4774,9 @@ def _brave_search(query: str, num_results: int = 5) -> list[dict]:
 @tool("web_search")
 def _web_search(params: dict, desk: Optional[str] = None) -> ToolResult:
     """Search the web via DuckDuckGo HTML with Brave Search API fallback."""
-    query = params.get("query", "").strip()
+    from app.services.max.thinking import sanitize_tool_query
+
+    query = sanitize_tool_query(params.get("query", "")).strip()
     logger.info(f"[web_search] called with query='{query}'")
     if not query:
         return ToolResult(tool="web_search", success=False, error="Query is required")
