@@ -4,6 +4,7 @@
  */
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { isSyntheticDocId, viewerHref } from './types.ts';
 import { docViewerTarget, invoicePdfSrc, normalizePhotoSrc, quotePdfSrc, visualsFromJob } from './jobVisuals.ts';
 
 test('sets job visuals from photos, drawings, and mockups JSON', () => {
@@ -31,4 +32,14 @@ test('opens quotes and invoices on the real PDF routes', () => {
   const t = docViewerTarget({ url: '/api/v1/drawings/files/plan.pdf', filename: 'plan.pdf' });
   assert.equal(t.src, '/api/v1/drawings/files/plan.pdf');
   assert.equal(t.kind, 'pdf');
+});
+
+test('synthetic job ids open the file src, not the docs-hub index', () => {
+  const docs = visualsFromJob({
+    photos: [{ url: '/api/v1/photos/serve/job/job-mock-hub/room.jpg', filename: 'room.jpg', title: 'Room photo' }],
+  });
+  assert.equal(isSyntheticDocId(docs[0].id), true);
+  const href = viewerHref({ id: docs[0].id, src: docs[0].src, title: docs[0].title });
+  assert.match(href, /src=%2Fapi%2Fv1%2Fphotos%2Fserve/);
+  assert.doesNotMatch(href, /[?&]id=/);
 });

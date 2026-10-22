@@ -9,13 +9,15 @@
  */
 import { useEffect, useRef, useState } from 'react';
 import { Eye, Printer, Download, Share2, Link2, History, MessageCircle, Mail, Copy } from 'lucide-react';
-import { DOCS_API, viewerHref } from '../../lib/docs-hub/types';
+import { DOCS_API, isSyntheticDocId, viewerHref } from '../../lib/docs-hub/types';
 import { openDocViewer, type DocRef } from './viewerBus';
 import './docs.css';
 
 export function docFileUrl(doc: DocRef, download = false): string {
   const p = new URLSearchParams();
-  if (doc.id) p.set('id', doc.id); else if (doc.src) p.set('src', doc.src);
+  if (doc.id && !isSyntheticDocId(doc.id)) p.set('id', doc.id);
+  else if (doc.src) p.set('src', doc.src);
+  else if (doc.id) p.set('id', doc.id);
   if (doc.src && doc.filename) p.set('name', doc.filename);
   if (doc.src && doc.v) p.set('v', doc.v);
   if (download) p.set('download', '1');
@@ -23,7 +25,7 @@ export function docFileUrl(doc: DocRef, download = false): string {
 }
 
 export function absoluteViewerUrl(doc: DocRef): string {
-  const rel = viewerHref({ id: doc.id, src: doc.id ? undefined : doc.src, title: doc.title });
+  const rel = viewerHref({ id: doc.id, src: doc.src, title: doc.title });
   return typeof window === 'undefined' ? rel : `${window.location.origin}${rel}`;
 }
 
