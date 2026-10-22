@@ -93,6 +93,7 @@ const CostTracker = lazy(() => import('./components/business/costs/CostTracker')
 import StudioShell from './studio/StudioShell';
 import VoiceHome from './studio/VoiceHome';
 import TodayCards from './studio/TodayCards';
+import ActiveJobsSection from './studio/ActiveJobsSection';
 import WorkPipeline from './studio/WorkPipeline';
 import MoneyHome from './studio/MoneyHome';
 import JobContextPane from './studio/JobContextPane';
@@ -857,6 +858,7 @@ export default function CommandCenter({ variant = 'studio' }: { variant?: 'studi
             }}
           />
           <TodayCards compact onOpen={applyStudioHref} />
+          <ActiveJobsSection onOpen={applyStudioHref} />
         </div>
       );
     }

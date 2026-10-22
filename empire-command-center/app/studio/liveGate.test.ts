@@ -54,7 +54,7 @@ test('EXAMPLE fixtures are returned only when the gate is on', () => {
 });
 
 test('Work / Today / Money / Job pane only use EXAMPLE_* behind the example flag', () => {
-  const files = ['WorkPipeline.tsx', 'TodayCards.tsx', 'MoneyHome.tsx', 'JobContextPane.tsx', 'VoiceHome.tsx'];
+  const files = ['WorkPipeline.tsx', 'TodayCards.tsx', 'MoneyHome.tsx', 'JobContextPane.tsx', 'VoiceHome.tsx', 'ActiveJobsSection.tsx'];
   for (const name of files) {
     const src = read(name);
     const flash = /example\s*\|\|\s*!live\s*\?\s*EXAMPLE_/;

@@ -48,3 +48,39 @@
   .jh-sec { padding: 14px; overflow-x: auto; }
   .jh-tl { grid-template-columns: 78px 1fr; }
 }
+
+.phase-stepper { margin: 4px 0 16px; padding: 14px 14px 12px; border: 1px solid var(--v-line, #ece8e0); border-radius: 14px; background: #fff; }
+.phase-stepper.dark { background: #16130e; border-color: rgba(212,175,55,0.18); color: #f4efe4; }
+.phase-stepper-track {
+  display: flex; gap: 4px; overflow-x: auto; scrollbar-width: thin;
+  padding-bottom: 8px; scroll-snap-type: x proximity;
+}
+.phase-step {
+  flex: 0 0 auto; scroll-snap-align: center; min-height: 44px;
+  display: flex; flex-direction: column; align-items: center; gap: 4px;
+  border: 0; background: transparent; cursor: pointer; padding: 4px 8px; color: inherit;
+}
+.phase-step .dot { width: 12px; height: 12px; border-radius: 50%; background: #d4d0c8; }
+.phase-step.done .dot, .phase-step.current .dot { background: var(--ph, #b8960c); }
+.phase-step.current .dot { box-shadow: 0 0 0 4px color-mix(in srgb, var(--ph, #b8960c) 28%, transparent); }
+.phase-step .lbl { font-size: 10px; font-weight: 650; max-width: 72px; text-align: center; line-height: 1.2; color: #888; }
+.phase-step.current .lbl { color: var(--ph, #b8960c); }
+.phase-step.done .lbl { color: #444; }
+.phase-stepper.dark .phase-step .lbl { color: #9a9284; }
+.phase-stepper.dark .phase-step.current .lbl { color: #d4af37; }
+.phase-stepper-actions { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-top: 8px; }
+.phase-next {
+  min-height: 44px; border: 0; border-radius: 10px; padding: 10px 16px; cursor: pointer;
+  background: #b8960c; color: #121214; font: 700 13px/1 var(--font-inter, sans-serif);
+  display: inline-flex; align-items: center; gap: 6px;
+}
+.phase-next:disabled { opacity: 0.45; cursor: default; }
+.phase-pick { display: flex; flex-direction: column; gap: 4px; font-size: 11px; color: #777; min-width: 180px; }
+.phase-pick select { min-height: 40px; border-radius: 8px; border: 1px solid #ece8e0; padding: 6px 8px; background: #fff; }
+.phase-hint { margin: 0; flex: 1 1 220px; font-size: 12px; color: #777; }
+.phase-toast {
+  position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%);
+  z-index: 10000; background: #121214; color: #fff; border: 1px solid #b8960c;
+  border-radius: 999px; padding: 10px 16px; font: 600 13px/1.3 sans-serif;
+  max-width: min(92vw, 520px); cursor: pointer;
+}
