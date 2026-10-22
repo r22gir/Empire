@@ -1,0 +1,103 @@
+{
+  "endpoint": "/api/v1/max/chat",
+  "user": "Resúmeme el día",
+  "model_first_payload": "[Tool call: get_today_agenda] [Tool call: list_schedule] [Tool call: get_tasks]",
+  "executed": [
+    "get_today_agenda",
+    "list_schedule",
+    "get_tasks",
+    "get_today_agenda",
+    "list_schedule",
+    "get_tasks"
+  ],
+  "response": {
+    "response": "Hoy tienes: Sesión AMP a las 10am.",
+    "model_used": "MiniMax-M3",
+    "fallback_used": false,
+    "tool_results": [
+      {
+        "tool": "get_today_agenda",
+        "success": true,
+        "result": {
+          "count": 1,
+          "reliable_calendar": true,
+          "from_open_projects": false,
+          "items": [
+            {
+              "title": "Sesión AMP 10am",
+              "source": "calendar"
+            }
+          ],
+          "message": "1 item on today — Sesión AMP 10am"
+        },
+        "error": null,
+        "provider": null,
+        "raw_type": "dict"
+      },
+      {
+        "tool": "list_schedule",
+        "success": true,
+        "result": {
+          "count": 1,
+          "reliable_calendar": true,
+          "from_open_projects": false,
+          "items": [
+            {
+              "title": "Sesión AMP 10am",
+              "source": "calendar"
+            }
+          ],
+          "message": "1 item on today — Sesión AMP 10am"
+        },
+        "error": null,
+        "provider": null,
+        "raw_type": "dict"
+      },
+      {
+        "tool": "get_tasks",
+        "success": true,
+        "result": {
+          "count": 1,
+          "reliable_calendar": true,
+          "from_open_projects": false,
+          "items": [
+            {
+              "title": "Sesión AMP 10am",
+              "source": "calendar"
+            }
+          ],
+          "message": "1 item on today — Sesión AMP 10am"
+        },
+        "error": null,
+        "provider": null,
+        "raw_type": "dict"
+      }
+    ],
+    "steps": [
+      "✓ get_today_agenda",
+      "✓ list_schedule",
+      "✓ get_tasks"
+    ],
+    "quality": {
+      "icon": "✅",
+      "color": "#22c55e",
+      "label": "Verified",
+      "checks": [
+        "tool_verification",
+        "uncertainty_detection",
+        "entity_verification",
+        "calculation_check",
+        "completeness_check"
+      ],
+      "warnings": [],
+      "validation_time_ms": 0.1
+    },
+    "response_id": "e88f9f3f-d59",
+    "metadata": {
+      "registry_version": "operating-registry-v2",
+      "surface": "Founder/Web MAX",
+      "response_at": "2026-10-22T10:45:22.988869+00:00",
+      "skill_used": null
+    }
+  }
+}
