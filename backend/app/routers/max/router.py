@@ -2724,6 +2724,8 @@ async def _maybe_job_drawing_desk_response(request: ChatRequest) -> ChatResponse
             request.message or "",
             history=request.history,
             job_hint=request.job_id,
+            conversation_id=request.conversation_id,
+            channel=request.channel,
         )
     except Exception as exc:
         return ChatResponse(
@@ -2841,7 +2843,8 @@ def _maybe_handle_direct_route_request(request: ChatRequest) -> ChatResponse | N
         try:
             from app.services.max.quick_replies import direct_reply
             _qr = direct_reply(request.message or "", channel=request.channel or "web",
-                               has_image=bool(request.image_filename))
+                               has_image=bool(request.image_filename),
+                               history=request.history)
         except Exception as _qr_err:
             logger.debug(f"quick reply skipped: {_qr_err}")
             _qr = None

@@ -337,7 +337,8 @@ def render_elevation_segment(
         note = f'Padded module back: {meta["nx"]} x {meta["ny"]} grid ({format_in(meta["mod_w"])} x {format_in(meta["mod_h"])})'
 
     elif pattern == "plain":
-        note = f'Plain back ({spec.material.name})'
+        from app.services.drawing.mockup_engine.materials import back_label_of, strip_supplier_text
+        note = f'Plain back ({strip_supplier_text(back_label_of(spec.material)) or spec.material.color_name})'
 
     # Dimensions
     dim_h(c, x, x + w, by + bh + 8, f"{name}  {format_in(length)}")
@@ -348,7 +349,8 @@ def render_elevation_segment(
     c.setFillColor(MUT)
     c.setFont("Helvetica", 6.5)
     c.drawString(x, y - 10, note)
-    c.drawString(x, y - 19, f"seat cushion: plain {spec.material.color_name} (height shown nominal)")
+    seat_name = getattr(spec.material, "resolved_seat_color_name", lambda: spec.material.color_name)()
+    c.drawString(x, y - 19, f"seat cushion: plain {seat_name} (height shown nominal)")
 
     return by + bh
 

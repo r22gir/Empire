@@ -36,6 +36,7 @@ from app.services.max.job_drawing_intent import (
     DRAWING_DESK_ID,
     extract_job_hint,
     extract_spec_changes,
+    is_drawing_link_followup,
     merge_drawing_job_context,
 )
 
@@ -118,20 +119,43 @@ def resolve_internal_fabric(token: str | None, registry_rows: list[dict] | None 
             rows = load_registry_rows()
         except Exception:
             rows = []
+    def _label(code: str | None, color: str | None, kind: str = "vinyl") -> str:
+        code = (code or "").strip()
+        color = (color or "").strip()
+        if code and color:
+            if color.lower() in code.lower():
+                return code
+            return f"{code}-{color}"
+        if color:
+            return f"{color} {kind}".strip()
+        return code or "TBC — CONFIRM BEFORE CUT"
+
     code_match = re.match(r"^(V\d{3}-[A-Za-z0-9]+)$", raw, re.I)
     if code_match:
         code = code_match.group(1)
         for row in rows:
             if str(row.get("code") or "").lower() == code.lower():
                 color = row.get("color") or code.split("-", 1)[-1]
-                return {"code": row.get("code"), "color": color, "label": f"{row.get('code')} {color}"}
+                kind = str(row.get("material_type") or "vinyl")
+                return {
+                    "code": row.get("code"),
+                    "color": color,
+                    "material_type": kind,
+                    "label": _label(row.get("code"), color, kind),
+                }
         return {"code": None, "color": None, "label": raw, "unknown_code": code}
     color_key = raw.lower()
     hits = [r for r in rows if str(r.get("color") or "").lower() == color_key]
     if len(hits) == 1:
         row = hits[0]
-        return {"code": row.get("code"), "color": row.get("color"), "label": f"{row.get('code')} {row.get('color')}"}
-    return {"code": None, "color": raw, "label": raw}
+        kind = str(row.get("material_type") or "vinyl")
+        return {
+            "code": row.get("code"),
+            "color": row.get("color"),
+            "material_type": kind,
+            "label": _label(row.get("code"), row.get("color"), kind),
+        }
+    return {"code": None, "color": raw, "material_type": "vinyl", "label": _label(None, raw, "vinyl")}
 
 
 def _layout_from_mapping(data: dict[str, Any] | None) -> dict[str, Any]:
@@ -461,13 +485,16 @@ def _piece_spec(layout: dict[str, Any], spec_changes: dict[str, Any], fabrics: d
     client = (quote or {}).get("customer_name") or layout.get("client_name") or "Client"
     project = (quote or {}).get("project_name") or layout.get("project_name") or "Job drawing"
     number = (quote or {}).get("quote_number") or layout.get("quote_number") or ""
+    from app.services.drawing.mockup_engine.materials import apply_seat_back_finish
+    material = MaterialFinishSpec(material_type="vinyl")
+    apply_seat_back_finish(material, back=fabrics.get("back") or {}, seat=fabrics.get("seat") or {})
     return PieceSpec(
         name=project or f"{client} drawing",
         piece_type="banquette",
         client_name=client,
         project_name=project,
         quote_number=number or "INTERNAL",
-        status="INTERNAL ONLY",
+        status="NOT SENT",
         business_unit="workroom",
         footprint=footprint,
         back=BackStyleSpec(
@@ -480,16 +507,10 @@ def _piece_spec(layout: dict[str, Any], spec_changes: dict[str, Any], fabrics: d
             seat_height_in=float(layout.get("seat_height_in") or 18.0),
             cushion_thickness_in=float(layout.get("cushion_thickness_in") or 4.0),
         ),
-        material=MaterialFinishSpec(
-            material_type="vinyl",
-            name=back_label,
-            color_name=str(fabrics.get("back", {}).get("color") or back_label),
-        ),
+        material=material,
         notes=[
-            INTERNAL_STAMP,
             f"Back fabric: {back_label}",
             f"Seat fabric: {seat_label}",
-            "Wood / foam cut and fabric cut are labeled separately.",
         ],
     )
 
@@ -606,6 +627,78 @@ def _try_mockup_pdf(spec, path: Path) -> bool:
         return False
 
 
+def _is_full_set_job(job_hint: str | None, message: str = "") -> bool:
+    blob = f"{job_hint or ''} {message or ''}".lower()
+    if re.search(r"\b(?:u\s*\+?\s*l|u and l|both benches|full set)\b", blob):
+        return True
+    key = (job_hint or "").strip().lower().replace("'", "")
+    key = key.rstrip("s")
+    return key in _KNOWN_LAYOUT_PRESETS or (job_hint or "").strip().lower() in _KNOWN_LAYOUT_PRESETS
+
+
+def _apply_revision_to_spec(spec, changes: dict[str, Any], fabrics: dict[str, Any], quote: dict[str, Any] | None):
+    from app.services.drawing.mockup_engine.materials import apply_seat_back_finish
+    if changes.get("channel_width_in") is not None:
+        spec.back.channel_width_in = float(changes["channel_width_in"])
+        spec.back.style = "channel"
+        spec.back.channel_orientation = "vertical"
+    apply_seat_back_finish(spec.material, back=fabrics.get("back") or {}, seat=fabrics.get("seat") or {})
+    if quote:
+        if quote.get("customer_name"):
+            spec.client_name = quote["customer_name"]
+        if quote.get("quote_number"):
+            spec.quote_number = quote["quote_number"]
+        if quote.get("project_name"):
+            spec.project_name = quote["project_name"]
+    spec.status = "NOT SENT"
+    return spec
+
+
+def _job_piece_specs(
+    *,
+    job_hint: str | None,
+    message: str,
+    layout: dict[str, Any],
+    changes: dict[str, Any],
+    fabrics: dict[str, Any],
+    quote: dict[str, Any] | None,
+) -> list:
+    pieces = []
+    if _is_full_set_job(job_hint, message):
+        try:
+            from app.services.drawing.mockup_engine.presets import marleys_u_and_l_preset
+            both = marleys_u_and_l_preset()
+            for key in ("u_bench", "l_bench"):
+                spec = both[key].model_copy(deep=True)
+                _apply_revision_to_spec(spec, changes, fabrics, quote)
+                pieces.append(spec)
+        except Exception:
+            pieces = []
+    if not pieces:
+        pieces = [_piece_spec(layout, changes, fabrics, quote)]
+    return pieces
+
+
+def _revision_filename(job_hint: str | None, date_str: str, n_pieces: int) -> str:
+    slug = re.sub(r"[^a-zA-Z0-9]+", "_", (job_hint or "job")).strip("_").lower() or "job"
+    suffix = "ul" if n_pieces > 1 else "rev"
+    unique = uuid.uuid4().hex[:8]
+    return f"{slug}_{suffix}_{date_str}_{unique}.pdf"
+
+
+def _share_url_for(path: Path | str) -> str:
+    try:
+        from app.services.max.doc_links import studio_found_url
+        return studio_found_url(str(path)) or ""
+    except Exception:
+        return ""
+
+
+def _verify_fresh_pdf(path: Path, generated_at: float) -> dict[str, Any]:
+    from app.services.max.last_drawing import verify_generated_file
+    return verify_generated_file(str(path), generated_at=generated_at)
+
+
 def generate_job_drawing(
     *,
     message: str = "",
@@ -616,6 +709,8 @@ def generate_job_drawing(
     takeoff: dict[str, Any] | None = None,
     spec_changes: dict[str, Any] | None = None,
     output_dir: str | Path | None = None,
+    conversation_id: str | None = None,
+    chat_channel: str | None = None,
 ) -> dict[str, Any]:
     """Build a revised internal drawing PDF for a job. Temp data only in tests."""
     ctx = merge_drawing_job_context(message, history)
@@ -693,19 +788,33 @@ def generate_job_drawing(
     project = (quote or {}).get("project_name") or layout.get("project_name") or f"{client} drawing"
     out_dir = Path(output_dir) if output_dir else _drawings_dir()
     out_dir.mkdir(parents=True, exist_ok=True)
-    slug = re.sub(r"[^a-zA-Z0-9_-]+", "_", f"{hint or 'job'}_{uuid.uuid4().hex[:8]}").strip("_")
-    pdf_path = out_dir / f"job_drawing_{slug}.pdf"
+    from datetime import date as _date
+    import time as _time
+    date_str = _date.today().isoformat()
+    revision = f"REV {date_str}"
+    pieces = _job_piece_specs(
+        job_hint=hint, message=message, layout=layout,
+        changes=changes, fabrics=fabrics, quote=quote,
+    )
+    pdf_name = _revision_filename(hint, date_str, len(pieces))
+    pdf_path = out_dir / pdf_name
+    shop_path = out_dir / f"shop_{pdf_name}"
+    generated_at = _time.time()
 
-    spec = None
-    mockup_path = out_dir / f"job_drawing_{slug}_engine.pdf"
     mockup_ok = False
     try:
-        spec = _piece_spec(layout, changes, fabrics, quote)
-        mockup_ok = _try_mockup_pdf(spec, mockup_path)
+        from app.services.drawing.mockup_engine.generator import render_job_set_mockup_pdf
+        render_job_set_mockup_pdf(
+            pieces, str(pdf_path), date_str=date_str, revision=revision,
+        )
+        mockup_ok = pdf_path.exists() and pdf_path.stat().st_size > 80
     except Exception:
         mockup_ok = False
+        if len(pieces) == 1:
+            mockup_ok = _try_mockup_pdf(pieces[0], pdf_path)
+
     _write_shop_pdf(
-        path=pdf_path,
+        path=shop_path,
         spec_notes=[INTERNAL_STAMP],
         layout={**layout, "channel_width_in": channel, "depth_in": depth, "back_height_in": back_h, "width_in": width},
         cuts=cuts,
@@ -714,16 +823,29 @@ def generate_job_drawing(
         client=client,
         project=project,
     )
+    if not mockup_ok:
+        if shop_path.exists() and shop_path.stat().st_size > 80:
+            pdf_path = shop_path
+        else:
+            return {
+                "success": False,
+                "error": "Drawing engine did not write a PDF.",
+                "desk": DRAWING_DESK_ID,
+                "internal_only": True,
+            }
 
-    size = pdf_path.stat().st_size if pdf_path.exists() else 0
-    if size < 80:
+    verified = _verify_fresh_pdf(pdf_path, generated_at)
+    if not verified.get("ok"):
         return {
             "success": False,
-            "error": "Drawing engine did not write a PDF.",
+            "error": f"Generated file failed path/mtime check: {verified.get('error')}",
             "desk": DRAWING_DESK_ID,
             "internal_only": True,
+            "verify": verified,
         }
-    return {
+    share_url = _share_url_for(verified["path"])
+    piece_names = [getattr(p, "name", "") for p in pieces]
+    result = {
         "success": True,
         "desk": DRAWING_DESK_ID,
         "desk_label": "Kai (ForgeDesk / Drawing Studio)",
@@ -743,25 +865,55 @@ def generate_job_drawing(
         "fabrics": fabrics,
         "cut_list": cuts,
         "estimate_conflicts": conflicts,
-        "pdf_path": str(pdf_path),
-        "pdf_filename": pdf_path.name,
-        "engine_pdf_path": str(mockup_path) if mockup_ok else None,
+        "pdf_path": verified["path"],
+        "pdf_filename": Path(verified["path"]).name,
+        "shop_pdf_path": str(shop_path) if shop_path.exists() else None,
+        "engine_pdf_path": verified["path"] if mockup_ok else None,
+        "mtime": verified["mtime"],
+        "generated_at": generated_at,
+        "share_url": share_url,
+        "revision": revision,
+        "date": date_str,
+        "piece_names": piece_names,
+        "page_count": 2 * len(pieces),
         "branding": EMPIRE_BRAND,
         "stamp": INTERNAL_STAMP,
-        "message": (
-            f"New internal shop drawing for {client}: {pdf_path.name}. "
-            f"{INTERNAL_STAMP}"
-            + (f" Conflicts: {'; '.join(conflicts)}" if conflicts else "")
-        ),
+        "message": _founder_message(client, Path(verified["path"]).name, share_url, revision, conflicts),
     }
+    try:
+        from app.services.max.last_drawing import remember_drawing
+        remember_drawing(conversation_id, result, channel=chat_channel)
+    except Exception:
+        pass
+    return result
+
+
+def _founder_message(
+    client: str,
+    filename: str,
+    share_url: str,
+    revision: str,
+    conflicts: list[str],
+) -> str:
+    if share_url:
+        line = f"Revised drawing for {client} ({revision}): [{filename}]({share_url})"
+    else:
+        line = f"Revised drawing for {client} ({revision}): {filename}"
+    if conflicts:
+        line += f" Conflicts: {'; '.join(conflicts)}"
+    return line
 
 
 def founder_drawing_reply(result: dict[str, Any]) -> str:
-    """Short founder-facing line. Never a pipeline dump."""
+    """Short founder-facing line. Never a pipeline dump. Prefer the new share URL."""
     if not result:
         return "Drawing desk failed: no result."
     if result.get("success"):
-        return result.get("message") or f"New internal drawing: {result.get('pdf_filename')}"
+        url = result.get("share_url") or ""
+        name = result.get("pdf_filename") or "drawing.pdf"
+        if url:
+            return result.get("message") or f"[{name}]({url})"
+        return result.get("message") or f"New drawing: {name}"
     return f"Drawing desk could not finish: {result.get('error') or 'unknown error'}."
 
 
@@ -769,6 +921,8 @@ def run_job_drawing_turn(
     message: str,
     history: Any = None,
     job_hint: str | None = None,
+    conversation_id: str | None = None,
+    channel: str | None = None,
     **kwargs: Any,
 ) -> dict[str, Any]:
     """Chat / stream entry: classify then generate. Used by both /chat doors."""
@@ -776,10 +930,31 @@ def run_job_drawing_turn(
 
     if not should_route_to_drawing_desk(message, history):
         return {"handled": False}
+    if is_drawing_link_followup(message):
+        try:
+            from app.services.max.last_drawing import recall_drawing, verify_record
+            last = recall_drawing(conversation_id, channel=channel)
+            checked = verify_record(last)
+            if last and checked.get("ok") and last.get("share_url"):
+                last = dict(last)
+                last["pdf_path"] = checked["path"]
+                last["mtime"] = checked["mtime"]
+                return {
+                    "handled": True,
+                    "success": True,
+                    "response": founder_drawing_reply(last),
+                    "result": last,
+                    "model_used": "drawing-desk",
+                    "desk": DRAWING_DESK_ID,
+                }
+        except Exception:
+            pass
     result = generate_job_drawing(
         message=message,
         history=history,
         job_hint=job_hint,
+        conversation_id=conversation_id,
+        chat_channel=channel,
         **kwargs,
     )
     return {

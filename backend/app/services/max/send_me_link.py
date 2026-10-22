@@ -33,6 +33,28 @@ FAMILY_REFUSED = (
     "It only delivers to Rafael on Studio."
 )
 SEND_VIAS = ("whatsapp", "email")
+STUDIO_VIAS = frozenset({"studio", "link", "enlace", "view", "open"})
+_STUDIO_WORD = re.compile(r"\b(?:studio|link|enlace)\b", re.I)
+
+
+def wants_studio_share(text: str | None = None, via: str | None = None) -> bool:
+    """True when Rafael asked for a Studio share link, not WhatsApp/email."""
+    raw_via = (via or "").strip().lower()
+    if raw_via in STUDIO_VIAS:
+        return True
+    return bool(_STUDIO_WORD.search(text or ""))
+
+
+def resolve_voice_share_via(user_text: str | None = None, via: str | None = None) -> str:
+    """Voice: 'studio' / 'link' → studio. Never default those to email/WhatsApp."""
+    raw = (via or "").strip().lower()
+    if wants_studio_share(user_text, raw):
+        return "studio"
+    if raw in ("email", "mail", "gmail"):
+        return "email"
+    if raw in ("whatsapp", "wa", "whats app"):
+        return "whatsapp"
+    return "studio"
 _EMAIL_IN_BRACKETS = re.compile(r"<([^<>]+@[^<>]+)>")
 _BARE_EMAIL = re.compile(r"([A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,})")
 
@@ -294,15 +316,69 @@ def _deliver_whatsapp(path: str, *, to: str, caption: str) -> dict[str, Any]:
     return _run_async(_send_whatsapp_file(to, path, caption))
 
 
+def _studio_share_only(path: str, *, query: str = "") -> dict[str, Any]:
+    """Return a studio share URL. Never emails or WhatsApps."""
+    from app.services.max import file_finder as ff
+    from app.services.max.doc_links import studio_found_url
+
+    name = os.path.basename(path)
+    shown = ff._display_path(path)
+    url = studio_found_url(path)
+    return {
+        "success": True,
+        "result": {
+            "via": "studio",
+            "name": name,
+            "path": shown,
+            "query": query,
+            "viewer_url": url,
+            "download_url": (url + "&download=1") if url else "",
+            "markdown_link": f"[{name}]({url})" if url else name,
+            "message": f"[{name}]({url})" if url else f"{name} — studio link.",
+            "sent": False,
+        },
+    }
+
+
 def send_me_this_link(params: dict) -> dict[str, Any]:
     """Core send. Returns {success, result?, error?}. Tests mock _deliver_*."""
     if family_edition_blocked():
         return {"success": False, "error": FAMILY_REFUSED}
-    via = str(params.get("via") or params.get("channel") or "whatsapp").strip().lower()
-    if via in ("mail", "gmail"):
+    via = str(params.get("via") or params.get("channel") or "").strip().lower()
+    user_text = str(params.get("user_text") or params.get("query") or params.get("what") or "")
+    if wants_studio_share(user_text, via):
+        via = "studio"
+    elif via in ("mail", "gmail"):
         via = "email"
-    if via in ("wa", "whats app", "chat"):
+    elif via in ("wa", "whats app", "chat"):
         via = "whatsapp"
+    elif not via:
+        via = "whatsapp"
+    if via == "studio":
+        ref = str(params.get("file_id") or params.get("path") or params.get("file") or "").strip()
+        query = str(params.get("query") or params.get("what") or params.get("ref") or "").strip()
+        history = params.get("history")
+        path = None
+        if ref:
+            from app.services.max import file_finder as ff
+            path = ff.resolve_file(ref)
+        if not path:
+            looked = find_latest_document(query or ref or "drawing", history)
+            match = looked.get("match")
+            if match:
+                from app.services.max import file_finder as ff
+                path = ff.resolve_file(match.get("file_id") or match.get("path") or "")
+            if not path:
+                near = "; ".join(c.get("name") or c.get("path") or "" for c in looked.get("closest") or [])
+                return {
+                    "success": False,
+                    "result": looked,
+                    "error": (
+                        f'No matching drawing or doc for "{looked.get("query") or query}". '
+                        + (f"Closest: {near}." if near else "Nothing close either.")
+                    ),
+                }
+        return _studio_share_only(path, query=query)
     gate = authorize_recipient(via, params.get("to"))
     if not gate["authorized"]:
         return {"success": False, "error": gate["error"]}

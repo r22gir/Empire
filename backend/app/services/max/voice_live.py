@@ -646,7 +646,20 @@ def run_voice_tool(name: str, arguments: dict[str, Any], *, call_id: str = "",
                                            f"Rafael's approval instead."}
     call = {k: v for k, v in (arguments or {}).items() if not str(k).startswith("_")}
     if name == SEND_ME_TOOL:
-        via = str(call.get("via") or "whatsapp").strip().lower()
+        from app.services.max.send_me_link import wants_studio_share
+        via_in = str(call.get("via") or "").strip().lower()
+        call["user_text"] = user_text
+        if wants_studio_share(user_text, via_in):
+            from app.services.max.send_me_link import send_me_this_link
+            call["via"] = "studio"
+            data = send_me_this_link(call)
+            return {
+                "success": bool(data.get("success")),
+                "tool": SEND_ME_TOOL,
+                "result": data.get("result"),
+                "error": data.get("error"),
+            }
+        via = via_in or "whatsapp"
         if via not in ("whatsapp", "email"):
             via = "whatsapp"
         call["via"] = via
@@ -745,7 +758,8 @@ def run_voice_tool(name: str, arguments: dict[str, Any], *, call_id: str = "",
     elif name == "find_files":
         call["limit"] = min(int(call.get("limit") or 8), 20)
     elif name == SHARE_TOOL:
-        call["via"] = str(call.get("via") or "email")
+        from app.services.max.send_me_link import resolve_voice_share_via
+        call["via"] = resolve_voice_share_via(user_text, call.get("via"))
     result = execute_tool(call, desk=None, access_context=None, founder=False, channel="voice_live")
     return _compact_for_voice(name, result.to_dict())
 

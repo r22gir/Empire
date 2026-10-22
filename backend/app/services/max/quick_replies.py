@@ -290,10 +290,28 @@ def scrub_internal_sources(text: str) -> str:
 
 
 # ── router hook ──────────────────────────────────────────────────────────────
-def direct_reply(message: str, *, channel: str = "web", has_image: bool = False) -> Optional[dict[str, Any]]:
+def direct_reply(
+    message: str,
+    *,
+    channel: str = "web",
+    has_image: bool = False,
+    history: Any = None,
+) -> Optional[dict[str, Any]]:
     """Return {'text', 'skill', 'quote'?} for messages answered without the model, else None."""
     if has_image:
         return None  # the model must read the attached image first
+    try:
+        from app.services.max.job_drawing_intent import (
+            history_has_drawing_in_progress,
+            is_drawing_link_followup,
+            should_route_to_drawing_desk,
+        )
+        if should_route_to_drawing_desk(message, history):
+            return None
+        if is_drawing_link_followup(message) and history_has_drawing_in_progress(history):
+            return None
+    except Exception:
+        pass
     if is_greeting(message):
         return {"text": greeting_reply(), "skill": "greeting"}
     if is_docs_location_request(message):

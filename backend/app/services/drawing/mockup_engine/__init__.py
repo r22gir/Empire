@@ -15,11 +15,16 @@ from app.services.drawing.mockup_engine.presets import (
     u_bench_preset, single_chair_preset, woodcraft_wall_unit_preset,
 )
 from app.services.drawing.mockup_engine.generator import (
-    render_piece_mockup_pdf, render_pdf_to_png_previews,
+    render_piece_mockup_pdf, render_job_set_mockup_pdf, render_pdf_to_png_previews,
 )
-from app.services.drawing.mockup_engine.renderers_3d import (
-    render_3d, build_viewer_html, export_spec_to_glb,
-)
+try:
+    from app.services.drawing.mockup_engine.renderers_3d import (
+        render_3d, build_viewer_html, export_spec_to_glb,
+    )
+except Exception:  # trimesh / OpenGL optional for 2D shop sheets
+    render_3d = None  # type: ignore
+    build_viewer_html = None  # type: ignore
+    export_spec_to_glb = None  # type: ignore
 from app.services.drawing.mockup_engine.nesting_engine import (
     NestingConfig, nest_project, generate_parts_for_piece,
     optimize_foam_nesting, optimize_dacron_nesting, optimize_fabric_nesting,
@@ -48,6 +53,7 @@ __all__ = [
     "single_chair_preset",
     "woodcraft_wall_unit_preset",
     "render_piece_mockup_pdf",
+    "render_job_set_mockup_pdf",
     "render_pdf_to_png_previews",
     "render_3d",
     "build_viewer_html",
