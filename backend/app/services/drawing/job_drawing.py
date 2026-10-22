@@ -195,6 +195,13 @@ def _is_marley_job(job_hint: str | None) -> bool:
 
 def _preset_layout(job_hint: str | None) -> dict[str, Any]:
     """Prior layout baked into the drawing engine for a known job name."""
+    try:
+        from app.services.drawing.templates.banquette_fixtures import known_job_layouts
+        found = known_job_layouts(job_hint)
+        if found:
+            return dict(found[0])
+    except Exception:
+        pass
     key = (job_hint or "").strip().lower().rstrip("s")
     key = key.replace("'", "")
     preset_name = _KNOWN_LAYOUT_PRESETS.get(key) or _KNOWN_LAYOUT_PRESETS.get((job_hint or "").strip().lower())
@@ -210,6 +217,13 @@ def _preset_layout(job_hint: str | None) -> dict[str, Any]:
 
 def job_set_layouts(job_hint: str | None) -> list[dict[str, Any]]:
     """Full job set (U + L) for known multi-piece jobs. Empty when only one piece exists."""
+    try:
+        from app.services.drawing.templates.banquette_fixtures import known_job_layouts
+        found = known_job_layouts(job_hint)
+        if found:
+            return found
+    except Exception:
+        pass
     if not _is_marley_job(job_hint):
         return []
     try:
@@ -667,6 +681,15 @@ def _try_job_set_pdf(specs: list, path: Path, *, revision: str, date_str: str) -
         return False
 
 
+def _try_standard_banquette_pdf(job, path: Path) -> bool:
+    try:
+        from app.services.drawing.templates.banquette_standard import render_banquette_job_pdf
+        render_banquette_job_pdf(job, path)
+        return path.exists() and path.stat().st_size > 80
+    except Exception:
+        return False
+
+
 def next_revision_letter(out_dir: Path, job_slug: str) -> str:
     """A, B, C… based on how many prior files exist for this job. Never reuse a filename."""
     n = 0
@@ -783,13 +806,20 @@ def generate_job_drawing(
     set_name = new_revision_filename(job_slug, revision, today)
     set_path = out_dir / set_name
 
-    set_layouts = job_set_layouts(hint)
-    if not set_layouts:
+    explicit = _has_dims(_layout_from_mapping(layout_data)) or _has_dims(_layout_from_mapping(takeoff))
+    if explicit:
         set_layouts = [layout]
-    specs = []
+    else:
+        set_layouts = job_set_layouts(hint) or [layout]
+    piece_layouts = []
     for piece_layout in set_layouts:
         piece = dict(piece_layout)
         piece["channel_width_in"] = channel
+        if foam is not None:
+            piece["foam_thickness_in"] = foam
+        piece_layouts.append(piece)
+    specs = []
+    for piece in piece_layouts:
         try:
             specs.append(_piece_spec(piece, changes, fabrics, quote))
         except Exception:
@@ -798,8 +828,29 @@ def generate_job_drawing(
         spec.revision = revision
         spec.drawn_date = today
 
+    standard_job = None
+    try:
+        from app.services.drawing.templates.banquette_job import (
+            build_banquette_job,
+            result_cut_list,
+        )
+        standard_job = build_banquette_job(
+            layouts=piece_layouts,
+            fabrics=fabrics,
+            conflicts=conflicts,
+            quote=quote,
+            revision=revision,
+            drawn_date=today,
+            job_hint=hint,
+        )
+        cuts = result_cut_list(standard_job)
+    except Exception:
+        standard_job = None
+
     job_set_ok = False
-    if specs:
+    if standard_job is not None:
+        job_set_ok = _try_standard_banquette_pdf(standard_job, set_path)
+    if not job_set_ok and specs:
         job_set_ok = _try_job_set_pdf(specs, set_path, revision=revision, date_str=today)
     mockup_ok = False
     mockup_path = None
