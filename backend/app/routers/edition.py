@@ -221,6 +221,16 @@ async def get_edition(request: Request):
     payload["greeting"] = greeting(include_owner=show_owner)
     payload["assistant"]["greeting_es"] = greeting("es", include_owner=show_owner)
     payload["assistant"]["greeting_en"] = greeting("en", include_owner=show_owner)
+    payload["whatsapp_guide"] = None
+    if show_owner:
+        try:
+            from app.edition import is_amp
+            from app.services.maxe_guides import pending_whatsapp_guide
+
+            if is_amp():
+                payload["whatsapp_guide"] = pending_whatsapp_guide(persist=True)
+        except Exception:
+            payload["whatsapp_guide"] = None
     if is_family_edition():
         try:
             from app.services.edition_seed import maybe_load_seed

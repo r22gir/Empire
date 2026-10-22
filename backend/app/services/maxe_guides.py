@@ -4,7 +4,11 @@ Secrets never belong in chat. WhatsApp tokens go to /amp/whatsapp.
 """
 from __future__ import annotations
 
+import re
 from typing import Optional
+
+DEFAULT_PENDING_WHATSAPP_KEY = "pendiente_whatsapp_famp"
+_PENDING_WHATSAPP_KEY_RE = re.compile(r"(?i)^pendiente_.*whatsapp")
 
 COMPANY_STEPS = (
     ("name", "¿Cómo se llama la empresa?"),
@@ -124,8 +128,12 @@ def company_guide_next(answers: Optional[dict] = None) -> dict:
     }
 
 
+def whatsapp_step_keys() -> list[str]:
+    return [item[0] for item in WHATSAPP_STEPS]
+
+
 def whatsapp_guide_next(step: str = "") -> dict:
-    keys = [item[0] for item in WHATSAPP_STEPS]
+    keys = whatsapp_step_keys()
     current = (step or "").strip() or keys[0]
     if current not in keys:
         current = keys[0]
@@ -141,3 +149,163 @@ def whatsapp_guide_next(step: str = "") -> dict:
         "juan_number_not_rafael": True,
         "done": index == len(keys) - 1,
     }
+
+
+def format_whatsapp_guide_message(guide: dict, webhook_url: str = "") -> str:
+    """One Spanish question. Keys stay on /amp/whatsapp, never in chat."""
+    question = str((guide or {}).get("question") or "").strip()
+    webhook = (webhook_url or str((guide or {}).get("webhook_url") or "")).strip()
+    parts = [question] if question else []
+    if webhook and str((guide or {}).get("step") or "") == "webhook":
+        parts.append(f"Webhook: {webhook}.")
+    parts.append("Pantalla segura: /amp/whatsapp. Nunca pegues el token aquí.")
+    return " ".join(parts)
+
+
+def is_pending_whatsapp_key(key: str) -> bool:
+    return bool(_PENDING_WHATSAPP_KEY_RE.search((key or "").strip()))
+
+
+def pending_whatsapp_facts() -> list[dict]:
+    """Juan's pending WhatsApp items from this instance facts.json only."""
+    try:
+        from app.edition import is_amp
+
+        if not is_amp():
+            return []
+        from app.services.edition_facts import list_facts
+
+        return [row for row in list_facts() if is_pending_whatsapp_key(str(row.get("key") or ""))]
+    except Exception:
+        return []
+
+
+def step_from_pending_fact(fact: Optional[dict]) -> str:
+    keys = whatsapp_step_keys()
+    blob = " ".join(
+        str((fact or {}).get(field) or "")
+        for field in ("value", "text", "label", "step")
+    ).strip().lower()
+    for key in keys:
+        if re.search(rf"\b{re.escape(key)}\b", blob):
+            return key
+    return keys[0]
+
+
+def saved_whatsapp_guide_step() -> str:
+    rows = pending_whatsapp_facts()
+    if not rows:
+        return whatsapp_step_keys()[0]
+    return step_from_pending_fact(rows[0])
+
+
+def persist_whatsapp_guide_step(step: str, key: Optional[str] = None) -> dict:
+    """Write the current guide step so a new Max-e session resumes here."""
+    from app.services.edition_facts import upsert_fact
+
+    keys = whatsapp_step_keys()
+    current = (step or "").strip() or keys[0]
+    if current not in keys:
+        current = keys[0]
+    existing = pending_whatsapp_facts()
+    fact_key = (key or "").strip() or (
+        str(existing[0].get("key") or "").strip() if existing else DEFAULT_PENDING_WHATSAPP_KEY
+    )
+    if not is_pending_whatsapp_key(fact_key):
+        fact_key = DEFAULT_PENDING_WHATSAPP_KEY
+    label = ""
+    if existing:
+        label = str(existing[0].get("label") or "")
+    return upsert_fact(
+        key=fact_key,
+        text=f"WhatsApp guía pendiente en {current}",
+        value=current,
+        label=label or "WhatsApp pendiente",
+        source="whatsapp_guide",
+        visibility="confidential",
+    )
+
+
+def whatsapp_channel_is_disabled() -> bool:
+    try:
+        from app.services.whatsapp_cloud import channel_status
+
+        status = channel_status() or {}
+        if status.get("enabled"):
+            return False
+        return str(status.get("status") or "disabled") != "ready"
+    except Exception:
+        return True
+
+
+def run_whatsapp_setup_guide(step: str = "", *, persist: bool = True) -> dict:
+    """Same result the whatsapp_setup_guide tool returns, from a saved step."""
+    from app.services.whatsapp_cloud import channel_status, webhook_public_url
+
+    resolved = (step or "").strip() or saved_whatsapp_guide_step()
+    guide = whatsapp_guide_next(resolved)
+    status = channel_status()
+    guide["webhook_url"] = webhook_public_url()
+    guide["channel_status"] = status.get("status")
+    guide["configured"] = bool(status.get("enabled"))
+    guide["message"] = format_whatsapp_guide_message(guide)
+    if persist:
+        try:
+            persist_whatsapp_guide_step(guide["step"])
+        except Exception:
+            pass
+    return guide
+
+
+def pending_whatsapp_guide(*, persist: bool = False) -> Optional[dict]:
+    """If facts have pendiente_* WhatsApp and the channel is off, resume."""
+    try:
+        from app.edition import is_amp
+
+        if not is_amp():
+            return None
+    except Exception:
+        return None
+    if not pending_whatsapp_facts():
+        return None
+    if not whatsapp_channel_is_disabled():
+        return None
+    return run_whatsapp_setup_guide(saved_whatsapp_guide_step(), persist=persist)
+
+
+def is_new_chat_first_turn(message: str, history: Optional[list] = None) -> bool:
+    """Family greeting or the first user turn of a new Max-e session."""
+    try:
+        from app.services.max.quick_replies import is_greeting
+
+        if is_greeting(message):
+            return True
+    except Exception:
+        folded = (message or "").strip().lower()
+        if folded in {"hola", "hi", "hey", "buenas", "quiubo", "quiúbo"}:
+            return True
+    users: list[str] = []
+    for item in history or []:
+        if not isinstance(item, dict):
+            continue
+        if str(item.get("role") or "") != "user":
+            continue
+        content = str(item.get("content") or "")
+        if content.startswith("[Context from previous sessions]"):
+            continue
+        users.append(content.strip())
+    if not users:
+        return True
+    return len(users) == 1 and users[0] == (message or "").strip()
+
+
+def maybe_resume_whatsapp_guide(
+    message: str = "",
+    history: Optional[list] = None,
+    *,
+    persist: bool = True,
+) -> Optional[dict]:
+    """First reply of a new Max-e session: the saved Spanish step question."""
+    if not is_new_chat_first_turn(message, history):
+        return None
+    return pending_whatsapp_guide(persist=persist)
