@@ -167,11 +167,15 @@ def test_generate_uses_layout_when_estimate_lacks_dims(tmp_path, monkeypatch):
     pdf = Path(result["pdf_path"])
     assert pdf.exists() and pdf.stat().st_size > 80
     raw = pdf.read_bytes()
-    assert b"EMPIRE WORKROOM" in raw
-    assert b"INTERNAL ONLY" in raw
-    assert b"SecretBrand" not in raw
-    assert b"HiddenSupplier" not in raw
-    assert b"Spradling" not in raw
+    shop = Path(result.get("shop_pdf_path") or result["pdf_path"])
+    shop_raw = shop.read_bytes() if shop.exists() else raw
+    blob = raw + shop_raw
+    assert b"EMPIRE WORKROOM" in blob
+    assert b"INTERNAL ONLY" in blob
+    assert b"SecretBrand" not in blob
+    assert b"HiddenSupplier" not in blob
+    assert b"Spradling" not in blob
+    assert b"Apex" not in blob
     cuts = result["cut_list"]
     wood = cuts["wood"][0]
     foam = cuts["foam"][0]

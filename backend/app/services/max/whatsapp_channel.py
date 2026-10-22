@@ -1665,7 +1665,7 @@ async def _quick_whatsapp_reply(body: str):
     along in this chat with Rafael: a reply to the founder, not an outbound send."""
     from app.services.max.quick_replies import direct_reply
 
-    hit = direct_reply(body, channel="whatsapp")
+    hit = direct_reply(body, channel="whatsapp", history=None)
     if not hit:
         return None
     text = hit["text"]

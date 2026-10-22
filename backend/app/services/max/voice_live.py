@@ -371,7 +371,9 @@ _FALLBACK_TOOL_SCHEMAS = {
     },
     SHARE_TOOL: {
         "description": "Send one file found by find_files to Rafael himself: via 'email' (his own address, right "
-                       "away), 'whatsapp' (his number) or 'studio' (link in his chat). Never to anyone else.",
+                       "away), 'whatsapp' (his number) or 'studio' (link in his chat). "
+                       "If he says studio or link, via must be studio — never WhatsApp or email. "
+                       "Never to anyone else.",
         "parameters": _obj({"file_id": {"type": "string", "description": "file_id from find_files"},
                             "via": {"type": "string", "enum": ["email", "whatsapp", "studio"]}}, ["file_id"]),
     },
@@ -646,7 +648,50 @@ def run_voice_tool(name: str, arguments: dict[str, Any], *, call_id: str = "",
                                            f"Rafael's approval instead."}
     call = {k: v for k, v in (arguments or {}).items() if not str(k).startswith("_")}
     if name == SEND_ME_TOOL:
+        from app.services.max.latest_job_file import wants_studio_share, wants_external_send, show_link_reply
+        blob = " ".join(
+            str(x) for x in (
+                user_text,
+                call.get("query"),
+                call.get("what"),
+                call.get("via"),
+            ) if x
+        )
+        if wants_studio_share(blob) and not wants_external_send(blob):
+            hit = show_link_reply(blob or user_text, channel="voice")
+            if hit and hit.get("found"):
+                return {
+                    "success": True,
+                    "tool": SHARE_TOOL,
+                    "result": {
+                        "via": "studio",
+                        "viewer_url": hit.get("url"),
+                        "name": hit.get("name"),
+                        "path": hit.get("path"),
+                        "message": hit.get("text"),
+                    },
+                }
+            return {
+                "success": bool(hit),
+                "tool": SHARE_TOOL,
+                "result": {"via": "studio", "message": (hit or {}).get("text")},
+                "error": None if hit else "No new drawing file to share.",
+            }
         via = str(call.get("via") or "whatsapp").strip().lower()
+        if via in ("studio", "link", "chat", "web"):
+            via = "studio"
+            hit = show_link_reply(blob or user_text, channel="voice")
+            return {
+                "success": bool(hit and hit.get("found")),
+                "tool": SHARE_TOOL,
+                "result": {
+                    "via": "studio",
+                    "viewer_url": (hit or {}).get("url"),
+                    "name": (hit or {}).get("name"),
+                    "message": (hit or {}).get("text"),
+                },
+                "error": None if (hit and hit.get("found")) else "No new drawing file to share.",
+            }
         if via not in ("whatsapp", "email"):
             via = "whatsapp"
         call["via"] = via
@@ -745,7 +790,29 @@ def run_voice_tool(name: str, arguments: dict[str, Any], *, call_id: str = "",
     elif name == "find_files":
         call["limit"] = min(int(call.get("limit") or 8), 20)
     elif name == SHARE_TOOL:
-        call["via"] = str(call.get("via") or "email")
+        from app.services.max.latest_job_file import wants_studio_share, wants_external_send, show_link_reply
+        via = str(call.get("via") or "").strip().lower()
+        if via in ("link", "chat", "web", "view", "open"):
+            via = "studio"
+        if (via in ("", "studio") or wants_studio_share(user_text)) and not wants_external_send(user_text):
+            call["via"] = "studio"
+            if not str(call.get("file_id") or call.get("path") or "").strip():
+                hit = show_link_reply(user_text or str(call.get("query") or "drawing"), channel="voice")
+                return {
+                    "success": bool(hit and hit.get("found")),
+                    "tool": SHARE_TOOL,
+                    "result": {
+                        "via": "studio",
+                        "viewer_url": (hit or {}).get("url"),
+                        "name": (hit or {}).get("name"),
+                        "message": (hit or {}).get("text"),
+                    },
+                    "error": None if (hit and hit.get("found")) else "No new drawing file to share.",
+                }
+        elif via in ("whatsapp", "email"):
+            call["via"] = via
+        else:
+            call["via"] = "studio"
     result = execute_tool(call, desk=None, access_context=None, founder=False, channel="voice_live")
     return _compact_for_voice(name, result.to_dict())
 

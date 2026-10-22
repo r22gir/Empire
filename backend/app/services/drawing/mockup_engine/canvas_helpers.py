@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import math
+from datetime import date
 from typing import Tuple
 from reportlab.lib.colors import HexColor, Color
 from reportlab.pdfgen import canvas
@@ -72,9 +73,12 @@ def draw_chrome(
     doc_kind: str = "ILLUSTRATION",
     quote_tag: str = "EST-2026-000 · NOT SENT",
     footer_text: str = "",
-    date_str: str = "2026-10-08",
+    date_str: str = "",
+    revision: str = "",
 ) -> None:
     """Draw professional top and bottom chrome bands adhering to the Empire Drawing Standard."""
+    date_str = (date_str or "").strip() or date.today().isoformat()
+    rev = (revision or "").strip()
     # Paper background
     c.setFillColor(PAPER)
     c.rect(0, 0, w, h, stroke=0, fill=1)
@@ -134,7 +138,11 @@ def draw_chrome(
     c.setFillColor(HexColor("#BBBBBB"))
     c.setFont("Helvetica", 7)
     c.drawString(24, 9, footer_text or f"{company} · {address} · drawn from quoted dimensions")
-    c.drawRightString(w - 24, 9, f"PAGE {page} / {total} · {date_str} · NOT SENT")
+    stamp = f"PAGE {page} / {total} · {date_str}"
+    if rev:
+        stamp += f" · REV {rev}"
+    stamp += " · NOT SENT"
+    c.drawRightString(w - 24, 9, stamp)
 
 
 def draw_scale_bar(c: canvas.Canvas, x: float, y: float, s: float, label: str) -> None:

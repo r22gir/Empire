@@ -61,7 +61,11 @@ def _find_files(params: dict, desk: Optional[str] = None) -> ToolResult:
             cloud = {"matches": [], "status": {"cloud": {"status": "error", "message": f"cloud search failed: {exc}"}}}
     for m in res.get("matches") or []:
         m.setdefault("source", "local")
-    merged = sorted((res.get("matches") or []) + cloud["matches"], key=lambda m: m.get("score", 0), reverse=True)
+    merged = sorted(
+        (res.get("matches") or []) + cloud["matches"],
+        key=lambda m: (float(m.get("score") or 0), float(m.get("mtime") or 0)),
+        reverse=True,
+    )
     lim = max(1, min(limit, 50))
     res["total_local"] = res.get("total", 0)
     res["total"] = res.get("total", 0) + len(cloud["matches"])

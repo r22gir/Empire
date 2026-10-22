@@ -93,10 +93,12 @@ async def serve_drawing_file(filename: str):
 
 class MockupFromSpecRequest(BaseModel):
     spec: Optional[dict] = None
-    preset: Optional[str] = None  # marleys_u, marleys_l, marleys_u_curved, straight_bench, l_bench, u_bench, chair, wall_unit
+    preset: Optional[str] = None  # marleys_u, marleys_l, marleys_u_and_l, marleys_u_curved, straight_bench, l_bench, u_bench, chair, wall_unit
     quote_id: Optional[str] = None
     job_id: Optional[str] = None
     format: Optional[str] = "pdf"  # "pdf" (plan + elevation sheets) or "3d" (live HTML viewer + 3D stills + glb)
+    job_set: Optional[bool] = None
+    revision: Optional[str] = None
 
 
 @router.post("/drawings/mockup")
@@ -109,7 +111,7 @@ async def generate_mockup_drawing(req: MockupFromSpecRequest):
         marleys_u_and_l_preset, marleys_u_with_curved_corners_preset, straight_bench_preset, l_bench_preset,
         u_bench_preset, single_chair_preset, woodcraft_wall_unit_preset
     )
-    from app.services.drawing.mockup_engine.generator import render_piece_mockup_pdf, render_pdf_to_png_previews
+    from app.services.drawing.mockup_engine.generator import render_piece_mockup_pdf, render_pdf_to_png_previews, render_job_set_pdf
     from app.services.drawing.mockup_engine.renderers_3d import render_3d
     from app.services.drawing.canonical_path import canonical_drawings_dir
 
@@ -117,6 +119,7 @@ async def generate_mockup_drawing(req: MockupFromSpecRequest):
     os.makedirs(out_dir, exist_ok=True)
 
     piece_spec: Optional[PieceSpec] = None
+    want_job_set = bool(req.job_set)
 
     if req.spec:
         piece_spec = PieceSpec(**req.spec)
@@ -128,6 +131,9 @@ async def generate_mockup_drawing(req: MockupFromSpecRequest):
             piece_spec = marleys_u_with_curved_corners_preset()
         elif p in ("marleys_l", "marleys_l_bench", "l_channel"):
             piece_spec = marleys_u_and_l_preset()["l_bench"]
+        elif p in ("marleys_u_and_l", "marleys", "marleys_ul", "marleys_job_set"):
+            piece_spec = marleys_u_and_l_preset()["u_bench"]
+            want_job_set = True
         elif p in ("straight", "straight_bench"):
             piece_spec = straight_bench_preset()
         elif p in ("l_shape", "l_bench"):
@@ -199,6 +205,14 @@ async def generate_mockup_drawing(req: MockupFromSpecRequest):
     if not piece_spec:
         raise HTTPException(status_code=400, detail="Must provide spec, preset, quote_id, or job_id")
 
+    from datetime import date as _date
+    from app.services.drawing.client_material import strip_supplier_names
+    piece_spec.drawn_date = _date.today().isoformat()
+    if req.revision:
+        piece_spec.revision = str(req.revision).strip()
+    if not strip_supplier_names(piece_spec.material.name):
+        piece_spec.material.name = piece_spec.material.back_client_label()
+
     file_id = uuid.uuid4().hex[:12]
     clean_name = re.sub(r"[^a-zA-Z0-9_-]+", "_", piece_spec.name.lower()).strip("_")
 
@@ -219,15 +233,43 @@ async def generate_mockup_drawing(req: MockupFromSpecRequest):
             "spec": piece_spec.model_dump(),
         }
 
-    # Generate PDF
-    pdf_filename = f"mockup_{clean_name}_{file_id}.pdf"
+    # Generate PDF — always a new filename; never reuse an older file.
+    today = _date.today().isoformat()
+    rev = (req.revision or piece_spec.revision or "").strip()
+    pdf_filename = (
+        f"mockup_{clean_name}_REV{rev}_{today.replace('-', '')}_{file_id}.pdf"
+        if rev else f"mockup_{clean_name}_{today.replace('-', '')}_{file_id}.pdf"
+    )
     pdf_path = str(out_dir / pdf_filename)
 
-    render_piece_mockup_pdf(piece_spec, pdf_path)
+    if want_job_set:
+        presets = marleys_u_and_l_preset()
+        u_spec = presets["u_bench"].model_copy(deep=True)
+        l_spec = presets["l_bench"].model_copy(deep=True)
+        u_spec.material = piece_spec.material.model_copy(deep=True)
+        l_spec.material = piece_spec.material.model_copy(deep=True)
+        u_spec.back.channel_width_in = piece_spec.back.channel_width_in
+        l_spec.back.channel_width_in = piece_spec.back.channel_width_in
+        u_spec.revision = l_spec.revision = rev
+        u_spec.drawn_date = l_spec.drawn_date = today
+        render_job_set_pdf([u_spec, l_spec], pdf_path, revision=rev, date_str=today)
+    else:
+        render_piece_mockup_pdf(piece_spec, pdf_path, date_str=today, revision=rev)
 
     # Generate PNG previews
     preview_prefix = str(out_dir / f"preview_{clean_name}_{file_id}")
     png_previews = render_pdf_to_png_previews(pdf_path, preview_prefix)
+
+    try:
+        from app.services.max.latest_job_file import record_generated_drawing
+        record_generated_drawing(
+            job_key=piece_spec.client_name or piece_spec.name,
+            path=pdf_path,
+            extra={"revision": rev, "date": today},
+            drawings_dir=out_dir,
+        )
+    except Exception:
+        pass
 
     return {
         "success": True,
@@ -237,6 +279,9 @@ async def generate_mockup_drawing(req: MockupFromSpecRequest):
         "pdf_url": f"/api/v1/drawings/files/{pdf_filename}",
         "png_previews": png_previews,
         "png_filenames": [os.path.basename(p) for p in png_previews],
+        "revision": rev or None,
+        "drawn_date": today,
+        "job_set": want_job_set,
         "spec": piece_spec.model_dump(),
     }
 

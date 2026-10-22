@@ -15,7 +15,7 @@ from app.services.drawing.mockup_engine.presets import (
     u_bench_preset, single_chair_preset, woodcraft_wall_unit_preset,
 )
 from app.services.drawing.mockup_engine.generator import (
-    render_piece_mockup_pdf, render_pdf_to_png_previews,
+    render_piece_mockup_pdf, render_pdf_to_png_previews, render_job_set_pdf,
 )
 from app.services.drawing.mockup_engine.renderers_3d import (
     render_3d, build_viewer_html, export_spec_to_glb,
@@ -49,6 +49,7 @@ __all__ = [
     "woodcraft_wall_unit_preset",
     "render_piece_mockup_pdf",
     "render_pdf_to_png_previews",
+    "render_job_set_pdf",
     "render_3d",
     "build_viewer_html",
     "export_spec_to_glb",

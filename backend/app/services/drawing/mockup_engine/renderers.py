@@ -168,7 +168,7 @@ def render_plan_view(
 
         c.setFillColor(MUT)
         c.setFont("Helvetica", 6.5)
-        c.drawString(ox + 4, top - max(l, r) - 14, f"{spec.back.style} backs ({spec.material.color_name} band) on the wall side of every leg")
+        c.drawString(ox + 4, top - max(l, r) - 14, f"{spec.back.style} backs ({spec.material.back_client_label()} band) on the wall side of every leg")
 
     elif shape == "l_shape":
         seg_dict = {seg.name.lower(): seg.length_in for seg in spec.footprint.segments}
@@ -337,7 +337,7 @@ def render_elevation_segment(
         note = f'Padded module back: {meta["nx"]} x {meta["ny"]} grid ({format_in(meta["mod_w"])} x {format_in(meta["mod_h"])})'
 
     elif pattern == "plain":
-        note = f'Plain back ({spec.material.name})'
+        note = f'Plain back ({spec.material.back_client_label()})'
 
     # Dimensions
     dim_h(c, x, x + w, by + bh + 8, f"{name}  {format_in(length)}")
@@ -348,7 +348,7 @@ def render_elevation_segment(
     c.setFillColor(MUT)
     c.setFont("Helvetica", 6.5)
     c.drawString(x, y - 10, note)
-    c.drawString(x, y - 19, f"seat cushion: plain {spec.material.color_name} (height shown nominal)")
+    c.drawString(x, y - 19, f"seat cushion: {spec.material.seat_client_label()} (height shown nominal)")
 
     return by + bh
 

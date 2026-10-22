@@ -71,6 +71,8 @@ def is_docs_location_request(text: str) -> bool:
     t = (text or "").strip().lower()
     if not t or len(t) > 120:
         return False
+    if re.search(r"(?i)\b(?:send me a link|give me (?:a |the )?link|done\??|show it)\b", t):
+        return False
     if not re.search(r"\b(where(?:'s| is| are| do i| can i)?|wheres|how do i (?:find|see|get to)|link to|show me (?:my|the) )", t):
         return False
     w = _words(t)
@@ -290,14 +292,40 @@ def scrub_internal_sources(text: str) -> str:
 
 
 # ── router hook ──────────────────────────────────────────────────────────────
-def direct_reply(message: str, *, channel: str = "web", has_image: bool = False) -> Optional[dict[str, Any]]:
+def direct_reply(
+    message: str,
+    *,
+    channel: str = "web",
+    has_image: bool = False,
+    history: Any = None,
+) -> Optional[dict[str, Any]]:
     """Return {'text', 'skill', 'quote'?} for messages answered without the model, else None."""
     if has_image:
         return None  # the model must read the attached image first
+    try:
+        from app.services.max.latest_job_file import is_show_link_request, show_link_reply
+        if is_show_link_request(message):
+            hit = show_link_reply(message, history, channel=channel)
+            if hit:
+                return hit
+    except Exception:
+        pass
     if is_greeting(message):
         return {"text": greeting_reply(), "skill": "greeting"}
     if is_docs_location_request(message):
+        try:
+            from app.services.max.latest_job_file import is_show_link_request
+            if is_show_link_request(message):
+                return None
+        except Exception:
+            pass
         return {"text": docs_location_reply(channel), "skill": "docs_location"}
+    try:
+        from app.services.max.latest_job_file import is_show_link_request
+        if is_show_link_request(message):
+            return None
+    except Exception:
+        pass
     try:
         from app.services.max.ui_map import find_in_app_reply
         _where = find_in_app_reply(message, channel=channel)

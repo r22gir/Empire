@@ -21,6 +21,7 @@ import json
 import os
 import re
 import uuid
+from datetime import date
 from pathlib import Path
 from typing import Any, Optional
 
@@ -163,6 +164,35 @@ def _layout_from_mapping(data: dict[str, Any] | None) -> dict[str, Any]:
     return layout
 
 
+def _layout_from_piece_spec(spec, *, source: str, preset: str) -> dict[str, Any]:
+    segs = {s.name.lower(): s.length_in for s in spec.footprint.segments}
+    return {
+        "source": source,
+        "preset": preset,
+        "width_in": segs.get("main") or segs.get("long") or spec.footprint.overall_width_in,
+        "left_in": segs.get("left"),
+        "right_in": segs.get("right"),
+        "short_in": segs.get("short"),
+        "long_in": segs.get("long"),
+        "depth_in": spec.cushion.seat_depth_in,
+        "back_height_in": spec.back.net_back_height_in,
+        "channel_width_in": spec.back.channel_width_in,
+        "seat_height_in": spec.cushion.seat_height_in,
+        "foam_thickness_in": spec.footprint.back_thickness_in,
+        "shape": spec.footprint.shape,
+        "client_name": spec.client_name,
+        "project_name": spec.project_name,
+        "quote_number": spec.quote_number,
+        "piece_name": spec.name,
+    }
+
+
+def _is_marley_job(job_hint: str | None) -> bool:
+    key = (job_hint or "").strip().lower().replace("'", "")
+    key = key.rstrip("s")
+    return key in _KNOWN_LAYOUT_PRESETS or "marley" in key
+
+
 def _preset_layout(job_hint: str | None) -> dict[str, Any]:
     """Prior layout baked into the drawing engine for a known job name."""
     key = (job_hint or "").strip().lower().rstrip("s")
@@ -175,23 +205,22 @@ def _preset_layout(job_hint: str | None) -> dict[str, Any]:
         spec = marleys_u_and_l_preset()["u_bench"]
     except Exception:
         return {}
-    segs = {s.name.lower(): s.length_in for s in spec.footprint.segments}
-    return {
-        "source": "prior_layout_preset",
-        "preset": preset_name,
-        "width_in": segs.get("main"),
-        "left_in": segs.get("left"),
-        "right_in": segs.get("right"),
-        "depth_in": spec.cushion.seat_depth_in,
-        "back_height_in": spec.back.net_back_height_in,
-        "channel_width_in": spec.back.channel_width_in,
-        "seat_height_in": spec.cushion.seat_height_in,
-        "foam_thickness_in": spec.footprint.back_thickness_in,
-        "shape": spec.footprint.shape,
-        "client_name": spec.client_name,
-        "project_name": spec.project_name,
-        "quote_number": spec.quote_number,
-    }
+    return _layout_from_piece_spec(spec, source="prior_layout_preset", preset=preset_name)
+
+
+def job_set_layouts(job_hint: str | None) -> list[dict[str, Any]]:
+    """Full job set (U + L) for known multi-piece jobs. Empty when only one piece exists."""
+    if not _is_marley_job(job_hint):
+        return []
+    try:
+        from app.services.drawing.mockup_engine.presets import marleys_u_and_l_preset
+        presets = marleys_u_and_l_preset()
+    except Exception:
+        return []
+    return [
+        _layout_from_piece_spec(presets["u_bench"], source="prior_layout_preset", preset="marleys_u"),
+        _layout_from_piece_spec(presets["l_bench"], source="prior_layout_preset", preset="marleys_l"),
+    ]
 
 
 def _quote_layout(quote: dict[str, Any] | None) -> dict[str, Any]:
@@ -435,10 +464,12 @@ def _piece_spec(layout: dict[str, Any], spec_changes: dict[str, Any], fabrics: d
     width = layout.get("width_in") or layout.get("main_in") or 0.0
     left = layout.get("left_in")
     right = layout.get("right_in")
+    short = layout.get("short_in")
+    long = layout.get("long_in")
     depth = layout.get("depth_in") or 16.0
     back_h = layout.get("back_height_in") or 26.75
     channel = spec_changes.get("channel_width_in") or layout.get("channel_width_in") or 12.0
-    shape = str(layout.get("shape") or ("u_shape" if left and right else "straight"))
+    shape = str(layout.get("shape") or ("u_shape" if left and right else "l_shape" if short and long else "straight"))
     if shape in ("u_shape", "u") and left and right:
         footprint = FootprintSpec(
             shape="u_shape",
@@ -449,6 +480,15 @@ def _piece_spec(layout: dict[str, Any], spec_changes: dict[str, Any], fabrics: d
             ],
             back_thickness_in=float(layout.get("foam_thickness_in") or 2.0),
         )
+    elif shape in ("l_shape", "l") and short and long:
+        footprint = FootprintSpec(
+            shape="l_shape",
+            segments=[
+                SegmentSpec(name="short", length_in=float(short)),
+                SegmentSpec(name="long", length_in=float(long)),
+            ],
+            back_thickness_in=float(layout.get("foam_thickness_in") or 2.0),
+        )
     else:
         footprint = FootprintSpec(
             shape="straight",
@@ -456,13 +496,28 @@ def _piece_spec(layout: dict[str, Any], spec_changes: dict[str, Any], fabrics: d
             overall_width_in=float(width or 0),
             back_thickness_in=float(layout.get("foam_thickness_in") or 2.0),
         )
-    back_label = fabrics.get("back", {}).get("label") or "TBC"
-    seat_label = fabrics.get("seat", {}).get("label") or "TBC"
+    from app.services.drawing.client_material import apply_seat_back_materials, client_facing_label
+
+    back_label = client_facing_label(
+        fabrics.get("back", {}).get("code") or fabrics.get("back", {}).get("color"),
+        color=fabrics.get("back", {}).get("color"),
+        material_type="vinyl",
+        code=fabrics.get("back", {}).get("code"),
+    ) or "TBC"
+    seat_label = client_facing_label(
+        fabrics.get("seat", {}).get("code") or fabrics.get("seat", {}).get("color"),
+        color=fabrics.get("seat", {}).get("color"),
+        material_type="vinyl",
+        code=fabrics.get("seat", {}).get("code"),
+    ) or "TBC"
     client = (quote or {}).get("customer_name") or layout.get("client_name") or "Client"
     project = (quote or {}).get("project_name") or layout.get("project_name") or "Job drawing"
     number = (quote or {}).get("quote_number") or layout.get("quote_number") or ""
-    return PieceSpec(
-        name=project or f"{client} drawing",
+    piece_name = layout.get("piece_name") or project or f"{client} drawing"
+    material = MaterialFinishSpec(material_type="vinyl")
+    apply_seat_back_materials(material, back=fabrics.get("back") or {}, seat=fabrics.get("seat") or {})
+    spec = PieceSpec(
+        name=piece_name,
         piece_type="banquette",
         client_name=client,
         project_name=project,
@@ -480,11 +535,7 @@ def _piece_spec(layout: dict[str, Any], spec_changes: dict[str, Any], fabrics: d
             seat_height_in=float(layout.get("seat_height_in") or 18.0),
             cushion_thickness_in=float(layout.get("cushion_thickness_in") or 4.0),
         ),
-        material=MaterialFinishSpec(
-            material_type="vinyl",
-            name=back_label,
-            color_name=str(fabrics.get("back", {}).get("color") or back_label),
-        ),
+        material=material,
         notes=[
             INTERNAL_STAMP,
             f"Back fabric: {back_label}",
@@ -492,6 +543,7 @@ def _piece_spec(layout: dict[str, Any], spec_changes: dict[str, Any], fabrics: d
             "Wood / foam cut and fabric cut are labeled separately.",
         ],
     )
+    return spec
 
 
 def _write_shop_pdf(
@@ -606,6 +658,36 @@ def _try_mockup_pdf(spec, path: Path) -> bool:
         return False
 
 
+def _try_job_set_pdf(specs: list, path: Path, *, revision: str, date_str: str) -> bool:
+    try:
+        from app.services.drawing.mockup_engine.generator import render_job_set_pdf
+        render_job_set_pdf(specs, str(path), revision=revision, date_str=date_str)
+        return path.exists() and path.stat().st_size > 80
+    except Exception:
+        return False
+
+
+def next_revision_letter(out_dir: Path, job_slug: str) -> str:
+    """A, B, C… based on how many prior files exist for this job. Never reuse a filename."""
+    n = 0
+    needle = (job_slug or "").lower()
+    try:
+        for name in os.listdir(out_dir):
+            if needle and needle in name.lower() and name.lower().endswith(".pdf"):
+                n += 1
+    except OSError:
+        n = 0
+    return chr(ord("A") + min(n, 25))
+
+
+def new_revision_filename(job_slug: str, revision: str, today: str) -> str:
+    stamp = today.replace("-", "")
+    unique = uuid.uuid4().hex[:10]
+    slug = re.sub(r"[^a-zA-Z0-9_-]+", "_", job_slug or "job").strip("_") or "job"
+    rev = re.sub(r"[^A-Za-z0-9]+", "", revision or "A") or "A"
+    return f"job_set_{slug}_REV{rev}_{stamp}_{unique}.pdf"
+
+
 def generate_job_drawing(
     *,
     message: str = "",
@@ -693,19 +775,40 @@ def generate_job_drawing(
     project = (quote or {}).get("project_name") or layout.get("project_name") or f"{client} drawing"
     out_dir = Path(output_dir) if output_dir else _drawings_dir()
     out_dir.mkdir(parents=True, exist_ok=True)
-    slug = re.sub(r"[^a-zA-Z0-9_-]+", "_", f"{hint or 'job'}_{uuid.uuid4().hex[:8]}").strip("_")
-    pdf_path = out_dir / f"job_drawing_{slug}.pdf"
+    job_slug = re.sub(r"[^a-zA-Z0-9_-]+", "_", hint or client or "job").strip("_") or "job"
+    today = date.today().isoformat()
+    revision = next_revision_letter(out_dir, job_slug)
+    shop_name = f"job_drawing_{job_slug}_{uuid.uuid4().hex[:8]}.pdf"
+    shop_path = out_dir / shop_name
+    set_name = new_revision_filename(job_slug, revision, today)
+    set_path = out_dir / set_name
 
-    spec = None
-    mockup_path = out_dir / f"job_drawing_{slug}_engine.pdf"
+    set_layouts = job_set_layouts(hint)
+    if not set_layouts:
+        set_layouts = [layout]
+    specs = []
+    for piece_layout in set_layouts:
+        piece = dict(piece_layout)
+        piece["channel_width_in"] = channel
+        try:
+            specs.append(_piece_spec(piece, changes, fabrics, quote))
+        except Exception:
+            continue
+    for spec in specs:
+        spec.revision = revision
+        spec.drawn_date = today
+
+    job_set_ok = False
+    if specs:
+        job_set_ok = _try_job_set_pdf(specs, set_path, revision=revision, date_str=today)
     mockup_ok = False
-    try:
-        spec = _piece_spec(layout, changes, fabrics, quote)
-        mockup_ok = _try_mockup_pdf(spec, mockup_path)
-    except Exception:
-        mockup_ok = False
+    mockup_path = None
+    if not job_set_ok and specs:
+        mockup_path = out_dir / f"job_drawing_{job_slug}_{uuid.uuid4().hex[:8]}_engine.pdf"
+        mockup_ok = _try_mockup_pdf(specs[0], mockup_path)
+
     _write_shop_pdf(
-        path=pdf_path,
+        path=shop_path,
         spec_notes=[INTERNAL_STAMP],
         layout={**layout, "channel_width_in": channel, "depth_in": depth, "back_height_in": back_h, "width_in": width},
         cuts=cuts,
@@ -715,14 +818,30 @@ def generate_job_drawing(
         project=project,
     )
 
-    size = pdf_path.stat().st_size if pdf_path.exists() else 0
-    if size < 80:
+    primary = set_path if job_set_ok else (mockup_path if mockup_ok else shop_path)
+    if primary is None or not Path(primary).exists() or Path(primary).stat().st_size < 80:
         return {
             "success": False,
             "error": "Drawing engine did not write a PDF.",
             "desk": DRAWING_DESK_ID,
             "internal_only": True,
         }
+    primary = Path(primary)
+    share_url = ""
+    try:
+        from app.services.max.doc_links import studio_found_url
+        from app.services.max.latest_job_file import record_generated_drawing
+        record_generated_drawing(
+            job_key=hint or job_slug,
+            path=str(primary),
+            extra={"revision": revision, "date": today, "pieces": [s.name for s in specs]},
+            drawings_dir=out_dir,
+        )
+        share_url = studio_found_url(str(primary)) or ""
+    except Exception:
+        share_url = ""
+    mtime = primary.stat().st_mtime
+    link_line = f" [{primary.name}]({share_url})" if share_url else f" {primary.name}"
     return {
         "success": True,
         "desk": DRAWING_DESK_ID,
@@ -734,6 +853,8 @@ def generate_job_drawing(
         "project_name": project,
         "quote_number": (quote or {}).get("quote_number"),
         "layout_source": layout.get("source"),
+        "revision": revision,
+        "drawn_date": today,
         "dimensions": {
             "width": format_inches(width),
             "depth": format_inches(depth),
@@ -743,13 +864,18 @@ def generate_job_drawing(
         "fabrics": fabrics,
         "cut_list": cuts,
         "estimate_conflicts": conflicts,
-        "pdf_path": str(pdf_path),
-        "pdf_filename": pdf_path.name,
-        "engine_pdf_path": str(mockup_path) if mockup_ok else None,
+        "pdf_path": str(primary),
+        "pdf_filename": primary.name,
+        "pdf_mtime": mtime,
+        "share_url": share_url,
+        "shop_pdf_path": str(shop_path) if shop_path.exists() else None,
+        "engine_pdf_path": str(set_path) if job_set_ok else (str(mockup_path) if mockup_ok else None),
+        "job_set": job_set_ok,
+        "pieces": [s.name for s in specs],
         "branding": EMPIRE_BRAND,
         "stamp": INTERNAL_STAMP,
         "message": (
-            f"New internal shop drawing for {client}: {pdf_path.name}. "
+            f"New drawing for {client} (REV {revision}, {today}):{link_line}. "
             f"{INTERNAL_STAMP}"
             + (f" Conflicts: {'; '.join(conflicts)}" if conflicts else "")
         ),
