@@ -136,13 +136,22 @@ class CushionSpec(BaseModel):
 
 
 class MaterialFinishSpec(BaseModel):
-    """Fabric, vinyl, leather, or wood finish details."""
+    """Fabric, vinyl, leather, or wood finish details.
+
+    Seat and back are separate inputs. ``color_name`` / ``color_hex`` are the
+    back; ``seat_color_name`` / ``seat_color_hex`` are the cushion. ``name`` is
+    the client-facing back label (Empire code + color, never a mill brand).
+    """
     material_type: Literal["fabric", "vinyl", "leather", "wood", "mdf", "metal", "com"] = "vinyl"
-    name: str = "Apex (Spradling Softside) vinyl"
-    color_name: str = "cognac"
-    color_hex: str = "#9A5B2E"        # Primary back / upholstery color
-    seat_color_hex: str = "#A8693A"   # Seat cushion color
-    seam_color_hex: str = "#5E3518"   # Seam/accent color
+    name: str = "vinyl"
+    color_name: str = "cognac"          # BACK color
+    color_hex: str = "#9A5B2E"          # BACK fill
+    seat_color_name: str = ""           # empty → same as color_name (legacy)
+    seat_color_hex: str = "#A8693A"     # SEAT cushion fill
+    seat_material_type: Optional[str] = None
+    fabric_code: Optional[str] = None          # Empire back code, e.g. V100-Cognac
+    seat_fabric_code: Optional[str] = None     # Empire seat code
+    seam_color_hex: str = "#5E3518"     # Seam/accent color
     wood_species: Optional[str] = None  # e.g. "Walnut", "White Oak", "Maple"
     wood_finish: Optional[str] = None   # e.g. "Natural matte", "Satin lacquer"
 
@@ -228,3 +237,6 @@ class PieceSpec(BaseModel):
 
     # Side section option
     include_section: bool = True
+    # Sheet stamp (set by a revision; chrome uses today's date when empty)
+    revision: str = ""
+    sheet_date: str = ""

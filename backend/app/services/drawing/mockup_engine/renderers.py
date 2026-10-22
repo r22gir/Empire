@@ -12,6 +12,9 @@ from app.services.drawing.mockup_engine.canvas_helpers import (
     format_in, dim_h, dim_v, draw_scale_bar,
     INK, MUT, GOLD, PAPER, WHITE, GRAY_LINE, WOOD_FILL, WOOD_DARK
 )
+from app.services.drawing.mockup_engine.finish import (
+    back_client_label, effective_seat_color_name, seat_client_label,
+)
 
 
 def render_plan_view(
@@ -337,7 +340,7 @@ def render_elevation_segment(
         note = f'Padded module back: {meta["nx"]} x {meta["ny"]} grid ({format_in(meta["mod_w"])} x {format_in(meta["mod_h"])})'
 
     elif pattern == "plain":
-        note = f'Plain back ({spec.material.name})'
+        note = f'Plain back ({back_client_label(spec.material)})'
 
     # Dimensions
     dim_h(c, x, x + w, by + bh + 8, f"{name}  {format_in(length)}")
@@ -348,7 +351,8 @@ def render_elevation_segment(
     c.setFillColor(MUT)
     c.setFont("Helvetica", 6.5)
     c.drawString(x, y - 10, note)
-    c.drawString(x, y - 19, f"seat cushion: plain {spec.material.color_name} (height shown nominal)")
+    seat_shown = seat_client_label(spec.material) or effective_seat_color_name(spec.material)
+    c.drawString(x, y - 19, f"seat cushion: {seat_shown} (height shown nominal)")
 
     return by + bh
 

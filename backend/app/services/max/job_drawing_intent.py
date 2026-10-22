@@ -65,7 +65,7 @@ _CHANNEL_WIDTH_WIDE = re.compile(
     re.I,
 )
 _BACK_FABRIC = re.compile(
-    r"\b(?:seat\s+backs?|backs?|channel backs?)\s+on\s+([A-Za-z0-9#/-]+)",
+    r"\b(?:seat\s+backs?|backs?|channel backs?|channels?)\s+on\s+([A-Za-z0-9#/-]+)",
     re.I,
 )
 _SEAT_FABRIC = re.compile(
@@ -240,6 +240,12 @@ def should_route_to_drawing_desk(
         or is_layout_revision_request(_history_blob(history))
     ):
         return True
+    try:
+        from app.services.max.drawing_share import is_drawing_ready_followup
+        if is_drawing_ready_followup(raw, history):
+            return True
+    except Exception:
+        pass
     return False
 
 

@@ -32,7 +32,7 @@ FAMILY_REFUSED = (
     "send_me_this_link is not available in family editions (amp / maxine). "
     "It only delivers to Rafael on Studio."
 )
-SEND_VIAS = ("whatsapp", "email")
+SEND_VIAS = ("whatsapp", "email", "studio")
 _EMAIL_IN_BRACKETS = re.compile(r"<([^<>]+@[^<>]+)>")
 _BARE_EMAIL = re.compile(r"([A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,})")
 
@@ -160,6 +160,8 @@ def authorize_recipient(via: str, to: str | None) -> dict[str, Any]:
         if is_send_me_email(raw):
             return {"authorized": True, "via": "email", "to": SEND_ME_EMAIL, "error": None}
         return {"authorized": False, "via": "email", "to": email or raw, "error": refused}
+    if via in ("studio", "link", "web"):
+        return {"authorized": True, "via": "studio", "to": "", "error": None}
     if via == "whatsapp":
         allowed = founder_whatsapp_numbers()
         if not raw or raw.lower() in ("me", "myself", "rafael", "founder", "my whatsapp"):
@@ -303,6 +305,18 @@ def send_me_this_link(params: dict) -> dict[str, Any]:
         via = "email"
     if via in ("wa", "whats app", "chat"):
         via = "whatsapp"
+    if via in ("link", "web", "view", "open"):
+        via = "studio"
+    user_text = str(
+        params.get("user_text") or params.get("spoken")
+        or params.get("query") or params.get("what") or ""
+    )
+    try:
+        from app.services.max.drawing_share import wants_studio_share
+        if wants_studio_share(user_text):
+            via = "studio"
+    except Exception:
+        pass
     gate = authorize_recipient(via, params.get("to"))
     if not gate["authorized"]:
         return {"success": False, "error": gate["error"]}
@@ -312,7 +326,20 @@ def send_me_this_link(params: dict) -> dict[str, Any]:
     history = params.get("history")
     path = None
     resolved_query = query
-    if ref:
+    try:
+        from app.services.max.drawing_share import last_drawing, remember_key, verify_generated_file
+        key = remember_key(params.get("conversation_id"), None, history)
+        remembered = last_drawing(key)
+        if remembered and remembered.get("pdf_path"):
+            proof = verify_generated_file(
+                remembered["pdf_path"],
+                min_mtime=float(remembered.get("pdf_mtime") or 0) - 0.5,
+            )
+            if proof.get("ok"):
+                path = proof["path"]
+    except Exception:
+        pass
+    if ref and not path:
         from app.services.max import file_finder as ff
         path = ff.resolve_file(ref)
     if not path:
@@ -337,6 +364,20 @@ def send_me_this_link(params: dict) -> dict[str, Any]:
 
     name = os.path.basename(path)
     shown = ff._display_path(path)
+    if via == "studio":
+        from app.services.max.drawing_share import absolute_share_url
+        url = absolute_share_url(path)
+        return {"success": True, "result": {
+            "via": "studio",
+            "sent": False,
+            "name": name,
+            "path": shown,
+            "query": resolved_query,
+            "share_url": url,
+            "viewer_url": url,
+            "markdown_link": f"[{name}]({url})" if url else name,
+            "message": f"[{name}]({url})" if url else name,
+        }}
     if via == "email":
         try:
             sent = _deliver_email(

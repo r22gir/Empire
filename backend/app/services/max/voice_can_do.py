@@ -31,6 +31,8 @@ _PURE_CAPABILITY = re.compile(
 
 # "can you send / check / look up …" is an action, not a capability yes.
 _ACTION_TOOLS: tuple[tuple[re.Pattern[str], str], ...] = (
+    (re.compile(r"(?i)\b(?:studio|share\s+link)\b"),
+     "share_file"),
     (re.compile(r"(?i)\b(?:send|email|whatsapp|m[aá]nda|env[ií]a)\b.+\b(?:drawing|dibujo|link|enlace|doc|file|3\s*-?\s*d)\b"
                 r"|\b(?:3\s*-?\s*d|drawing|dibujo).+\b(?:whatsapp|email|send)\b"),
      "send_me_this_link"),

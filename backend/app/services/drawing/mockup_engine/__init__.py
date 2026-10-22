@@ -15,7 +15,10 @@ from app.services.drawing.mockup_engine.presets import (
     u_bench_preset, single_chair_preset, woodcraft_wall_unit_preset,
 )
 from app.services.drawing.mockup_engine.generator import (
-    render_piece_mockup_pdf, render_pdf_to_png_previews,
+    render_piece_mockup_pdf, render_job_set_mockup_pdf, render_pdf_to_png_previews,
+)
+from app.services.drawing.mockup_engine.finish import (
+    apply_seat_back_finish, client_facing_label, color_hex_for_name,
 )
 from app.services.drawing.mockup_engine.renderers_3d import (
     render_3d, build_viewer_html, export_spec_to_glb,
@@ -48,7 +51,11 @@ __all__ = [
     "single_chair_preset",
     "woodcraft_wall_unit_preset",
     "render_piece_mockup_pdf",
+    "render_job_set_mockup_pdf",
     "render_pdf_to_png_previews",
+    "apply_seat_back_finish",
+    "client_facing_label",
+    "color_hex_for_name",
     "render_3d",
     "build_viewer_html",
     "export_spec_to_glb",

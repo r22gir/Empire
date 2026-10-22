@@ -167,8 +167,14 @@ def test_generate_uses_layout_when_estimate_lacks_dims(tmp_path, monkeypatch):
     pdf = Path(result["pdf_path"])
     assert pdf.exists() and pdf.stat().st_size > 80
     raw = pdf.read_bytes()
-    assert b"EMPIRE WORKROOM" in raw
-    assert b"INTERNAL ONLY" in raw
+    import pdfplumber
+    with pdfplumber.open(pdf) as doc:
+        text = "\n".join(page.extract_text() or "" for page in doc.pages)
+    assert "EMPIRE WORKROOM" in text
+    assert "INTERNAL ONLY" in text
+    assert "SecretBrand" not in text
+    assert "HiddenSupplier" not in text
+    assert "Spradling" not in text
     assert b"SecretBrand" not in raw
     assert b"HiddenSupplier" not in raw
     assert b"Spradling" not in raw

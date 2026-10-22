@@ -120,8 +120,38 @@ async def generate_mockup_drawing(req: MockupFromSpecRequest):
 
     if req.spec:
         piece_spec = PieceSpec(**req.spec)
+        try:
+            from app.services.drawing.mockup_engine.finish import apply_seat_back_finish
+            mat = piece_spec.material
+            apply_seat_back_finish(
+                mat,
+                back={"color": mat.color_name, "code": getattr(mat, "fabric_code", None)},
+                seat={"color": getattr(mat, "seat_color_name", None) or None,
+                      "code": getattr(mat, "seat_fabric_code", None)},
+            )
+        except Exception:
+            pass
     elif req.preset:
         p = req.preset.lower().strip()
+        if p in ("marleys_u_and_l", "marleys", "marleys_both", "marleys_ul"):
+            from app.services.drawing.mockup_engine.generator import render_job_set_mockup_pdf
+            from datetime import date as _date
+            pair = marleys_u_and_l_preset()
+            pieces = [pair["u_bench"], pair["l_bench"]]
+            file_id = uuid.uuid4().hex[:12]
+            day = _date.today().isoformat()
+            pdf_filename = f"mockup_marleys_ul_rev1_{day.replace('-', '')}_{file_id}.pdf"
+            pdf_path = str(out_dir / pdf_filename)
+            render_job_set_mockup_pdf(pieces, pdf_path, date_str=day, revision="1")
+            return {
+                "success": True,
+                "format": "pdf",
+                "pdf_path": pdf_path,
+                "pdf_filename": pdf_filename,
+                "pdf_url": f"/api/v1/drawings/files/{pdf_filename}",
+                "piece_count": 2,
+                "spec": [p.model_dump() for p in pieces],
+            }
         if p in ("marleys_u", "marleys_u_bench", "u_channel"):
             piece_spec = marleys_u_and_l_preset()["u_bench"]
         elif p in ("marleys_u_curved", "marleys_u_with_curved_corners", "curved_u"):
