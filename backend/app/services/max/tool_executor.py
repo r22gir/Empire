@@ -234,6 +234,11 @@ if not FOUNDER_PIN:
         _already_warned_PIN_unset = True
 
 TOOL_BLOCK_RE = re.compile(r"```(?:tool|json|action|actions)?\s*\n(.*?)\n```", re.DOTALL | re.IGNORECASE)
+# MiniMax-M3 printed these instead of executing (Max-e, 2026-10-21 11:21 AM ET).
+_TEXT_TOOL_CALL_RE = re.compile(
+    r"\[\s*Tool\s+call\s*:\s*([A-Za-z_][A-Za-z0-9_]*)\s*\]",
+    re.IGNORECASE,
+)
 
 QUOTES_DIR = str(dp.quotes_data_dir())
 
@@ -360,7 +365,14 @@ def parse_tool_blocks_with_errors(text: str) -> tuple[list[dict], list[dict]]:
     results: list[dict] = []
     errors: list[dict] = []
     seen_payloads: set[str] = set()
+    seen_tools: set[str] = set()
     text = strip_thinking(text or "")
+
+    for match in _TEXT_TOOL_CALL_RE.finditer(text):
+        name = (match.group(1) or "").strip()
+        if name and name not in seen_tools:
+            results.append(sanitize_tool_call({"tool": name}))
+            seen_tools.add(name)
 
     for match in TOOL_BLOCK_RE.finditer(text):
         candidate = match.group(1).strip()
@@ -369,14 +381,22 @@ def parse_tool_blocks_with_errors(text: str) -> tuple[list[dict], list[dict]]:
         seen_payloads.add(candidate)
 
         block_actions, block_errors = _parse_ndjson_block(candidate)
-        results.extend(sanitize_tool_call(action) for action in block_actions)
+        for action in block_actions:
+            cleaned = sanitize_tool_call(action)
+            results.append(cleaned)
+            if cleaned.get("tool"):
+                seen_tools.add(str(cleaned["tool"]))
         errors.extend(block_errors)
 
     stripped = text.strip()
     if not results and stripped and stripped[0] in "{[":
         # Single raw JSON message (no fences) — same NDJSON-tolerant parser.
         raw_actions, raw_errors = _parse_ndjson_block(stripped)
-        results.extend(sanitize_tool_call(action) for action in raw_actions)
+        for action in raw_actions:
+            cleaned = sanitize_tool_call(action)
+            results.append(cleaned)
+            if cleaned.get("tool"):
+                seen_tools.add(str(cleaned["tool"]))
         errors.extend(raw_errors)
     elif not results and stripped and '"tool"' not in stripped and "'tool'" not in stripped:
         # Prose-only assistant replies (email bodies, narratives) — not tool blocks.
@@ -489,9 +509,13 @@ def strip_tool_blocks(text: str) -> str:
 
     Fenced blocks are removed directly. A response consisting solely of raw
     JSON tool actions is also suppressed; those actions are for the dispatcher,
-    never for the user-facing transcript.
+    never for the user-facing transcript. Literal ``[Tool call: name]``
+    markup is never shown — it is executed by parse_tool_blocks, not printed.
     """
-    cleaned = TOOL_BLOCK_RE.sub("", text).strip()
+    cleaned = TOOL_BLOCK_RE.sub("", text or "")
+    cleaned = _TEXT_TOOL_CALL_RE.sub("", cleaned)
+    cleaned = re.sub(r"[ \t]{2,}", " ", cleaned)
+    cleaned = re.sub(r"\n{3,}", "\n\n", cleaned).strip()
     if cleaned and cleaned[0] in "[{":
         actions, _errors = _parse_ndjson_block(cleaned)
         if actions:

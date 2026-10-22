@@ -14,17 +14,9 @@ import re
 from typing import Any, Iterable
 
 # XML-ish / MiniMax / DeepSeek / Qwen-style wrappers.
-_TAG_NAMES = (
-    "think",
-    "thinking",
-    "thought",
-    "reason",
-    "reasoning",
-    "minimax:thinking",
-    "minimax:think",
-)
-
-_TAG_ALT = "|".join(re.escape(name) for name in _TAG_NAMES)
+# MiniMax-M3 leaked as orphan ``</mm:think>`` (no open tag) on 2026-10-21.
+# Accept optional provider prefixes: mm:think, minimax:thinking, foo:think.
+_TAG_ALT = r"(?:[A-Za-z][\w.-]*:)?(?:think(?:ing)?|thought|reason(?:ing)?)"
 
 _COMPLETE_TAG_RE = re.compile(
     rf"<(?:{_TAG_ALT})\b[^>]*>.*?</(?:{_TAG_ALT})>",
@@ -90,6 +82,8 @@ _STREAM_OPEN_TAGS = (
     "<reasoning>",
     "<minimax:thinking>",
     "<minimax:think>",
+    "<mm:thinking>",
+    "<mm:think>",
     "◁think▷",
     "<|think|>",
     "<|thinking|>",
@@ -106,11 +100,24 @@ _STREAM_CLOSE_TAGS = (
     "</reasoning>",
     "</minimax:thinking>",
     "</minimax:think>",
+    "</mm:thinking>",
+    "</mm:think>",
     "◁/think▷",
     "<|/think|>",
     "<|/thinking|>",
     "</|think|>",
     "</|thinking|>",
+)
+
+# Oct 21 leak quoted internal developer rules with no opening tag.
+_INTERNAL_RULE_LEAK = re.compile(
+    r"(?is)(?:developer says|not ask tokens/?secrets|tokens/?secrets|"
+    r"tools absent from(?: current)? prompt|internal (?:developer )?rules?)"
+)
+_ENGLISH_PLANNER_START = re.compile(
+    r"(?is)\A(?:The user\b|I should\b|I need to\b|Let(?:'|’)s\b|"
+    r"Let me think\b|The assistant\b|developer says\b|Tools absent\b|"
+    r"secret plan\b|Note to (?:self|developer)\b)"
 )
 
 _TOOL_QUERY_KEYS = (
@@ -123,6 +130,46 @@ _TOOL_QUERY_KEYS = (
     "prompt",
     "question",
 )
+
+
+def _drop_before_orphan_close(text: str) -> str:
+    """Orphan close tag = reasoning with no open. Drop everything before it.
+
+    Night Lab 2026-10-22: ``secret plan</mm:think>Hola`` kept the plan
+    because the old stripper only deleted the tag.
+    """
+    last = None
+    for match in _ORPHAN_CLOSE_RE.finditer(text):
+        last = match
+    if last is None:
+        return text
+    return text[last.end():]
+
+
+def _strip_untagged_reasoning_preamble(text: str) -> str:
+    """Drop English internal-rule / planner preambles with no think tags."""
+    if not text:
+        return text
+    paragraphs = re.split(r"\n\s*\n", text)
+    if len(paragraphs) == 1:
+        snippet = paragraphs[0].strip()
+        # Whole-reply English that quotes developer rules is a leak, not an answer.
+        if _INTERNAL_RULE_LEAK.search(snippet) and _ENGLISH_PLANNER_START.match(snippet):
+            return ""
+        return text
+    kept: list[str] = []
+    dropping = True
+    for part in paragraphs:
+        snippet = part.strip()
+        if not snippet:
+            continue
+        leak = bool(_INTERNAL_RULE_LEAK.search(snippet))
+        planner = bool(_ENGLISH_PLANNER_START.match(snippet))
+        if dropping and (leak or planner):
+            continue
+        dropping = False
+        kept.append(part)
+    return "\n\n".join(kept) if kept else text
 
 
 def strip_thinking(text: str | None, *, trim_edges: bool = True) -> str:
@@ -138,10 +185,13 @@ def strip_thinking(text: str | None, *, trim_edges: bool = True) -> str:
     cleaned = _UNCLOSED_TAG_RE.sub("", cleaned)
     cleaned = _SPECIAL_UNCLOSED_RE.sub("", cleaned)
     cleaned = _FENCE_UNCLOSED_RE.sub("", cleaned)
+    # Orphan close: the Oct 21 shape. Drop the reasoning, not just the tag.
+    cleaned = _drop_before_orphan_close(cleaned)
     cleaned = _ORPHAN_CLOSE_RE.sub("", cleaned)
     cleaned = _ORPHAN_OPEN_RE.sub("", cleaned)
     cleaned = _SPECIAL_ORPHAN_RE.sub("", cleaned)
     cleaned = _ANSWER_WRAP_RE.sub(r"\1", cleaned)
+    cleaned = _strip_untagged_reasoning_preamble(cleaned)
     cleaned = re.sub(r"\n{3,}", "\n\n", cleaned)
     if trim_edges:
         cleaned = cleaned.strip()
