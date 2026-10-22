@@ -1,0 +1,33 @@
+{
+  "endpoint": "/api/v1/max/chat",
+  "user": "hola",
+  "model_payload": "The assistant reviewed the request. The developer says not ask tokens/secrets. Tools absent from current prompt. I should answer without exposing internal rules.\n</mm:think>\nClaro, Juan. Aquí tienes lo que pediste.",
+  "response": {
+    "response": "Claro, Juan. Aquí tienes lo que pediste.",
+    "model_used": "MiniMax-M3",
+    "fallback_used": false,
+    "tool_results": null,
+    "steps": null,
+    "quality": {
+      "icon": "✅",
+      "color": "#22c55e",
+      "label": "High confidence",
+      "checks": [
+        "tool_verification",
+        "uncertainty_detection",
+        "entity_verification",
+        "calculation_check",
+        "completeness_check"
+      ],
+      "warnings": [],
+      "validation_time_ms": 0.4
+    },
+    "response_id": "7a0e1e24-d2f",
+    "metadata": {
+      "registry_version": "operating-registry-v2",
+      "surface": "Founder/Web MAX",
+      "response_at": "2026-10-22T10:47:26.226301+00:00",
+      "skill_used": null
+    }
+  }
+}

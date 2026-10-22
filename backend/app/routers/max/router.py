@@ -1585,9 +1585,13 @@ def _sanitize_internal_leakage_text(text: str | None) -> str:
     """Remove internal tool/reasoning leakage from visible responses."""
     if not text:
         return ""
-    cleaned = strip_tool_blocks(text)
+    from app.services.max.thinking import strip_thinking
+
+    cleaned = strip_thinking(text)
+    cleaned = strip_tool_blocks(cleaned)
     cleaned = re.sub(r"```(?:tool|json|actions?)?\s*", "", cleaned, flags=re.IGNORECASE)
     cleaned = re.sub(r"```", "", cleaned)
+    cleaned = re.sub(r"\[\s*Tool\s+call\s*:[^\]]*\]", "", cleaned, flags=re.IGNORECASE)
     cleaned = re.sub(r"\bI should check\b[^\n.]*[.\n]?", "", cleaned, flags=re.IGNORECASE)
     cleaned = re.sub(r"\bruntime check required\b[^\n.]*[.\n]?", "", cleaned, flags=re.IGNORECASE)
     cleaned = re.sub(r"\bdelegation check required\b[^\n.]*[.\n]?", "", cleaned, flags=re.IGNORECASE)
@@ -1596,6 +1600,35 @@ def _sanitize_internal_leakage_text(text: str | None) -> str:
     cleaned = re.sub(r"\b[A-Z][A-Z0-9_]*(?:KEY|TOKEN|SECRET|PASSWORD)[A-Z0-9_]*\b", "[REDACTED_ENV_NAME]", cleaned)
     cleaned = re.sub(r"\n{3,}", "\n\n", cleaned)
     return cleaned.strip()
+
+
+def _family_graceful_visible_reply(
+    text: str,
+    request: "ChatRequest",
+    tool_results: list | None,
+) -> str:
+    """Family editions never show English leaks or raw tool markup."""
+    cleaned = text or ""
+    if not _is_family_edition():
+        return cleaned
+    try:
+        from app.services.max.today_agenda import agenda_unavailable_reply, is_today_agenda_ask
+    except Exception:
+        return cleaned
+    if not is_today_agenda_ask(getattr(request, "message", None)):
+        return cleaned
+    low = cleaned.lower()
+    empty = not cleaned.strip()
+    markup = "[tool call:" in low
+    en_unavail = bool(re.search(r"(?i)(?:calendar|calendario).{0,48}(?:unavailab|not available|no est[aá] disponible)", cleaned))
+    tools = [
+        row for row in (tool_results or [])
+        if isinstance(row, dict) and row.get("tool") in ("get_today_agenda", "list_schedule", "get_tasks")
+    ]
+    failed = bool(tools) and all(not row.get("success") for row in tools)
+    if empty or markup or en_unavail or failed:
+        return agenda_unavailable_reply()
+    return cleaned
 
 
 def _empire_module_response(request: ChatRequest) -> ChatResponse | None:
@@ -3979,8 +4012,11 @@ async def _chat_with_max_service_impl(
         except Exception as _flag_err:
             logger.debug("[chat] quality flag logging failed: %s", _flag_err)
 
+        final_content = _family_graceful_visible_reply(
+            sanitize_output(final_content), request, tool_results_list,
+        )
         resp = ChatResponse(
-            response=sanitize_output(final_content),
+            response=final_content,
             model_used=resolve_display_model_used(response.model_used, request.model),
             fallback_used=response.fallback_used,
             tool_results=tool_results_list if tool_results_list else None,
@@ -4938,6 +4974,9 @@ async def _chat_stream_impl(request: ChatRequest, http_request: Request | None =
                 full_response = scrub_internal_sources(full_response)
             except Exception:
                 pass
+            full_response = _family_graceful_visible_reply(
+                sanitize_output(full_response), request, tool_results_list,
+            )
             if full_response:
                 yield f"data: {_safe_dumps({'type': 'text', 'content': full_response})}\n\n"
             conversation_tracker.add_message(conv_id, "assistant", full_response)
