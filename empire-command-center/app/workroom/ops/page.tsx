@@ -2,6 +2,9 @@
 
 import { useEffect, useState, useCallback } from "react";
 import { API } from "../../lib/api";
+import { openDocViewer } from "../../components/docs/viewerBus";
+import { invoicePdfSrc, quotePdfSrc } from "../../lib/docs-hub/jobVisuals";
+import { jobHubHref } from "../../components/jobhub/href";
 
 interface DailyAction {
   type: string;
@@ -203,11 +206,21 @@ export default function OpsPage() {
             ) : (
               <div className="bg-white rounded-xl shadow-sm border border-black/5 overflow-hidden divide-y divide-gray-100">
                 {dailyActions.actions.map((action, i) => (
-                  <div
+                  <button
+                    type="button"
                     key={`${action.entity_type}-${action.entity_id}-${i}`}
-                    className={`flex items-center justify-between px-5 py-4 gap-4 ${
+                    data-testid={`ops-action-${action.entity_type}-${action.entity_id}`}
+                    className={`flex items-center justify-between px-5 py-4 gap-4 w-full text-left ${
                       i % 2 === 1 ? "bg-gray-50/50" : ""
                     }`}
+                    onClick={() => {
+                      const t = (action.entity_type || "").toLowerCase();
+                      const id = action.entity_id;
+                      if (t.includes("invoice")) openDocViewer({ src: invoicePdfSrc(id), title: action.label, kind: "pdf" });
+                      else if (t.includes("quote") || t.includes("estimate")) openDocViewer({ src: quotePdfSrc(id), title: action.label, kind: "pdf" });
+                      else if (t.includes("job")) window.location.href = jobHubHref({ job: id });
+                      else window.location.href = jobHubHref({ job: id });
+                    }}
                   >
                     <div className="flex items-center gap-3 min-w-0">
                       <span className="text-xl flex-shrink-0">{action.icon}</span>
@@ -225,7 +238,7 @@ export default function OpsPage() {
                     >
                       {action.priority}
                     </span>
-                  </div>
+                  </button>
                 ))}
               </div>
             )}

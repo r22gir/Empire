@@ -6,11 +6,14 @@
  *   ~/empire-data/quotes/pdf/*.pdf            system estimate PDFs
  *   <repo>/backend/data/quotes/pdf/*.pdf      system estimate PDFs (backend data dir)
  *   ~/empire-data/presentations/*.pdf         presentations
+ *   ~/empire-data/drawings/*                  shop drawings on the data volume
+ *   ~/empire-data/documents/*                 other saved PDFs / images
  *   <repo>/backend/data/invoices/pdf/*.pdf    invoice PDFs
  *   drawing_versions.file_path (DB)           shop drawings
  *   ~/jobs/<client>/**                        job folders (estimate revisions,
  *                                             presentations, drawings, photos)
  *   job_documents (DB, photos)                quote photos served by the backend
+ *   jobs.photos / jobs.drawings / jobs.mockups JSON fields
  *   invoices (DB) without a stored PDF        previewed via the backend PDF endpoint
  * DB rows come from scripts/docs_hub_db.py (SQLite opened read-only).
  */
@@ -33,6 +36,8 @@ const ROOTS: { dir: string; type: DocType; source: string; system?: boolean }[] 
   { dir: path.join(DATA, 'quotes', 'pdf'), type: 'estimate', source: 'Quote PDFs (empire-data)', system: true },
   { dir: path.join(REPO, 'backend', 'data', 'quotes', 'pdf'), type: 'estimate', source: 'Quote PDFs (backend data)', system: true },
   { dir: path.join(DATA, 'presentations'), type: 'presentation', source: 'Presentations' },
+  { dir: path.join(DATA, 'drawings'), type: 'drawing', source: 'Drawings (empire-data)' },
+  { dir: path.join(DATA, 'documents'), type: 'other', source: 'Documents (empire-data)' },
   { dir: path.join(REPO, 'backend', 'data', 'invoices', 'pdf'), type: 'invoice', source: 'Invoice PDFs' },
 ];
 /** Only files under these roots can ever be served. */
@@ -158,6 +163,30 @@ async function buildIndex(): Promise<DocsIndex> {
   const docs: DocEntry[] = [];
   const roots: { dir: string; files: number }[] = [];
 
+  const folderSlugOf = (job?: Row | null): string | null => {
+    if (!job) return null;
+    let meta = job.metadata;
+    if (typeof meta === 'string') { try { meta = JSON.parse(meta); } catch { meta = null; } }
+    const slug = meta && typeof meta === 'object' ? (meta.job_folder_slug || meta.folder_slug || meta.jobs_folder) : null;
+    return slug ? String(slug) : null;
+  };
+
+  const enrichFromJob = (d: Partial<DocEntry>, job?: Row | null) => {
+    if (!job) return d;
+    d.jobId = d.jobId || job.id;
+    d.jobNumber = d.jobNumber || job.job_number || null;
+    d.client = d.client || job.client_name || null;
+    d.project = d.project || job.title || null;
+    d.businessUnit = d.businessUnit || job.business_unit || null;
+    const slug = folderSlugOf(job);
+    if (slug) d.jobFolder = d.jobFolder || slug;
+    if (job.quote_id && !d.quoteId) {
+      const q = qById.get(String(job.quote_id));
+      if (q) enrichFromQuote(d, q);
+    }
+    return d;
+  };
+
   const enrichFromQuote = (d: Partial<DocEntry>, q?: Row | null) => {
     if (!q) return d;
     const job = (q.job_id && jobsById.get(String(q.job_id))) || jobByQuote.get(String(q.id));
@@ -166,7 +195,7 @@ async function buildIndex(): Promise<DocsIndex> {
     d.project = q.project_name || null;
     d.client = d.client || clientFromProject(q.project_name) || q.customer_name || null;
     d.businessUnit = q.business_unit || null;
-    if (job) { d.jobId = job.id; d.jobNumber = job.job_number || null; }
+    if (job) { d.jobId = job.id; d.jobNumber = job.job_number || null; const slug = folderSlugOf(job); if (slug) d.jobFolder = d.jobFolder || slug; }
     return d;
   };
 
@@ -259,19 +288,28 @@ async function buildIndex(): Promise<DocsIndex> {
   // 4) photos referenced by job_documents (served by the backend)
   for (const jd of db.job_documents) {
     if (!jd.url || !/^\/api\/v1\//.test(String(jd.url))) continue;
-    const type: DocType = jd.document_type === 'photo' ? 'photo' : jd.document_type === 'drawing' ? 'drawing' : 'other';
+    const type: DocType = jd.document_type === 'photo' ? 'photo' : jd.document_type === 'drawing' ? 'drawing' : jd.document_type === 'estimate' ? 'estimate' : jd.document_type === 'invoice' ? 'invoice' : 'other';
     const q = jd.quote_id ? qById.get(String(jd.quote_id)) : null;
+    const jobRow = jd.job_id ? jobsById.get(String(jd.job_id)) : null;
     if (!q && !jd.job_id) continue; // unassigned uploads stay out of the hub
     let src = String(jd.url);
-    // drawing PDFs recorded as /api/v1/drawings/files/<name>.pdf (that backend path 404s):
-    // index the file on disk instead, unless the DB drawing pass already did.
-    const dm = src.match(/^\/api\/v1\/drawings\/files\/([\w.-]+\.pdf)$/i);
+    // drawing PDFs recorded as /api/v1/drawings/files/<name>.pdf — try disk, else keep the API src.
+    const dm = src.match(/^\/api\/v1\/drawings\/files\/([\w.-]+)$/i);
     if (dm) {
-      const abs = path.join(REPO, 'backend', 'data', 'drawings', dm[1]);
-      if (docs.some(x => x.location === abs || x.location.endsWith(path.sep + dm[1]))) continue;
-      try { await fs.access(abs); } catch { continue; }
-      await push(abs, 'drawing', `Job documents (${jd.source_channel || 'db'})`, enrichFromQuote({}, q) as Partial<DocEntry>);
-      continue;
+      const candidates = [
+        path.join(DATA, 'drawings', dm[1]),
+        path.join(DATA, 'documents', dm[1]),
+        path.join(REPO, 'backend', 'data', 'drawings', dm[1]),
+      ];
+      let abs: string | null = null;
+      for (const c of candidates) { try { await fs.access(c); abs = c; break; } catch { /* next */ } }
+      if (abs && !docs.some(x => x.location === abs || x.location.endsWith(path.sep + dm[1]))) {
+        const extra = enrichFromJob(enrichFromQuote({}, q), jobRow) as Partial<DocEntry>;
+        extra.jobId = extra.jobId || (jd.job_id ? String(jd.job_id) : extra.jobId);
+        await push(abs, 'drawing', `Job documents (${jd.source_channel || 'db'})`, extra);
+        continue;
+      }
+      // file not on the indexed disks: still list it via the drawings file route
     }
     // photos stored as /api/v1/photos/<type>/<id>/<file>; the backend serves them under /serve/
     const pm = src.match(/^\/api\/v1\/photos\/(?!serve\/)([\w-]+)\/([\w-]+)\/([\w.-]+)$/);
@@ -283,7 +321,51 @@ async function buildIndex(): Promise<DocsIndex> {
       groupKey: `${type}|db|${jd.id}`,
     };
     enrichFromQuote(d, q);
+    enrichFromJob(d, jobRow);
+    if (!d.jobId && jd.job_id) d.jobId = String(jd.job_id);
     docs.push(d as DocEntry);
+  }
+
+  // 4b) job JSON photos / drawings / mockups (ignored by the hub before this)
+  const parseVisuals = (value: any): any[] => {
+    if (!value) return [];
+    if (Array.isArray(value)) return value;
+    if (typeof value === 'string') { try { const p = JSON.parse(value); return Array.isArray(p) ? p : []; } catch { return []; } }
+    return [];
+  };
+  const visualUrl = (item: any): { url: string; filename: string; title: string } | null => {
+    if (!item) return null;
+    if (typeof item === 'string') {
+      const url = item.trim(); if (!url) return null;
+      const filename = path.basename(url.split('?')[0]) || 'file';
+      return { url, filename, title: filename };
+    }
+    const url = String(item.url || item.src || item.path || item.serverUrl || '').trim();
+    if (!url) return null;
+    const filename = String(item.filename || item.original_name || item.name || path.basename(url.split('?')[0]) || 'file');
+    return { url, filename, title: String(item.title || item.item_name || filename) };
+  };
+  for (const job of db.jobs) {
+    const fields: [string, DocType][] = [['photos', 'photo'], ['drawings', 'drawing'], ['mockups', 'drawing']];
+    for (const [field, type] of fields) {
+      for (const item of parseVisuals(job[field])) {
+        const parsed = visualUrl(item);
+        if (!parsed) continue;
+        let src = parsed.url;
+        if (!/^\/api\/v1\//.test(src)) continue;
+        const pm = src.match(/^\/api\/v1\/photos\/(?!serve\/)([\w-]+)\/([\w-]+)\/([\w.-]+)$/);
+        if (pm) src = `/api/v1/photos/serve/${pm[1]}/${pm[2]}/${pm[3]}`;
+        if (docs.some(x => x.src === src || x.location === src)) continue;
+        const d: Partial<DocEntry> = {
+          id: sha(`jobjson|${job.id}|${src}`), type, kind: IMG_RE.test(src) || IMG_RE.test(parsed.filename) ? 'image' : 'pdf',
+          filename: parsed.filename, title: parsed.title, version: 'original', versionRank: 1, isFinal: false,
+          source: `job.${field}`, location: src, modified: String(job.updated_at || ''), src,
+          groupKey: `${type}|jobjson|${job.id}|${parsed.filename}`,
+        };
+        enrichFromJob(d, job);
+        docs.push(d as DocEntry);
+      }
+    }
   }
 
   // 5) invoices without a stored PDF -> preview through the backend endpoint
@@ -417,6 +499,46 @@ export function docsForQuote(idx: DocsIndex, quoteIdOrNumber: string) {
   };
 }
 
+function jobFolderSlug(job?: Row | null): string | null {
+  if (!job) return null;
+  let meta = job.metadata;
+  if (typeof meta === 'string') { try { meta = JSON.parse(meta); } catch { return null; } }
+  const slug = meta && typeof meta === 'object' ? (meta.job_folder_slug || meta.folder_slug || meta.jobs_folder) : null;
+  return slug ? String(slug) : null;
+}
+
+/** Docs that belong to a job: job id / number / folder + every quote tied to it. */
+export function docsForJob(idx: DocsIndex, jobIdOrNumber: string) {
+  const job = idx.jobs.find(j => j.id === jobIdOrNumber || j.job_number === jobIdOrNumber) || null;
+  const slug = jobFolderSlug(job);
+  const quoteIds = new Set<string>();
+  const quoteNums = new Set<string>();
+  if (job?.quote_id) quoteIds.add(String(job.quote_id));
+  for (const q of idx.quotes) {
+    if (job && (q.job_id === job.id || (job.quote_id && q.id === job.quote_id))) {
+      quoteIds.add(String(q.id));
+      if (q.quote_number) quoteNums.add(String(q.quote_number).toUpperCase());
+    }
+  }
+  const folders = new Set<string>();
+  if (slug) folders.add(slug);
+  for (const d of idx.docs) {
+    if (d.jobFolder && (d.jobId === job?.id || d.jobNumber === job?.job_number || (d.quoteNumber && quoteNums.has(String(d.quoteNumber).toUpperCase())))) {
+      folders.add(d.jobFolder);
+    }
+  }
+  return idx.docs.filter(d =>
+    (job && d.jobId === job.id) ||
+    d.jobId === jobIdOrNumber ||
+    d.jobNumber === jobIdOrNumber ||
+    d.jobFolder === jobIdOrNumber ||
+    (!!slug && d.jobFolder === slug) ||
+    (!!d.jobFolder && folders.has(d.jobFolder)) ||
+    (!!d.quoteId && quoteIds.has(String(d.quoteId))) ||
+    (!!d.quoteNumber && quoteNums.has(String(d.quoteNumber).toUpperCase()))
+  );
+}
+
 const money = (n: number) => `$${n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
 export function jobContext(idx: DocsIndex, opts: { quote?: string | null; job?: string | null; invoice?: string | null }): JobContext | null {
@@ -475,6 +597,7 @@ export const SRC_ALLOW = [
   /^\/api\/v1\/finance\/invoices\/[\w-]+\/pdf$/,
   /^\/api\/v1\/photos\/[\w./-]+\.(png|jpe?g|webp|gif)$/i,
   /^\/api\/v1\/patterns\/saved\/[\w-]+\/pdf$/,
+  /^\/api\/v1\/drawings\/files\/[\w.-]+$/,
 ];
 export const srcAllowed = (src: string) => !src.includes('..') && SRC_ALLOW.some(re => re.test(src));
 

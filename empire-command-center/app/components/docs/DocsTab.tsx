@@ -15,7 +15,8 @@ export function useQuoteDocs(quote?: string | null, job?: string | null) {
     if (!quote && !job) return;
     let dead = false;
     const p = new URLSearchParams({ group: '1' });
-    if (quote) p.set('quote', quote); else if (job) p.set('job', job);
+    if (quote) p.set('quote', quote);
+    if (job) p.set('job', job);
     fetch(`${DOCS_API}?${p}`).then(r => r.ok ? r.json() : Promise.reject(r.status)).then(d => { if (!dead) setData({ groups: d.groups || [], context: d.context }); })
       .catch(() => { if (!dead) setErr('Could not load documents.'); });
     return () => { dead = true; };

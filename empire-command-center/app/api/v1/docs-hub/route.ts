@@ -7,7 +7,7 @@
  * Same auth perimeter as the rest of /api/v1 (served by this Next server).
  */
 import type { NextRequest } from 'next/server';
-import { docsForQuote, getIndex, groupDocs, jobContext, searchDocs } from '../../../lib/docs-hub/server';
+import { docsForJob, docsForQuote, getIndex, groupDocs, jobContext, searchDocs } from '../../../lib/docs-hub/server';
 
 export const dynamic = 'force-dynamic';
 
@@ -23,9 +23,11 @@ export async function GET(req: NextRequest) {
     return Response.json({ doc, versions, context }, { headers: { 'cache-control': 'no-store' } });
   }
   const quote = sp.get('quote');
-  let docs = quote ? docsForQuote(idx, quote).docs : idx.docs;
+  const job = sp.get('job');
+  let docs = job ? docsForJob(idx, job) : quote ? docsForQuote(idx, quote).docs : idx.docs;
   docs = searchDocs(docs, {
-    q: sp.get('q') || undefined, type: sp.get('type'), client: sp.get('client'), job: sp.get('job'),
+    q: sp.get('q') || undefined, type: sp.get('type'), client: sp.get('client'),
+    quote: job ? null : quote, job: job ? null : job,
     finalOnly: sp.get('final') === '1',
   });
   const facets = {
@@ -35,6 +37,6 @@ export async function GET(req: NextRequest) {
   const body: any = { builtAt: idx.builtAt, tookMs: idx.tookMs, total: docs.length, roots: idx.roots, facets, dbError: idx.dbError || undefined };
   if (sp.get('group') === '1') body.groups = groupDocs(docs);
   else body.docs = docs.sort((a, b) => (b.modified || '').localeCompare(a.modified || '')).slice(0, Number(sp.get('limit') || 500));
-  if (quote) body.context = jobContext(idx, { quote });
+  if (quote || job) body.context = jobContext(idx, { quote, job });
   return Response.json(body, { headers: { 'cache-control': 'no-store' } });
 }

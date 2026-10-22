@@ -96,10 +96,17 @@ export default function WorkroomLanding() {
           ['/diagrams/window-treatments/roman_flat.svg', 'Roman shades'],
           ['/diagrams/furniture/bench_banquette.svg', 'Banquette cushions'],
         ].map(([src, label]) => (
-          <div key={src} style={{ background: '#fff', border: '1px solid #ece8e0', borderRadius: 8, padding: 18, textAlign: 'center' }}>
-            <img src={src} alt="" style={{ width: '100%', maxHeight: 150, objectFit: 'contain' }} />
+          <a
+            key={src}
+            href={src}
+            target="_blank"
+            rel="noreferrer"
+            data-testid={`workroom-diagram-${label}`}
+            style={{ background: '#fff', border: '1px solid #ece8e0', borderRadius: 8, padding: 18, textAlign: 'center', textDecoration: 'none', color: 'inherit', display: 'block' }}
+          >
+            <img src={src} alt={label} style={{ width: '100%', maxHeight: 150, objectFit: 'contain' }} />
             <div style={{ marginTop: 10, color: '#1a1a2e', fontSize: 13, fontWeight: 800 }}>{label}</div>
-          </div>
+          </a>
         ))}
       </section>
 

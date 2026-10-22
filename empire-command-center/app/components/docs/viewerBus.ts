@@ -8,5 +8,5 @@ export const OPEN_DOC_EVENT = 'empire:open-doc';
 export function openDocViewer(doc: DocRef) {
   if (typeof window === 'undefined') return;
   if ((window as any).__empireDocHost) window.dispatchEvent(new CustomEvent(OPEN_DOC_EVENT, { detail: doc }));
-  else window.location.href = viewerHref({ id: doc.id, src: doc.id ? undefined : doc.src, title: doc.title });
+  else window.location.href = viewerHref({ id: doc.id, src: doc.src, title: doc.title });
 }

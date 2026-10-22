@@ -7,7 +7,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { X, ZoomIn, ZoomOut, Maximize2, ArrowLeft, Loader2 } from 'lucide-react';
 import type { DocEntry, JobContext } from '../../lib/docs-hub/types';
-import { DOCS_API } from '../../lib/docs-hub/types';
+import { DOCS_API, isSyntheticDocId } from '../../lib/docs-hub/types';
 import DocActionBar from './DocActionBar';
 import type { DocRef } from './viewerBus';
 import './docs.css';
@@ -16,7 +16,9 @@ const fmtDate = (iso?: string) => { if (!iso) return ''; const d = new Date(iso)
 
 function renderUrl(ref: DocRef, extra: Record<string, string | number>) {
   const p = new URLSearchParams();
-  if (ref.id) p.set('id', ref.id); else if (ref.src) { p.set('src', ref.src); if (ref.v) p.set('v', ref.v); }
+  if (ref.id && !isSyntheticDocId(ref.id)) p.set('id', ref.id);
+  else if (ref.src) { p.set('src', ref.src); if (ref.v) p.set('v', ref.v); }
+  else if (ref.id) p.set('id', ref.id);
   for (const [k, v] of Object.entries(extra)) p.set(k, String(v));
   return `${DOCS_API}/render?${p.toString()}`;
 }

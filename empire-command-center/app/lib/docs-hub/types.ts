@@ -72,8 +72,19 @@ export interface JobContext {
 
 export const DOCS_API = '/api/v1/docs-hub';
 
+/** Job JSON / related cards mint ids like job-photo-0-room.jpg that are not in the docs-hub index. */
+export function isSyntheticDocId(id?: string | null): boolean {
+  return !id || id.startsWith('job-') || id.startsWith('related-');
+}
+
 export function viewerHref(d: { id?: string; src?: string; title?: string }): string {
-  if (d.id) return `/docs/view?id=${encodeURIComponent(d.id)}`;
+  if (d.src && isSyntheticDocId(d.id)) {
+    const p = new URLSearchParams();
+    p.set('src', d.src);
+    if (d.title) p.set('title', d.title);
+    return `/docs/view?${p.toString()}`;
+  }
+  if (d.id && !isSyntheticDocId(d.id)) return `/docs/view?id=${encodeURIComponent(d.id)}`;
   const p = new URLSearchParams();
   if (d.src) p.set('src', d.src);
   if (d.title) p.set('title', d.title);

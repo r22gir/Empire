@@ -172,6 +172,8 @@ export interface HomeJobCard {
   totalLabel: string;
   business: string;
   href: string;
+  quoteId?: string | null;
+  estimateHref?: string | null;
 }
 
 export function jobDisplayName(job: JobLike): string {
@@ -200,6 +202,10 @@ export function toHomeJobCard(job: JobLike, hrefFor: (id: string) => string): Ho
     totalLabel: formatJobMoney(total),
     business: businessLabel(job.business_unit || job.business || job.type),
     href: hrefFor(String(job.id)),
+    quoteId: job.quote_id ? String(job.quote_id) : null,
+    estimateHref: job.quote_id
+      ? `/docs/view?src=${encodeURIComponent(`/api/v1/quotes-v2/${job.quote_id}/pdf`)}&title=${encodeURIComponent('Estimate')}`
+      : null,
   };
 }
 

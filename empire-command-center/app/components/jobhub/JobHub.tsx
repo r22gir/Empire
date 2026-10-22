@@ -13,6 +13,7 @@ import JobHeader from '../docs/JobHeader';
 import DocCard, { thumbUrl, toRef } from '../docs/DocCard';
 import { useQuoteDocs } from '../docs/DocsTab';
 import { openDocViewer } from '../docs/viewerBus';
+import { docViewerTarget, invoicePdfSrc, quotePdfSrc, visualsFromJob, visualsToGroups } from '../../lib/docs-hub/jobVisuals';
 import { Empty } from '../../v3/ui';
 import { jobHubHref } from './href';
 import PhaseStepper from '../../studio/PhaseStepper';
@@ -179,11 +180,36 @@ export default function JobHub({ initial }: { initial?: { job?: string | null; q
   }, []);
   const d = useHub(target, reload);
   const quoteId = d?.quote?.id || d?.job?.quote_id || target.quote || null;
-  const docs = useQuoteDocs(quoteId, quoteId ? null : (d?.job?.job_number || d?.job?.id || target.job));
-  const groups = docs.data?.groups ?? [];
+  const jobKey = d?.job?.job_number || d?.job?.id || target.job || null;
+  const docs = useQuoteDocs(quoteId, jobKey);
+  const [related, setRelated] = useState<Any | null>(null);
+  useEffect(() => {
+    const id = d?.job?.id || target.job;
+    if (!id) { setRelated(null); return; }
+    let dead = false;
+    getJson(`${API}/jobs/${encodeURIComponent(id)}/related`).then((r) => { if (!dead) setRelated(r); });
+    return () => { dead = true; };
+  }, [d?.job?.id, target.job, reload]);
+  const visualGroups = visualsToGroups(visualsFromJob(d?.job));
+  const groups = [...(docs.data?.groups ?? [])];
+  const seenKeys = new Set(groups.map(g => g.key));
+  for (const g of visualGroups) {
+    if (!seenKeys.has(g.key) && !groups.some(x => x.final.src && x.final.src === g.final.src)) {
+      groups.push(g); seenKeys.add(g.key);
+    }
+  }
+  if (related?.groups) {
+    for (const g of related.groups) {
+      const src = g?.final?.src;
+      if (!src || groups.some(x => x.final.src === src || x.final.id === g.final.id)) continue;
+      groups.push({ key: `${g.type}|related|${src}`, type: g.type, title: g.title, final: { id: '', type: g.type, kind: g.final.kind || 'pdf', title: g.title, filename: g.title, version: 'original', versionRank: 1, isFinal: true, groupKey: `${g.type}|related|${src}`, source: g.source || 'related', location: src, modified: '', src }, older: [] });
+    }
+  }
   const drawings = groups.filter(g => g.type === 'drawing');
   const photos = groups.filter(g => g.type === 'photo').flatMap(g => [g.final, ...g.older]);
   const otherDocs = groups.filter(g => g.type !== 'drawing' && g.type !== 'photo');
+  const quotes = (d?.quotes?.length ? d.quotes : related?.quotes) || [];
+  const invoices = (d?.invoices?.length ? d.invoices : related?.invoices) || [];
 
   const timeline = useMemo(() => {
     if (!d) return [];
@@ -297,17 +323,37 @@ export default function JobHub({ initial }: { initial?: { job?: string | null; q
                   </div>
                 )}
               </Sec>
-              <Sec id="quotes" icon={<FileText size={15} />} title="Estimates / quotes" count={d.quotes.length}>
-                {d.quotes.length === 0 ? <div className="jh-mut">No quotes linked.</div> : (
+              <Sec id="quotes" icon={<FileText size={15} />} title="Estimates / quotes" count={quotes.length}>
+                {quotes.length === 0 ? <div className="jh-mut">No quotes linked.</div> : (
                   <table className="v3-table"><thead><tr><th>Quote</th><th>Project</th><th>Status</th><th className="num">Total</th></tr></thead><tbody>
-                    {d.quotes.map(q => <tr key={q.id}><td><a href={`/?screen=quote&id=${encodeURIComponent(q.id)}`} className="jh-a v3-mono">{q.quote_number || q.id}</a></td><td className="jh-ell">{q.project_name || q.customer_name}</td><td><span className={`v3-pill ${pillTone(q.status)}`}>{label(q.status)}</span></td><td className="num">{money(q.total)}</td></tr>)}
+                    {quotes.map((q: Any) => (
+                      <tr key={q.id} className="jh-click" data-testid={`jh-quote-${q.id}`}>
+                        <td>
+                          <button type="button" className="jh-a v3-mono" onClick={() => openDocViewer({ src: quotePdfSrc(q.id), title: q.quote_number || 'Estimate', kind: 'pdf' })}>{q.quote_number || q.id}</button>
+                          <a href={`/?screen=quote&id=${encodeURIComponent(q.id)}`} className="jh-sub">Edit</a>
+                        </td>
+                        <td className="jh-ell">{q.project_name || q.customer_name}</td>
+                        <td><span className={`v3-pill ${pillTone(q.status)}`}>{label(q.status)}</span></td>
+                        <td className="num">{money(q.total)}</td>
+                      </tr>
+                    ))}
                   </tbody></table>
                 )}
               </Sec>
-              <Sec id="invoices" icon={<Receipt size={15} />} title="Invoices" count={d.invoices.length}>
-                {d.invoices.length === 0 ? <div className="jh-mut">No invoices yet.</div> : (
+              <Sec id="invoices" icon={<Receipt size={15} />} title="Invoices" count={invoices.length}>
+                {invoices.length === 0 ? <div className="jh-mut">No invoices yet.</div> : (
                   <table className="v3-table"><thead><tr><th>Invoice</th><th>Status</th><th className="num">Total</th><th className="num">Balance</th></tr></thead><tbody>
-                    {d.invoices.map(i => <tr key={i.id}><td><a href={`/?screen=invoice&id=${encodeURIComponent(i.id)}`} className="jh-a v3-mono">{i.invoice_number || i.id}</a></td><td><span className={`v3-pill ${pillTone(i.status)}`}>{label(i.status)}</span></td><td className="num">{money(i.total)}</td><td className="num">{money(i.balance_due)}</td></tr>)}
+                    {invoices.map((i: Any) => (
+                      <tr key={i.id} className="jh-click" data-testid={`jh-invoice-${i.id}`}>
+                        <td>
+                          <button type="button" className="jh-a v3-mono" onClick={() => openDocViewer({ src: invoicePdfSrc(i.id), title: i.invoice_number || 'Invoice', kind: 'pdf' })}>{i.invoice_number || i.id}</button>
+                          <a href={`/?screen=invoice&id=${encodeURIComponent(i.id)}`} className="jh-sub">Edit</a>
+                        </td>
+                        <td><span className={`v3-pill ${pillTone(i.status)}`}>{label(i.status)}</span></td>
+                        <td className="num">{money(i.total)}</td>
+                        <td className="num">{money(i.balance_due)}</td>
+                      </tr>
+                    ))}
                   </tbody></table>
                 )}
               </Sec>
@@ -319,18 +365,25 @@ export default function JobHub({ initial }: { initial?: { job?: string | null; q
                 )}
               </Sec>
               <Sec id="drawings" icon={<PenTool size={15} />} title="Drawings" count={drawings.length}>
-                {!docs.data && !docs.err ? <div className="jh-mut">Loading…</div> : drawings.length === 0 ? <div className="jh-mut">No drawings saved for this job.</div> : drawings.map(g => <DocCard key={g.key} group={g} phone={phone} email={email} />)}
+                {!docs.data && !docs.err && drawings.length === 0 ? <div className="jh-mut">Loading…</div> : drawings.length === 0 ? <div className="jh-mut">No drawings saved for this job.</div> : drawings.map(g => <DocCard key={g.key} group={g} phone={phone} email={email} />)}
               </Sec>
               <Sec id="photos" icon={<ImageIcon size={15} />} title="Photos" count={photos.length}>
-                {!docs.data && !docs.err ? <div className="jh-mut">Loading…</div> : photos.length === 0 ? <div className="jh-mut">No photos saved for this job.</div> : (
+                {!docs.data && !docs.err && photos.length === 0 ? <div className="jh-mut">Loading…</div> : photos.length === 0 ? <div className="jh-mut">No photos saved for this job.</div> : (
                   <div className="jh-photos">{photos.map(p => <button key={p.id} type="button" style={{ backgroundImage: `url("${thumbUrl(p)}")` }} onClick={() => openDocViewer(toRef(p))} aria-label={`Open ${p.title}`} title={p.filename} />)}</div>
                 )}
               </Sec>
               <Sec id="docs" icon={<FileText size={15} />} title="Documents" count={otherDocs.length + (d.documents?.length || 0)}>
-                {docs.err ? <div className="jh-mut">{docs.err}</div> : !docs.data ? <div className="jh-mut">Loading…</div> : otherDocs.length === 0 && !d.documents.length ? <div className="jh-mut">No estimates, presentations or invoice PDFs saved yet.</div> : otherDocs.map(g => <DocCard key={g.key} group={g} phone={phone} email={email} />)}
-                {d.documents.map((doc: Any) => (
-                  <div key={doc.id} className="jh-tl"><span className="v3-mono">{label(doc.document_type)}</span><b>{doc.filename || doc.title || 'File'}</b></div>
-                ))}
+                {docs.err && otherDocs.length === 0 && !d.documents.length ? <div className="jh-mut">{docs.err}</div> : !docs.data && otherDocs.length === 0 && !d.documents.length ? <div className="jh-mut">Loading…</div> : otherDocs.length === 0 && !d.documents.length ? <div className="jh-mut">No estimates, presentations or invoice PDFs saved yet.</div> : otherDocs.map(g => <DocCard key={g.key} group={g} phone={phone} email={email} />)}
+                {d.documents.map((doc: Any) => {
+                  const target = docViewerTarget(doc);
+                  return (
+                    <button key={doc.id} type="button" className="jh-tl jh-docbtn" data-testid={`jh-doc-${doc.id}`} onClick={() => target.src ? openDocViewer(target) : undefined}>
+                      <span className="v3-mono">{label(doc.document_type)}</span>
+                      <b>{doc.filename || doc.title || 'File'}</b>
+                      <span>{target.src ? 'Open' : ''}</span>
+                    </button>
+                  );
+                })}
               </Sec>
             </div>
             <div className="jh-col">

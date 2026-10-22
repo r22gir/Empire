@@ -31,6 +31,7 @@ const MOCK_JOBS = [
     status: 'in_progress',
     scheduled_date: '2026-10-28',
     quoted_amount: 4200,
+    quote_id: 'q-wr-1',
   },
   {
     id: 'job-wc-1',
@@ -91,6 +92,9 @@ test('active cards include every business and drop closed or cancelled jobs', ()
   assert.equal(wr.total, 4200);
   assert.equal(wr.totalLabel, '$4,200');
   assert.match(wr.href, /job=job-wr-1/);
+  assert.equal(wr.quoteId, 'q-wr-1');
+  assert.match(String(wr.estimateHref), /quotes-v2/);
+  assert.match(String(wr.estimateHref), /q-wr-1/);
   const blob = JSON.stringify(cards);
   assert.doesNotMatch(blob, /@|Nelma|McLean|\+1\d/);
 });

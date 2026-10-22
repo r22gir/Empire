@@ -17,8 +17,11 @@
 .jh-sec .v3-ph { margin-bottom: 10px; }
 .jh-sec .v3-ph h2 { font-size: 19px; }
 .jh-ico { color: var(--v-accink); display: inline-flex; }
-.jh-a { color: var(--v-accink) !important; text-decoration: none; }
+.jh-a { color: var(--v-accink) !important; text-decoration: none; background: none; border: 0; padding: 0; cursor: pointer; font: inherit; }
 .jh-a:hover { text-decoration: underline; }
+.jh-sub { display: inline-block; margin-left: 8px; font-size: 11px; color: var(--v-mut); }
+.jh-click { cursor: pointer; }
+.jh-docbtn { width: 100%; text-align: left; background: none; border: 0; cursor: pointer; }
 .jh-ell { max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .jh .v3-table { color: var(--v-ink); }
 .jh-photos { display: grid; grid-template-columns: repeat(auto-fill, minmax(92px, 1fr)); gap: 8px; }

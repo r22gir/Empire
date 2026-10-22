@@ -2,6 +2,8 @@
 import { useEffect, useMemo, useState } from 'react';
 import { API } from '../lib/api';
 import { jobHubHref } from '../components/jobhub/href';
+import { openDocViewer } from '../components/docs/viewerBus';
+import { quotePdfSrc } from '../lib/docs-hub/jobVisuals';
 import { EXAMPLE_JOBS, EXAMPLE_MARK, useExampleMode } from './exampleData';
 import { activeJobCards, type HomeJobCard, type JobLike } from './jobStages';
 
@@ -81,6 +83,26 @@ export default function ActiveJobsSection({ onOpen }: { onOpen: (href: string) =
                 {c.totalLabel ? <strong>{c.totalLabel}</strong> : null}
               </div>
               <span className="open">Open job ›</span>
+              {c.quoteId ? (
+                <span
+                  className="open-doc"
+                  role="link"
+                  tabIndex={0}
+                  data-testid={`studio-job-estimate-${c.id}`}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    openDocViewer({ src: quotePdfSrc(c.quoteId!), title: 'Estimate', kind: 'pdf' });
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.stopPropagation();
+                      openDocViewer({ src: quotePdfSrc(c.quoteId!), title: 'Estimate', kind: 'pdf' });
+                    }
+                  }}
+                >
+                  Open estimate
+                </span>
+              ) : null}
             </button>
           ))}
         </div>
