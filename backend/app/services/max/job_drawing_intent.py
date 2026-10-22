@@ -32,13 +32,14 @@ _LAYOUT_REVISION = re.compile(
     r"\b(?:this|that|the)\s+layout\b|"
     r"\b(?:older|old)\s+(?:one|layout|drawing)\b|"
     r"\bwe need the (?:one|layout|drawing)\b|"
-    r"\brevis(?:e|ed|ion)\b.{0,40}\b(?:drawing|layout)\b|"
-    r"\b(?:drawing|layout)\b.{0,40}\brevis(?:e|ed|ion)\b|"
+    r"\brevis(?:e|ed|ion)\b.{0,40}\b(?:drawing|layout|banquette|bench|u\s*\+?\s*l)\b|"
+    r"\b(?:drawing|layout|banquette|bench|u\s*\+?\s*l)\b.{0,40}\brevis(?:e|ed|ion)\b|"
     r"\bchannel(?:s)?\s+back\b|"
     r"\bchannel(?:s)?\s+(?:at|to|width|wide)\b|"
     r"\bseat\s+(?:backs?|cushion)\s+on\b|"
     r"\b(?:back|seat)\s+(?:fabric|vinyl|cushion)\b.{0,20}\bon\b|"
-    r"\bchannel width\b",
+    r"\bchannel width\b|"
+    r"\bevery\s+(?:back|seat)\b",
     re.I,
 )
 
@@ -65,11 +66,11 @@ _CHANNEL_WIDTH_WIDE = re.compile(
     re.I,
 )
 _BACK_FABRIC = re.compile(
-    r"\b(?:seat\s+backs?|backs?|channel backs?)\s+on\s+([A-Za-z0-9#/-]+)",
+    r"\b(?:seat\s+backs?|channel backs?|backs?)\s+(?:on|in|=)\s+([A-Za-z][A-Za-z0-9#/-]*)",
     re.I,
 )
 _SEAT_FABRIC = re.compile(
-    r"\bseat\s+cushion(?:s)?\s+on\s+([A-Za-z0-9#/-]+)",
+    r"\bseat\s+cushion(?:s)?\s+(?:on|in|=)\s+([A-Za-z][A-Za-z0-9#/-]*)",
     re.I,
 )
 _FABRIC_CODE = re.compile(r"\b(V\d{3}-[A-Za-z0-9]+)\b", re.I)
@@ -87,6 +88,24 @@ _DRAWING_CONTEXT = re.compile(
 _LOOKUP_ONLY = re.compile(
     r"\b(?:show|find|open|pull|where is|share)\b.{0,40}\b"
     r"(?:docs?|documents?|files?|pdfs?|addendum)\b",
+    re.I,
+)
+
+# After a drawing is in flight: 'done? show it / give me link' is that drawing, not a UI map.
+_LINK_FOLLOWUP = re.compile(
+    r"\b(?:done\s*\??|show it|show me(?: it)?|"
+    r"give me (?:the )?(?:link|drawing|pdf|file|studio)|"
+    r"(?:the |your )?(?:share )?link|"
+    r"share (?:the |me (?:the )?)?(?:link|drawing|studio)|"
+    r"where(?:'s| is) (?:it|the (?:drawing|pdf|file|link|doc)))\b"
+    r"|^\s*(?:link|studio)\s*[.!]?\s*$",
+    re.I,
+)
+
+_DRAWING_IN_PROGRESS = re.compile(
+    r"\b(?:drawing|drawings|layout|shop drawing|mockup|banquette|"
+    r"channel back|Drawing Studio|revised)\b"
+    r"|job_drawing_|mockup_|\.pdf|REV \d{4}-\d{2}-\d{2}",
     re.I,
 )
 
@@ -126,6 +145,20 @@ def is_layout_revision_request(text: str | None) -> bool:
 
 def is_drawing_change_followup(text: str | None) -> bool:
     return bool(_CHANGE_FOLLOWUP.search((text or "").strip()))
+
+
+def is_drawing_link_followup(text: str | None) -> bool:
+    """True for 'done?', 'show it', 'give me link', 'studio' after a drawing turn."""
+    return bool(_LINK_FOLLOWUP.search((text or "").strip()))
+
+
+def history_has_drawing_in_progress(history: Any) -> bool:
+    blob = _history_blob(history)
+    if not blob:
+        return False
+    if history_has_drawing_job_context(history):
+        return True
+    return bool(_DRAWING_IN_PROGRESS.search(blob))
 
 
 def history_has_drawing_job_context(history: Any) -> bool:
@@ -227,6 +260,8 @@ def should_route_to_drawing_desk(
     raw = (text or "").strip()
     if not raw:
         return False
+    if is_drawing_link_followup(raw) and history_has_drawing_in_progress(history):
+        return True
     if _LOOKUP_ONLY.search(raw) and not is_job_drawing_request(raw):
         return False
     if is_job_drawing_request(raw):

@@ -131,6 +131,8 @@ def test_generate_uses_layout_when_estimate_lacks_dims(tmp_path, monkeypatch):
     from app.services.drawing.job_drawing import generate_job_drawing
 
     monkeypatch.setenv("MAX_DRAWINGS_OUTPUT_DIR", str(tmp_path))
+    monkeypatch.setenv("EMPIRE_EDITION", "workroom")
+    monkeypatch.setenv("EMPIRE_PUBLIC_BASE_URL", "https://studio.empirebox.store")
     csv_path = tmp_path / "FABRIC_CODES.csv"
     csv_path.write_text(
         "code,color,material_type,width_inches,pattern_repeat_v,pattern_repeat_h,"
@@ -167,11 +169,19 @@ def test_generate_uses_layout_when_estimate_lacks_dims(tmp_path, monkeypatch):
     pdf = Path(result["pdf_path"])
     assert pdf.exists() and pdf.stat().st_size > 80
     raw = pdf.read_bytes()
-    assert b"EMPIRE WORKROOM" in raw
-    assert b"INTERNAL ONLY" in raw
-    assert b"SecretBrand" not in raw
-    assert b"HiddenSupplier" not in raw
-    assert b"Spradling" not in raw
+    import pdfplumber
+    extracted = ""
+    with pdfplumber.open(pdf) as doc:
+        extracted = "\n".join(page.extract_text() or "" for page in doc.pages)
+    assert "EMPIRE WORKROOM" in extracted
+    assert "SecretBrand" not in extracted and b"SecretBrand" not in raw
+    assert "HiddenSupplier" not in extracted and b"HiddenSupplier" not in raw
+    assert "Spradling" not in extracted and b"Spradling" not in raw
+    assert "Apex" not in extracted and b"Apex" not in raw
+    shop = Path(result["shop_pdf_path"])
+    assert shop.exists() and b"INTERNAL ONLY" in shop.read_bytes()
+    assert result.get("share_url", "").startswith("https://studio.empirebox.store/api/v1/files/found?t=")
+    assert result.get("revision", "").startswith("REV ")
     cuts = result["cut_list"]
     wood = cuts["wood"][0]
     foam = cuts["foam"][0]
@@ -345,8 +355,9 @@ def test_job_drawing_turn_returns_desk_payload(monkeypatch, tmp_path):
     assert turn["success"] is True
     assert turn["model_used"] == "drawing-desk"
     assert turn["desk"] == "forge"
-    assert "INTERNAL ONLY" in turn["response"]
     assert "Pipeline" not in turn["response"]
+    assert turn["result"].get("pdf_filename")
+    assert "drawing" in turn["response"].lower() or turn["result"].get("share_url")
     skipped = run_job_drawing_turn("can you show me the Marley docs")
     assert skipped["handled"] is False
 
@@ -355,6 +366,8 @@ def test_change_it_turn_keeps_job_and_spec(monkeypatch, tmp_path):
     from app.services.drawing.job_drawing import generate_job_drawing
 
     monkeypatch.setenv("MAX_DRAWINGS_OUTPUT_DIR", str(tmp_path))
+    monkeypatch.setenv("EMPIRE_EDITION", "workroom")
+    monkeypatch.setenv("EMPIRE_PUBLIC_BASE_URL", "https://studio.empirebox.store")
     result = generate_job_drawing(
         message="you change it",
         history=MARLEY_HISTORY,

@@ -43,11 +43,14 @@ def marleys_u_and_l_preset() -> Dict[str, PieceSpec]:
         ),
         material=MaterialFinishSpec(
             material_type="vinyl",
-            name="Apex (Spradling Softside) vinyl",
+            name="vinyl",
             color_name="cognac",
+            seat_color_name="cognac",
             color_hex="#9A5B2E",
             seat_color_hex="#A8693A",
             seam_color_hex="#5E3518",
+            client_back_label="Cognac vinyl",
+            client_seat_label="Cognac vinyl",
         ),
     )
 
@@ -83,11 +86,14 @@ def marleys_u_and_l_preset() -> Dict[str, PieceSpec]:
         ),
         material=MaterialFinishSpec(
             material_type="vinyl",
-            name="Apex (Spradling Softside) vinyl",
+            name="vinyl",
             color_name="cognac",
+            seat_color_name="cognac",
             color_hex="#9A5B2E",
             seat_color_hex="#A8693A",
             seam_color_hex="#5E3518",
+            client_back_label="Cognac vinyl",
+            client_seat_label="Cognac vinyl",
         ),
     )
     return {"u_bench": u_spec, "l_bench": l_spec}

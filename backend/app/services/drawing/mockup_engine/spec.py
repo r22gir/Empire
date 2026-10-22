@@ -1,7 +1,7 @@
 """Structured piece specification for parametric furniture and casework mockups."""
 from __future__ import annotations
 
-from typing import List, Optional, Literal, Dict, Any
+from typing import List, Optional, Literal, Dict, Any, Tuple
 from pydantic import BaseModel, Field
 
 
@@ -136,15 +136,27 @@ class CushionSpec(BaseModel):
 
 
 class MaterialFinishSpec(BaseModel):
-    """Fabric, vinyl, leather, or wood finish details."""
+    """Fabric, vinyl, leather, or wood finish details.
+
+    Seat and back are independent inputs. A revision that changes only
+    the seat color must leave the back color alone (and vice versa).
+    ``name`` / ``client_*_label`` are client-facing: Empire fabric code
+    + color, never a supplier or brand.
+    """
     material_type: Literal["fabric", "vinyl", "leather", "wood", "mdf", "metal", "com"] = "vinyl"
-    name: str = "Apex (Spradling Softside) vinyl"
+    name: str = "vinyl"
     color_name: str = "cognac"
+    seat_color_name: str = ""          # empty → same as color_name (legacy single-finish)
     color_hex: str = "#9A5B2E"        # Primary back / upholstery color
-    seat_color_hex: str = "#A8693A"   # Seat cushion color
+    seat_color_hex: str = "#A8693A"   # Seat cushion color (must follow seat_color_name)
     seam_color_hex: str = "#5E3518"   # Seam/accent color
+    client_back_label: str = ""
+    client_seat_label: str = ""
     wood_species: Optional[str] = None  # e.g. "Walnut", "White Oak", "Maple"
     wood_finish: Optional[str] = None   # e.g. "Natural matte", "Satin lacquer"
+
+    def resolved_seat_color_name(self) -> str:
+        return (self.seat_color_name or self.color_name or "").strip()
 
 
 class CarcassBoxSpec(BaseModel):

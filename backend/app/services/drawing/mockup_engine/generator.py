@@ -1,11 +1,10 @@
 """Core PDF & PNG preview generator for the parametric mockup engine."""
 from __future__ import annotations
 
-import io
-import os
 import subprocess
+from datetime import date
 from pathlib import Path
-from typing import List, Optional, Tuple, Dict, Any
+from typing import List, Optional, Tuple, Sequence
 
 from reportlab.lib.pagesizes import letter, landscape
 from reportlab.lib.colors import HexColor
@@ -19,18 +18,28 @@ from app.services.drawing.mockup_engine.canvas_helpers import (
 from app.services.drawing.mockup_engine.renderers import (
     render_plan_view, render_elevation_segment, render_casework_elevation, render_side_section
 )
-
-
-from app.services.drawing.mockup_engine.spec import PieceSpec
-from app.services.drawing.mockup_engine.canvas_helpers import (
-    draw_chrome, draw_scale_bar, draw_legend, draw_casework_legend, format_in,
-    INK, PAPER, WHITE, MUT, GOLD
-)
-from app.services.drawing.mockup_engine.renderers import (
-    render_plan_view, render_elevation_segment, render_casework_elevation, render_side_section
-)
+from app.services.drawing.mockup_engine.materials import back_label_of, seat_label_of, strip_supplier_text
 from app.config.workroom_billing import get_workroom_billing, client_facing_website
 from app.services.drawing.bench_quote_bridge import sheet_chrome
+
+
+def _sheet_date(date_str: str | None = None) -> str:
+    return (date_str or "").strip() or date.today().isoformat()
+
+
+def _sheet_revision(revision: str | None = None, date_str: str | None = None) -> str:
+    rev = (revision or "").strip()
+    if rev:
+        return rev if rev.upper().startswith("REV") else f"REV {rev}"
+    return f"REV {_sheet_date(date_str)}"
+
+
+def _client_material_line(spec: PieceSpec) -> str:
+    back = strip_supplier_text(back_label_of(spec.material)) or spec.material.color_name
+    seat = strip_supplier_text(seat_label_of(spec.material)) or spec.material.resolved_seat_color_name()
+    if seat and seat.lower() != back.lower():
+        return f"back {back} · seat {seat}"
+    return back
 
 
 def _pick_optimal_scale(
@@ -74,12 +83,79 @@ def _pick_optimal_scale(
 def render_piece_mockup_pdf(
     spec: PieceSpec,
     output_pdf_path: str,
+    *,
+    date_str: str | None = None,
+    revision: str | None = None,
 ) -> str:
     """Generate a multi-page, true-scale architectural mockup PDF from a PieceSpec."""
     W, H = landscape(letter)
     c = canvas.Canvas(output_pdf_path, pagesize=landscape(letter))
+    try:
+        c._doc.compression = 0
+    except Exception:
+        pass
     c.setTitle(f"{spec.name} Mockup — {spec.quote_number}")
     c.setAuthor("Empire Workroom")
+    render_piece_pages(
+        c, spec, W, H,
+        page_offset=0,
+        total_pages=2,
+        date_str=_sheet_date(date_str),
+        revision=_sheet_revision(revision, date_str),
+    )
+    c.save()
+    return output_pdf_path
+
+
+def render_job_set_mockup_pdf(
+    specs: Sequence[PieceSpec],
+    output_pdf_path: str,
+    *,
+    date_str: str | None = None,
+    revision: str | None = None,
+) -> str:
+    """Render every piece in a job (e.g. U and L) into one new PDF."""
+    pieces = [s for s in specs if s is not None]
+    if not pieces:
+        raise ValueError("render_job_set_mockup_pdf requires at least one piece")
+    stamp = _sheet_date(date_str)
+    rev = _sheet_revision(revision, stamp)
+    W, H = landscape(letter)
+    c = canvas.Canvas(output_pdf_path, pagesize=landscape(letter))
+    try:
+        c._doc.compression = 0
+    except Exception:
+        pass
+    names = " + ".join(s.name for s in pieces)
+    c.setTitle(f"{names} Mockup — {pieces[0].quote_number}")
+    c.setAuthor("Empire Workroom")
+    total = 2 * len(pieces)
+    for i, spec in enumerate(pieces):
+        render_piece_pages(
+            c, spec, W, H,
+            page_offset=i * 2,
+            total_pages=total,
+            date_str=stamp,
+            revision=rev,
+        )
+    c.save()
+    return output_pdf_path
+
+
+def render_piece_pages(
+    c: canvas.Canvas,
+    spec: PieceSpec,
+    W: float,
+    H: float,
+    *,
+    page_offset: int = 0,
+    total_pages: int = 2,
+    date_str: str = "",
+    revision: str = "",
+) -> None:
+    """Draw plan + elevation pages for one piece onto an existing canvas."""
+    date_str = _sheet_date(date_str)
+    revision = _sheet_revision(revision, date_str)
 
     is_woodcraft = spec.business_unit == "woodcraft" or spec.casework is not None
     chrome_data = sheet_chrome("woodcraft" if is_woodcraft else "workroom")
@@ -93,16 +169,11 @@ def render_piece_mockup_pdf(
     contact_info = f"{phone} · {website}"
 
     shape = spec.footprint.shape
-
-    # Determine total pages needed
-    if spec.casework:
-        total_pages = 2  # Page 1: Plan & Specs; Page 2: Front Elevation of Casework
-    elif shape == "u_shape":
-        total_pages = 2  # Page 1: Plan view; Page 2: Front elevations (U Main, U Left, U Right)
-    elif shape == "l_shape":
-        total_pages = 2  # Page 1: Plan view; Page 2: Front elevations (L Long, L Short)
-    else:
-        total_pages = 2  # Page 1: Plan view; Page 2: Front Elevation & Side Section
+    material_line = _client_material_line(spec)
+    back_lbl = strip_supplier_text(back_label_of(spec.material)) or spec.material.color_name
+    seat_lbl = strip_supplier_text(seat_label_of(spec.material)) or spec.material.resolved_seat_color_name()
+    page_1 = page_offset + 1
+    page_2 = page_offset + 2
 
     # Calculate optimal scales
     # Available area on Page 1: width ~ 450 pt (beside legend) or 680 pt
@@ -159,7 +230,7 @@ def render_piece_mockup_pdf(
         arm_desc = f"  ·  {format_in(spec.arm.arm_width_in)} arms" if getattr(spec, "arm", None) and spec.arm.has_arms else ""
         sub_title = (
             f'Seat depth {format_in(spec.cushion.seat_depth_in)}  ·  net back {format_in(spec.back.net_back_height_in)}  ·  '
-            f'{b_desc}{arm_desc}  ·  {spec.material.name}, {spec.material.color_name}'
+            f'{b_desc}{arm_desc}  ·  {material_line}'
         )
 
     # ==========================================
@@ -170,7 +241,7 @@ def render_piece_mockup_pdf(
         c, W, H,
         title=page_1_title,
         subtitle=sub_title,
-        page=1,
+        page=page_1,
         total=total_pages,
         company=company,
         tagline=tagline,
@@ -178,8 +249,10 @@ def render_piece_mockup_pdf(
         contact_info=contact_info,
         client_name=spec.client_name,
         client_address=getattr(spec, "client_address", "") or "",
-        quote_tag=f"{spec.quote_number} · {spec.status}",
-        footer_text=f"{company} · {spec.project_name} · {spec.material.name if not spec.casework else spec.casework.wood_species} · drawn from quoted dimensions",
+        quote_tag=f"{spec.quote_number} · {revision} · {spec.status}",
+        footer_text=f"{company} · {spec.project_name} · {spec.casework.wood_species if spec.casework else material_line} · drawn from quoted dimensions",
+        date_str=date_str,
+        revision=revision,
     )
 
     c.setFillColor(INK)
@@ -219,18 +292,18 @@ def render_piece_mockup_pdf(
 
         b_style = spec.back.style
         if b_style == "channel":
-            b_lbl = f'{format_in(spec.back.channel_width_in)} channel back, {spec.material.color_name}'
+            b_lbl = f'{format_in(spec.back.channel_width_in)} channel back, {back_lbl}'
         elif b_style in ("tufted", "button_tufted"):
-            b_lbl = f'tufted back, {spec.material.color_name}'
+            b_lbl = f'tufted back, {back_lbl}'
         else:
-            b_lbl = f'{b_style} back, {spec.material.color_name}'
+            b_lbl = f'{b_style} back, {back_lbl}'
 
         draw_legend(
             c, lx, ly,
             back_color=back_c,
             seat_color=seat_c,
             back_label=b_lbl,
-            seat_label=f"seat cushion, plain {spec.material.color_name}",
+            seat_label=f"seat cushion, plain {seat_lbl}",
             runs=runs,
             notes=[
                 f'Back band in plan drawn {format_in(spec.footprint.back_thickness_in)} thick for legibility only.',
@@ -259,7 +332,7 @@ def render_piece_mockup_pdf(
         c, W, H,
         title=page_2_title,
         subtitle=sub_title_p2,
-        page=2,
+        page=page_2,
         total=total_pages,
         company=company,
         tagline=tagline,
@@ -267,8 +340,10 @@ def render_piece_mockup_pdf(
         contact_info=contact_info,
         client_name=spec.client_name,
         client_address=getattr(spec, "client_address", "") or "",
-        quote_tag=f"{spec.quote_number} · {spec.status}",
-        footer_text=f"{company} · {spec.project_name} · {spec.material.name if not spec.casework else spec.casework.wood_species} · drawn from quoted dimensions",
+        quote_tag=f"{spec.quote_number} · {revision} · {spec.status}",
+        footer_text=f"{company} · {spec.project_name} · {spec.casework.wood_species if spec.casework else material_line} · drawn from quoted dimensions",
+        date_str=date_str,
+        revision=revision,
     )
 
     if spec.casework:
@@ -322,8 +397,6 @@ def render_piece_mockup_pdf(
         draw_scale_bar(c, 60, 40, s_elev, scale_lbl_elev)
 
     c.showPage()
-    c.save()
-    return output_pdf_path
 
 
 def render_pdf_to_png_previews(
