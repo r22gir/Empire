@@ -5,6 +5,9 @@ import { formatInches } from '../../lib/formatInches';
 import { useJob, Job } from '../../hooks/useJob';
 import JobHeader from '../docs/JobHeader';
 import DocsTab from '../docs/DocsTab';
+import PhaseStepper from '../../studio/PhaseStepper';
+import PhaseToast from '../../studio/PhaseToast';
+import { movedToast, stagePatchRequest } from '../../studio/jobStages';
 import {
   X, Upload, Camera, FileText, CheckCircle2, Clock, AlertCircle,
   DollarSign, Receipt, Plus, RefreshCw, Send, Mail, ArrowRight,
@@ -77,6 +80,8 @@ export default function JobFolderModal({
   // New Note state
   const [newNote, setNewNote] = useState('');
   const [noteSubmitting, setNoteSubmitting] = useState(false);
+  const [movingPhase, setMovingPhase] = useState(false);
+  const [phaseToast, setPhaseToast] = useState<string | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const cameraInputRef = useRef<HTMLInputElement>(null);
@@ -258,6 +263,31 @@ export default function JobFolderModal({
   const timeline = job?.timeline || [];
 
   const isActiveInContext = activeJob && String(activeJob.id) === String(job?.id);
+  const record = job?.job || job;
+  const currentPhase = record?.canonical_stage || record?.pipeline_stage || record?.status;
+
+  const movePhase = async (stage: string) => {
+    const id = record?.id || jobId;
+    if (!id || movingPhase) return;
+    setMovingPhase(true);
+    try {
+      const req = stagePatchRequest(String(id), stage);
+      const res = await fetch(`${API}${req.path}`, {
+        method: req.method,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(req.body),
+      });
+      if (!res.ok) throw new Error('move failed');
+      setPhaseToast(movedToast(record?.title || record?.job_number || 'Job', currentPhase, stage));
+      await fetchJobData();
+      onJobUpdated?.();
+    } catch {
+      setPhaseToast('Could not move the phase. Try again.');
+    } finally {
+      setMovingPhase(false);
+      setTimeout(() => setPhaseToast(null), 4000);
+    }
+  };
 
   return (
     <div
@@ -509,6 +539,12 @@ export default function JobFolderModal({
             </div>
           )}
         </div>
+
+        {record && (
+          <div style={{ padding: '10px 16px 0', background: '#faf9f7' }}>
+            <PhaseStepper currentStage={currentPhase} onMove={movePhase} moving={movingPhase} />
+          </div>
+        )}
 
         {/* Tab Navigation (Scrollable horizontally on phone) */}
         <div
@@ -1281,6 +1317,7 @@ export default function JobFolderModal({
           )}
         </div>
       </div>
+      <PhaseToast message={phaseToast} onDismiss={() => setPhaseToast(null)} />
     </div>
   );
 }

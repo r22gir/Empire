@@ -1044,16 +1044,25 @@ def jobs_pipeline():
 
 @router.get("/jobs/active")
 def jobs_active():
-    """All non-closed, non-cancelled jobs."""
+    """All non-closed, non-cancelled jobs across every business unit."""
     with get_db() as conn:
         rows = conn.execute(
             """SELECT j.*, c.name as customer_name
                FROM jobs j LEFT JOIN customers c ON j.customer_id = c.id
-               WHERE COALESCE(j.pipeline_stage, 'intake') NOT IN ('closed')
-                 AND COALESCE(j.status, '') NOT IN ('cancelled')
+               WHERE COALESCE(j.pipeline_stage, 'intake') NOT IN ('closed', 'paid_closed', 'paid')
+                 AND COALESCE(j.status, '') NOT IN ('cancelled', 'canceled')
                ORDER BY j.created_at DESC"""
         ).fetchall()
-        return {"jobs": [_enrich_job(dict_row(r)) for r in rows], "total": len(rows)}
+        jobs = []
+        for r in rows:
+            job = _enrich_job(dict_row(r))
+            raw = (job.get("pipeline_stage") or job.get("status") or "lead")
+            canonical = STAGE_NORMALIZATION.get(str(raw).strip().lower(), "lead")
+            job["canonical_stage"] = canonical
+            if canonical in ("paid_closed", "closed") or str(job.get("status") or "").lower() in ("cancelled", "canceled"):
+                continue
+            jobs.append(job)
+        return {"jobs": jobs, "total": len(jobs)}
 
 
 @router.get("/jobs/search")
@@ -1369,14 +1378,15 @@ def create_job(job: JobCreateSchema):
                 _normalise_business(job.business_unit),
                 job.room,
                 job.description,
-                job.pipeline_stage,
+                raw_stage,
                 job.estimated_value or 0,
                 datetime.now().isoformat() if job.pipeline_stage == "intake" else None,
             ),
         )
 
         row = conn.execute(
-            "SELECT * FROM jobs ORDER BY created_at DESC LIMIT 1"
+            "SELECT * FROM jobs WHERE job_number = ?",
+            (job_number,),
         ).fetchone()
         result = _enrich_job(dict_row(row))
         job_id = result["id"]
@@ -1822,10 +1832,9 @@ class StageUpdatePayload(BaseModel):
     notes: Optional[str] = None
 
 
-@router.patch("/jobs/{job_id}/stage")
 def update_job_stage(job_id: str, payload: StageUpdatePayload):
     """Update job to any of the 11 canonical kanban stages."""
-    return update_job_status(job_id, payload.stage, payload.notes)
+    return change_job_status(job_id, {"stage": payload.stage, "notes": payload.notes})
 
 
 

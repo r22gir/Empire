@@ -22,6 +22,7 @@ test('Studio voice home is the single talk entry; composer keeps a mic', () => {
   assert.match(chat, /aria-label=\{recording \? 'Stop recording' : 'Start recording'\}/);
   assert.match(app, /variant === 'studio'/);
   assert.match(app, /<VoiceHome/);
+  assert.match(app, /<ActiveJobsSection/);
   assert.match(app, /<JobContextPane/);
   const studioBlock = app.slice(app.indexOf("if (variant === 'studio')"), app.indexOf("if (variant === 'studio')") + 900);
   assert.doesNotMatch(studioBlock, /<LiveVoiceCall/);
@@ -75,6 +76,17 @@ test('deep links for presentation and video are registered', () => {
   const app = read('CommandCenterApp.tsx');
   assert.match(app, /'presentation'/);
   assert.match(app, /'video'/);
+});
+
+test('Job hub exposes a phase stepper and move-to-next control', () => {
+  const hub = read('components/jobhub/JobHub.tsx');
+  assert.match(hub, /PhaseStepper/);
+  assert.match(hub, /movePhase/);
+  assert.match(hub, /Phase history/);
+  const board = read('components/business/jobs/JobBoard.tsx');
+  assert.match(board, /PhaseToast/);
+  assert.match(board, /handleDrop/);
+  assert.match(board, /moveJobByTap/);
 });
 
 test('preview cockpit and ring use StudioAuthGate', () => {

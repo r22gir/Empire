@@ -47,14 +47,14 @@ def client():
     return TestClient(app)
 
 
-def _create_test_job(client, title, client_name, status="lead", estimated_value=1000.0):
+def _create_test_job(client, title, client_name, status="lead", estimated_value=1000.0, business_unit="workroom"):
     with get_db() as conn:
         row = conn.execute("SELECT id FROM customers WHERE name = ?", (client_name,)).fetchone()
         if not row:
             cid = f"cust_{secrets.token_hex(4)}"
             conn.execute(
-                "INSERT INTO customers (id, name, business) VALUES (?, ?, 'workroom')",
-                (cid, client_name)
+                "INSERT INTO customers (id, name, business) VALUES (?, ?, ?)",
+                (cid, client_name, business_unit)
             )
             customer_id = cid
         else:
@@ -67,7 +67,7 @@ def _create_test_job(client, title, client_name, status="lead", estimated_value=
         "status": status,
         "pipeline_stage": status,
         "estimated_value": estimated_value,
-        "business_unit": "workroom",
+        "business_unit": business_unit,
     })
     data = resp.json()
     job = data.get("job") or data
@@ -125,6 +125,13 @@ def test_kanban_stage_transition(client):
     in_prod_col = next(c for c in k_resp.json()["columns"] if c["key"] == "in_production")
     in_prod_job_ids = [j["id"] for j in in_prod_col["jobs"]]
     assert job_id in in_prod_job_ids
+
+    timeline = client.get(f"/api/v1/jobs/{job_id}/timeline")
+    assert timeline.status_code == 200
+    events = timeline.json().get("events") or []
+    changes = [e for e in events if e.get("event_type") == "status_change"]
+    assert len(changes) >= 2
+    assert any((e.get("metadata") or {}).get("to") == "in_production" for e in changes)
 
 
 def test_per_job_document_folder_endpoints(client):
@@ -214,3 +221,44 @@ def test_max_chat_job_context_and_tools():
     docs_res = execute_tool("list_job_documents", {"job_id": "job_test_max_42"})
     assert docs_res.success is True
     assert docs_res.result["count"] >= 1
+
+
+def test_active_jobs_include_every_business_and_skip_closed(client):
+    wr = _create_test_job(client, "Living room drapery", "Client A", "in_production", 4200, "workroom")
+    wc = _create_test_job(client, "CNC panel set", "Client D", "ready", 1800, "woodcraft")
+    closed = _create_test_job(client, "Closed drapery", "Client F", "lead", 900, "workroom")
+    assert wr and wc and closed
+    closed_move = client.patch(f"/api/v1/jobs/{closed}/stage", json={"stage": "paid_closed"})
+    assert closed_move.status_code == 200
+    assert closed_move.json()["job"]["canonical_stage"] == "paid_closed"
+
+    active = client.get("/api/v1/jobs/active")
+    assert active.status_code == 200
+    jobs = active.json()["jobs"]
+    ids = {j["id"] for j in jobs}
+    assert wr in ids
+    assert wc in ids
+    assert closed not in ids
+    units = {j.get("business_unit") for j in jobs if j["id"] in {wr, wc}}
+    assert units == {"workroom", "woodcraft"}
+    wr_row = next(j for j in jobs if j["id"] == wr)
+    assert wr_row["canonical_stage"] == "in_production"
+
+
+def test_move_to_next_phase_persists_and_logs_history(client):
+    job_id = _create_test_job(client, "Banquette", "Client B", "lead", 1200, "workroom")
+    first = client.patch(f"/api/v1/jobs/{job_id}/stage", json={"stage": "estimate_sent"})
+    assert first.status_code == 200
+    assert first.json()["job"]["canonical_stage"] == "estimate_sent"
+    second = client.patch(f"/api/v1/jobs/{job_id}/stage", json={"stage": "deposit_paid"})
+    assert second.status_code == 200
+
+    timeline = client.get(f"/api/v1/jobs/{job_id}/timeline")
+    changes = [e for e in timeline.json()["events"] if e.get("event_type") == "status_change"]
+    assert len(changes) >= 2
+    tos = [(e.get("metadata") or {}).get("to") for e in changes]
+    assert "estimate_sent" in tos
+    assert "deposit_paid" in tos
+
+    detail = client.get(f"/api/v1/jobs/{job_id}")
+    assert detail.json()["job"]["pipeline_stage"] == "deposit_paid"

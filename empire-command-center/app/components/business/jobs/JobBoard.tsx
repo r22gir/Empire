@@ -13,31 +13,10 @@ import {
 import KPICard from '../shared/KPICard';
 import DataTable, { Column } from '../shared/DataTable';
 import StatusBadge from '../shared/StatusBadge';
+import PhaseToast from '../../../studio/PhaseToast';
+import { KANBAN_STAGES, movedToast, stagePatchRequest } from '../../../studio/jobStages';
 
-// ---------------------------------------------------------------------------
-// 11 Canonical Kanban Stages
-// ---------------------------------------------------------------------------
-
-interface KanbanStageSpec {
-  key: string;
-  label: string;
-  color: string;
-  bgLight: string;
-}
-
-export const KANBAN_STAGES: KanbanStageSpec[] = [
-  { key: 'lead',             label: 'Lead',                  color: '#64748b', bgLight: '#f1f5f9' },
-  { key: 'estimate_sent',    label: 'Estimate sent',         color: '#3b82f6', bgLight: '#eff6ff' },
-  { key: 'deposit_paid',     label: 'Approved/Deposit paid', color: '#10b981', bgLight: '#ecfdf5' },
-  { key: 'fabric_ordered',   label: 'Fabric ordered',        color: '#8b5cf6', bgLight: '#f5f3ff' },
-  { key: 'fabric_picked_up', label: 'Fabric picked up',      color: '#d97706', bgLight: '#fffbeb' },
-  { key: 'in_production',    label: 'In production',         color: '#06b6d4', bgLight: '#ecfeff' },
-  { key: 'ready',            label: 'Ready',                 color: '#22c55e', bgLight: '#f0fdf4' },
-  { key: 'scheduled',        label: 'Scheduled',             color: '#6366f1', bgLight: '#eef2ff' },
-  { key: 'installed',        label: 'Installed/Delivered',   color: '#059669', bgLight: '#ecfdf5' },
-  { key: 'final_invoice',    label: 'Final invoice',         color: '#b8960c', bgLight: '#fefce8' },
-  { key: 'paid_closed',      label: 'Paid/Closed',           color: '#15803d', bgLight: '#f0fdf4' },
-];
+export { KANBAN_STAGES };
 
 export interface PaymentStrip {
   paid: number;
@@ -88,6 +67,8 @@ export default function JobBoard({ business }: { business?: string } = {}) {
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [draggedJobId, setDraggedJobId] = useState<string | null>(null);
   const [dragOverColumn, setDragOverColumn] = useState<string | null>(null);
+  const [toast, setToast] = useState<string | null>(null);
+  const [movePickerJobId, setMovePickerJobId] = useState<string | null>(null);
 
   // Per-job folder modal state
   const [selectedJobIdForFolder, setSelectedJobIdForFolder] = useState<string | number | null>(null);
@@ -143,17 +124,17 @@ export default function JobBoard({ business }: { business?: string } = {}) {
     setDraggedJobId(null);
     if (!jobId) return;
 
+    const foundJob = allJobs.find(j => String(j.id) === String(jobId));
+
     // Optimistically update column position in state
     if (boardData) {
       const nextCols = boardData.columns.map(col => {
-        const movingJob = col.jobs.find(j => String(j.id) === String(jobId));
         return {
           ...col,
           jobs: col.jobs.filter(j => String(j.id) !== String(jobId)),
         };
       });
 
-      const foundJob = allJobs.find(j => String(j.id) === String(jobId));
       if (foundJob) {
         const updatedJob = { ...foundJob, canonical_stage: targetStageKey, status: targetStageKey };
         const targetCol = nextCols.find(c => c.key === targetStageKey);
@@ -170,17 +151,44 @@ export default function JobBoard({ business }: { business?: string } = {}) {
 
     // Call API to persist stage change
     try {
-      const res = await fetch(`${API}/jobs/${jobId}/stage`, {
-        method: 'PATCH',
+      const req = stagePatchRequest(String(jobId), targetStageKey);
+      const res = await fetch(`${API}${req.path}`, {
+        method: req.method,
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ stage: targetStageKey }),
+        body: JSON.stringify(req.body),
       });
       if (!res.ok) {
         fetchKanban();
+        setToast('Could not move the job. It is back in the previous phase.');
+      } else {
+        const from = foundJob?.canonical_stage || foundJob?.status || '';
+        setToast(movedToast(foundJob?.title || foundJob?.job_number || foundJob?.client_name || 'Job', from, targetStageKey));
       }
     } catch {
       fetchKanban();
+      setToast('Could not move the job. It is back in the previous phase.');
     }
+    setTimeout(() => setToast(null), 4000);
+  };
+
+  const moveJobByTap = async (job: JobCardData, targetStageKey: string) => {
+    setMovePickerJobId(null);
+    const from = job.canonical_stage || job.status;
+    if (from === targetStageKey) return;
+    try {
+      const req = stagePatchRequest(String(job.id), targetStageKey);
+      const res = await fetch(`${API}${req.path}`, {
+        method: req.method,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(req.body),
+      });
+      if (!res.ok) throw new Error('move failed');
+      setToast(movedToast(job.title || job.job_number || job.client_name || 'Job', from, targetStageKey));
+      fetchKanban();
+    } catch {
+      setToast('Could not move the job. Try again.');
+    }
+    setTimeout(() => setToast(null), 4000);
   };
 
   const openJobFolder = (job: JobCardData) => {
@@ -208,6 +216,7 @@ export default function JobBoard({ business }: { business?: string } = {}) {
   return (
     <div
       data-jobs-scrollable="true"
+      data-testid="job-board"
       style={{
         padding: '16px 20px',
         backgroundColor: '#f5f2ed',
@@ -358,7 +367,7 @@ export default function JobBoard({ business }: { business?: string } = {}) {
           {/* Mobile column scroll guidance */}
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <span style={{ fontSize: '11px', color: '#777', fontWeight: 600 }}>
-              11 Pipeline Stages • Swipe sideways on phone or drag on desktop
+              11 phases · Tap a card to open it · Tap Move or drag to another column
             </span>
             <div style={{ display: 'flex', gap: 6 }}>
               <button
@@ -420,6 +429,7 @@ export default function JobBoard({ business }: { business?: string } = {}) {
               return (
                 <div
                   key={stage.key}
+                  data-testid={`kanban-col-${stage.key}`}
                   onDragOver={(e) => handleDragOver(e, stage.key)}
                   onDragLeave={handleDragLeave}
                   onDrop={(e) => handleDrop(e, stage.key)}
@@ -501,7 +511,7 @@ export default function JobBoard({ business }: { business?: string } = {}) {
                           borderRadius: '10px',
                         }}
                       >
-                        Drop job here
+                        Drop here to move into {stage.label}
                       </div>
                     ) : (
                       jobs.map((job) => {
@@ -520,6 +530,7 @@ export default function JobBoard({ business }: { business?: string } = {}) {
                         return (
                           <div
                             key={job.id}
+                            data-testid={`kanban-card-${job.id}`}
                             draggable
                             onDragStart={(e) => handleDragStart(e, job.id)}
                             onClick={() => openJobFolder(job)}
@@ -540,6 +551,13 @@ export default function JobBoard({ business }: { business?: string } = {}) {
                               gap: '8px',
                             }}
                           >
+                            <div
+                              className="job-drag-handle"
+                              title="Drag to another phase"
+                              style={{ fontSize: 10, fontWeight: 700, color: '#b8960c', letterSpacing: 0.4, textTransform: 'uppercase' }}
+                            >
+                              ⋮⋮ Drag to move
+                            </div>
                             {/* Card Top: Client & Job Name */}
                             <div>
                               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
@@ -589,6 +607,29 @@ export default function JobBoard({ business }: { business?: string } = {}) {
                               </div>
                             )}
 
+                            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                            <button
+                              type="button"
+                              data-testid={`job-move-${job.id}`}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setMovePickerJobId(movePickerJobId === String(job.id) ? null : String(job.id));
+                              }}
+                              style={{
+                                alignSelf: 'flex-start',
+                                fontSize: 11,
+                                fontWeight: 700,
+                                background: '#111',
+                                color: '#f5f2ed',
+                                border: '1px solid #111',
+                                borderRadius: 6,
+                                padding: '6px 10px',
+                                cursor: 'pointer',
+                                minHeight: 36,
+                              }}
+                            >
+                              Move
+                            </button>
                             <button
                               type="button"
                               onClick={(e) => {
@@ -609,6 +650,27 @@ export default function JobBoard({ business }: { business?: string } = {}) {
                             >
                               Schedule
                             </button>
+                            </div>
+                            {movePickerJobId === String(job.id) && (
+                              <select
+                                data-testid={`job-move-pick-${job.id}`}
+                                defaultValue=""
+                                onClick={(e) => e.stopPropagation()}
+                                onChange={(e) => {
+                                  e.stopPropagation();
+                                  const v = e.target.value;
+                                  if (v) moveJobByTap(job, v);
+                                }}
+                                style={{ minHeight: 40, borderRadius: 8, border: '1px solid #ece8e0', fontSize: 12 }}
+                              >
+                                <option value="">Move to phase…</option>
+                                {KANBAN_STAGES.map((s) => (
+                                  <option key={s.key} value={s.key} disabled={s.key === (job.canonical_stage || job.status)}>
+                                    {s.label}
+                                  </option>
+                                ))}
+                              </select>
+                            )}
                             {/* Pickup / Delivery date chip */}
                             {(job.pickup_delivery_date || job.due_date || job.scheduled_date) && (
                               <div
@@ -769,6 +831,7 @@ export default function JobBoard({ business }: { business?: string } = {}) {
           onJobUpdated={fetchKanban}
         />
       )}
+      <PhaseToast message={toast} onDismiss={() => setToast(null)} />
     </div>
   );
 }

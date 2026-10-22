@@ -57,6 +57,42 @@ export const EXAMPLE_JOB_CONTEXT = {
   note: 'Cut list is ready. Fabric cut uses wood + 2 × allowance for 2" foam.',
 };
 
+export const EXAMPLE_JOBS = [
+  {
+    id: 'ex-job-home-a',
+    title: 'Living room drapery',
+    job_number: 'JOB-####',
+    client_name: 'Client A',
+    business_unit: 'workroom',
+    pipeline_stage: 'in_production',
+    status: 'in_progress',
+    scheduled_date: '2026-10-28',
+    quoted_amount: 4200,
+  },
+  {
+    id: 'ex-job-home-d',
+    title: 'CNC panel set',
+    job_number: 'JOB-####',
+    client_name: 'Client D',
+    business_unit: 'woodcraft',
+    pipeline_stage: 'ready',
+    status: 'in_progress',
+    due_date: '2026-10-30',
+    estimated_value: 1800,
+  },
+  {
+    id: 'ex-job-home-e',
+    title: 'Install drapery',
+    job_number: 'JOB-####',
+    client_name: 'Client E',
+    business_unit: 'workroom',
+    pipeline_stage: 'scheduled',
+    status: 'scheduled',
+    install_date: '2026-10-24',
+    quoted_amount: 2600,
+  },
+];
+
 export const EXAMPLE_WORK_ROWS = [
   { space: 'Empire Workroom', items: [
     { title: 'JOB-#### · Client A', detail: 'Drapery · Living room', badge: 'CUT' },
