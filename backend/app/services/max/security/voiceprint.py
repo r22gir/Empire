@@ -27,7 +27,12 @@ import numpy as np
 
 logger = logging.getLogger("max.security.voiceprint")
 
-VOICEPRINT_DIR = Path.home() / "empire-repo" / "backend" / "data" / "security" / "voiceprints"
+_data_root = os.environ.get("EMPIRE_DATA_DIR")
+VOICEPRINT_DIR = (
+    Path(_data_root) / "security" / "voiceprints"
+    if _data_root
+    else Path.home() / "empire-repo" / "backend" / "data" / "security" / "voiceprints"
+)
 VOICEPRINT_DIR.mkdir(parents=True, exist_ok=True)
 
 # Similarity threshold for voice verification (0.0 - 1.0)

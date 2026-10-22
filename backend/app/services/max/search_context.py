@@ -144,6 +144,11 @@ def build_search_query(message: str, history: list[dict[str, Any]] | None = None
             context_injected: True if carry-forward was applied.
             context_terms: list of terms injected (for auditability).
     """
+    try:
+        from app.services.max.thinking import strip_thinking
+        message = strip_thinking(message)
+    except Exception:
+        pass
     raw = (message or "").strip()
     if not raw:
         return {"query": "", "context_injected": False, "context_terms": []}

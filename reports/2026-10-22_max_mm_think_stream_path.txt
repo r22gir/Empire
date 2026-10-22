@@ -1,0 +1,11 @@
+POST /api/v1/max/chat/stream
+decoded_text=Claro, Juan. Aquí tienes lo que pediste.
+
+raw_sse=
+data: {"type": "heartbeat", "phase": "start"}
+
+data: {"type": "text", "content": "Claro, Juan. Aqu\u00ed tienes lo que pediste."}
+
+data: {"type": "done", "model_used": "MiniMax-M3", "conversation_id": "12349761-7cd9-45c1-8ea2-58d84c4c8fe9", "metadata": {"registry_version": "operating-registry-v2", "surface": "Founder/Web MAX", "response_at": "2026-10-22T10:51:05.447665+00:00", "skill_used": null}, "quality": {"icon": "\u2705", "color": "#22c55e", "label": "High confidence", "checks": ["tool_verification", "uncertainty_detection", "entity_verification", "calculation_check", "completeness_check"], "warnings": [], "validation_time_ms": 0.0}}
+
+
