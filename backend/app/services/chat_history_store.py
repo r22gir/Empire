@@ -242,6 +242,11 @@ def persist_exchange(
         and messages[-1].get("content") == user_message
     )
     stamp = now_iso()
+    try:
+        from app.services.max.thinking import strip_thinking
+        assistant_message = strip_thinking(assistant_message)
+    except Exception:
+        pass
     new_msgs = [
         {"role": "user", "content": user_message, "timestamp": stamp},
         {"role": "assistant", "content": assistant_message, "timestamp": stamp, "model": model},

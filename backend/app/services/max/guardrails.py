@@ -190,70 +190,50 @@ def check_input(text: str, message_context: dict = None) -> Tuple[bool, str]:
 # Handles complete blocks, orphan open/close tags, and cross-chunk splits.
 
 def strip_reasoning_tags(text: str, *, trim_edges: bool = True) -> str:
-    """Remove all AI reasoning/reasoning tag content from text."""
+    """Remove all AI reasoning/reasoning tag content from text.
+
+    Delegates to the central MiniMax/LLM stripper so reply, history,
+    search-query, and stream paths share one implementation.
+    """
+    from app.services.max.thinking import strip_thinking
+
     if not text:
         return text
+    return strip_thinking(text, trim_edges=trim_edges)
 
-    # 1. Remove complete <think>... blocks (non-greedy .*? so each block matched individually,
-    #    DOTALL so . matches newlines, optional trailing newline preserved)
-    text = re.sub(r"<think>.*?<\/think>\n?", "", text, flags=re.IGNORECASE | re.DOTALL)
 
-    # 2. Remove <thinking>...</thinking> blocks
-    text = re.sub(r"<thinking>[\s\S]*?</thinking>", "", text, flags=re.IGNORECASE)
-
-    # 3. Remove orphan closing tag  at end of chunk (no opening in this chunk)
-    #    This appears after strip of complete tags leaves stray closing tag
-    text = re.sub(r"<\/think>$", "", text, flags=re.IGNORECASE)
-
-    # 4. Handle cross-chunk split: orphaned <think> at START of text
-    #    Strip everything from <think> to the last newline before real content
-    while text.startswith("<think>"):
-        nl_idx = text.rfind("\n")
-        if nl_idx > 0:
-            text = text[nl_idx + 1:]
-        else:
-            # No newline, just strip the tag itself
-            text = text[len("<think>"):]
-
-    # 5. Remove stray opening tags
-    text = re.sub(r"<think>", "", text, flags=re.IGNORECASE)
-    text = re.sub(r"<think>", "", text, flags=re.IGNORECASE)
-
-    # 6. Remove stray closing tags
-    text = re.sub(r"", "", text, flags=re.IGNORECASE)
-    text = re.sub(r"</think>", "", text, flags=re.IGNORECASE)
-
-    # 7. Remove answer/final wrapper tags (extract content)
-    text = re.sub(r"<answer>([\s\S]*?)</answer>", r"\1", text, flags=re.IGNORECASE)
-    text = re.sub(r"<final>([\s\S]*?)</final>", r"\1", text, flags=re.IGNORECASE)
-    text = re.sub(r"<回答>([\s\S]*?)</回答>", r"\1", text, flags=re.IGNORECASE)
-
-    # 8. Collapse excessive blank lines (more than 2 consecutive newlines)
-    text = re.sub(r"\n{3,}", "\n\n", text)
-
-    # 9. Trim leading/trailing whitespace for full responses only.
-    # Streaming chunks must preserve edge whitespace so chunk boundaries
-    # don't collapse words when concatenated in the browser.
-    if trim_edges:
-        text = text.strip()
-
+def _redact_provider_keys(text: str) -> str:
+    text = re.sub(r"sk-[a-zA-Z0-9]{20,}", "[REDACTED_KEY]", text)
+    text = re.sub(r"xai-[a-zA-Z0-9]{20,}", "[REDACTED_KEY]", text)
     return text
 
 
 def sanitize_output(text: str) -> str:
     """Sanitize output: remove API keys and strip reasoning tags."""
-    text = re.sub(r"sk-[a-zA-Z0-9]{20,}", "[REDACTED_KEY]", text)
-    text = re.sub(r"xai-[a-zA-Z0-9]{20,}", "[REDACTED_KEY]", text)
-    text = strip_reasoning_tags(text, trim_edges=True)
-    return text
+    return strip_reasoning_tags(_redact_provider_keys(text or ""), trim_edges=True)
 
 
 def sanitize_output_streaming(text: str) -> str:
-    """Streaming-safe sanitization: preserves edge whitespace per chunk."""
-    text = re.sub(r"sk-[a-zA-Z0-9]{20,}", "[REDACTED_KEY]", text)
-    text = re.sub(r"xai-[a-zA-Z0-9]{20,}", "[REDACTED_KEY]", text)
-    text = strip_reasoning_tags(text, trim_edges=False)
-    return text
+    """Per-chunk key redaction plus complete think-block strip."""
+    return strip_reasoning_tags(_redact_provider_keys(text or ""), trim_edges=False)
+
+
+def new_thinking_stream_sanitizer():
+    """Stateful stream sanitizer: keys + split think tags.
+
+    Returns ``(push, finish)``. Use one pair per model turn.
+    """
+    from app.services.max.thinking import ThinkingStreamFilter
+
+    filt = ThinkingStreamFilter()
+
+    def push(chunk: str) -> str:
+        return filt.feed(_redact_provider_keys(chunk or ""))
+
+    def finish() -> str:
+        return filt.flush()
+
+    return push, finish
 
 
 # ── Hallucination markers ─────────────────────────────────────────────

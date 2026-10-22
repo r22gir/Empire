@@ -26,7 +26,9 @@ _TODAY_AGENDA = re.compile(
     r"qu[eé]\s+(?:hay|tengo)\s+(?:hoy|para\s+hoy)|"
     r"qu[eé]\s+hay\s+en\s+(?:la\s+|el\s+)?(?:agenda|calendario|horario)|"
     r"(?:mi|la)\s+(?:agenda|horario|calendario)(?:\s+de\s+hoy)?|"
-    r"agenda\s+de\s+hoy|horario\s+de\s+hoy|calendario\s+de\s+hoy"
+    r"agenda\s+de\s+hoy|horario\s+de\s+hoy|calendario\s+de\s+hoy|"
+    r"res[uú]me(?:me)?\s+(?:el\s+)?d[ií]a|"
+    r"summarize\s+(?:my\s+|the\s+)?day"
     r")",
     re.I,
 )
@@ -208,6 +210,16 @@ def collect_today_agenda(day: Optional[str] = None) -> dict[str, Any]:
             "projects. Never claim the calendar is unavailable or unreliable."
         ),
     }
+
+
+AGENDA_UNAVAILABLE_ES = (
+    "No pude consultar la agenda ahora. Inténtalo de nuevo en un momento."
+)
+
+
+def agenda_unavailable_reply() -> str:
+    """Family-facing fallback when agenda tools fail. Never English."""
+    return AGENDA_UNAVAILABLE_ES
 
 
 def is_today_agenda_ask(message: Optional[str]) -> bool:
