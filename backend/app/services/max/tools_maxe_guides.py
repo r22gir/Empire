@@ -99,20 +99,20 @@ def register_tools(tool, ToolResult):
 
     @tool("whatsapp_setup_guide")
     def whatsapp_setup_guide(params: dict, desk=None):
-        """Walk Juan through his own Meta/WhatsApp. Never collect secrets."""
+        """Walk the owner through their own Meta/WhatsApp. Never collect secrets."""
         try:
-            from app.edition import is_amp
-            from app.services.maxe_guides import looks_like_secret, run_whatsapp_setup_guide, secret_refusal
+            from app.edition import is_family_edition
+            from app.services.maxe_guides import looks_like_secret, run_whatsapp_setup_guide, secret_refusal, whatsapp_setup_path
 
-            if not is_amp():
-                return ToolResult(tool="whatsapp_setup_guide", success=False, error="Solo en Max-e")
+            if not is_family_edition():
+                return ToolResult(tool="whatsapp_setup_guide", success=False, error="Solo en ediciones familiares")
             args = _args(params)
             spoken = str(args.get("text") or args.get("answer") or "")
             if looks_like_secret(spoken):
                 return ToolResult(
                     tool="whatsapp_setup_guide",
                     success=True,
-                    result={"refused": True, "message": secret_refusal(), "setup_path": "/amp/whatsapp"},
+                    result={"refused": True, "message": secret_refusal(), "setup_path": whatsapp_setup_path()},
                 )
             step = str(args.get("step") or "")
             guide = run_whatsapp_setup_guide(step, persist=True)
