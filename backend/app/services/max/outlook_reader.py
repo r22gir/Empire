@@ -67,6 +67,16 @@ _READ_FIELDS = "id,subject,from,toRecipients,ccRecipients,receivedDateTime,body,
 MAX_BODY_CHARS = 8000
 
 
+def _sanitize_mail_text(text: str, *, limit: int = 300) -> str:
+    """Visible text only — hidden inbound instructions never leave this reader."""
+    try:
+        from app.services.max.security.inbound_content import sanitize_inbound
+        cleaned = sanitize_inbound(text or "", source="outlook").text
+    except Exception:
+        cleaned = text or ""
+    return cleaned[:limit]
+
+
 class OutlookNotSignedIn(RuntimeError):
     pass
 
@@ -327,7 +337,7 @@ def search_messages(query: Optional[str] = None, folder: Optional[str] = None,
             "from": _addr(m.get("from")),
             "subject": m.get("subject") or "(no subject)",
             "date": m.get("receivedDateTime"),
-            "preview": (m.get("bodyPreview") or "")[:300],
+            "preview": _sanitize_mail_text(m.get("bodyPreview") or "", limit=300),
             "unread": not m.get("isRead", True),
             "has_attachments": bool(m.get("hasAttachments")),
             "rfc_message_id": m.get("internetMessageId") or "",
@@ -344,8 +354,8 @@ def read_message(message_id: str, http: Optional[httpx.Client] = None) -> dict:
     mid = quote(str(message_id), safe="")
     m = _graph_get(c, f"/me/messages/{mid}", params={"$select": _READ_FIELDS},
                    headers={"Prefer": 'outlook.body-content-type="text"'})
-    body = ((m.get("body") or {}).get("content") or "").strip()
-    truncated = len(body) > MAX_BODY_CHARS
+    body = _sanitize_mail_text(((m.get("body") or {}).get("content") or "").strip(), limit=MAX_BODY_CHARS)
+    truncated = len(((m.get("body") or {}).get("content") or "")) > MAX_BODY_CHARS
     return {
         "success": True, "source": "outlook", "id": m.get("id"),
         "from": _addr(m.get("from")),
@@ -354,5 +364,5 @@ def read_message(message_id: str, http: Optional[httpx.Client] = None) -> dict:
         "subject": m.get("subject") or "(no subject)",
         "date": m.get("receivedDateTime"),
         "has_attachments": bool(m.get("hasAttachments")),
-        "body": body[:MAX_BODY_CHARS] + ("\n[... truncated]" if truncated else ""),
+        "body": body + ("\n[... truncated]" if truncated else ""),
     }
