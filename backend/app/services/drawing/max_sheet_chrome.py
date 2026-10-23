@@ -154,22 +154,28 @@ def _ls_draw(c: canvas.Canvas, x: float, y: float, text: str,
     return total
 
 
-def _wrap_project_words(text: str, c: canvas.Canvas, font: str, size: float,
-                        tracking: float, max_width: float) -> list[str]:
-    words = [w for w in (text or "").split() if w]
-    if not words:
-        return [""]
-    lines: list[str] = []
-    current = words[0]
-    for word in words[1:]:
-        trial = f"{current} {word}"
+def _ellipsize_to_width(
+    text: str,
+    c: canvas.Canvas,
+    font: str,
+    size: float,
+    tracking: float,
+    max_width: float,
+) -> str:
+    """Word-aware ellipsis so a long CLIENT · PROJECT stays on one header line."""
+    text = (text or "").strip()
+    if not text or _ls_width(c, text, font, size, tracking) <= max_width:
+        return text
+    words = text.split()
+    while words:
+        trial = (" ".join(words) + "…").strip()
         if _ls_width(c, trial, font, size, tracking) <= max_width:
-            current = trial
-        else:
-            lines.append(current)
-            current = word
-    lines.append(current)
-    return lines
+            return trial
+        words.pop()
+    trimmed = text
+    while trimmed and _ls_width(c, trimmed + "…", font, size, tracking) > max_width:
+        trimmed = trimmed[:-1]
+    return (trimmed + "…") if trimmed else "…"
 
 
 def _draw_fitted_project_line(
@@ -184,8 +190,10 @@ def _draw_fitted_project_line(
     max_width: float,
     min_size: float = 4.4,
 ) -> list[tuple[str, float, float]]:
-    """Shrink, then wrap, so a long CLIENT · PROJECT line stays left of the stamp.
+    """Shrink, then ellipsize, so CLIENT · PROJECT stays on one line.
 
+    A second wrapped line lands on the gold tagline (CUSTOM UPHOLSTERY &
+    FABRICATION) and the ESTIMATE / SHEET stamp. Keep one baseline.
     Returns the drawn (line, x, y) runs for tests.
     """
     text = (text or "").strip()
@@ -200,21 +208,9 @@ def _draw_fitted_project_line(
             _ls_draw(c, x, y, text, font, chosen, color, tracking=tracking)
             return [(text, x, y)]
         chosen = trial
-    lines = _wrap_project_words(text, c, font, chosen, tracking, max_width)
-    if len(lines) > 2:
-        head = " ".join(lines[:-1])
-        while len(head) > 4 and _ls_width(c, head + "…", font, chosen, tracking) > max_width:
-            head = head.rsplit(" ", 1)[0] if " " in head else head[:-1]
-        lines = [head + "…", lines[-1]]
-        while lines[-1] and _ls_width(c, lines[-1], font, chosen, tracking) > max_width:
-            lines[-1] = lines[-1].rsplit(" ", 1)[0] if " " in lines[-1] else lines[-1][:-1]
-    drawn = []
-    step = max(7.0, chosen + 1.4)
-    for i, line in enumerate(lines[:2]):
-        yy = y - i * step
-        _ls_draw(c, x, yy, line, font, chosen, color, tracking=tracking)
-        drawn.append((line, x, yy))
-    return drawn
+    fitted = _ellipsize_to_width(text, c, font, chosen, tracking, max_width)
+    _ls_draw(c, x, y, fitted, font, chosen, color, tracking=tracking)
+    return [(fitted, x, y)]
 
 
 def render_chrome_bands(

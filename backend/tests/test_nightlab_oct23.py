@@ -180,8 +180,46 @@ def test_quote_pdf_long_project_name_does_not_overlap_header(tmp_path):
         assert hits == [], f"header overlap {hits[:8]}"
         text = page.extract_text() or ""
         assert "ESTIMATE" in text.upper() or "EST-TEMP-NL23" in text
-        # Project words survive (wrapped/shrunk, not dropped entirely).
+        # Tagline must stay a real phrase — mashed glyphs mean the project
+        # line wrapped onto CUSTOM UPHOLSTERY & FABRICATION.
+        assert "CUSTOM UPHOLSTERY" in text.upper()
+        assert "CDOUWNSTTOWONM" not in text.upper()
+        assert "OUTEPLH" not in text.upper()
+        # Project words survive (shrunk/ellipsized, not dropped entirely).
         assert "BALLROOM" in text.upper() or "HOTEL" in text.upper() or "BANQUETTE" in text.upper()
+
+
+def test_max_desk_returns_conflicts_and_fraction_pages(drawings_dir):
+    """Real Max door: _maybe_job_drawing_desk_response returns the PDF pages."""
+    import importlib
+
+    max_router = importlib.import_module("app.routers.max.router")
+    request = max_router.ChatRequest(
+        message="change it to 10 inch channels; seat cushions on V999-Fake",
+        history=HISTORY,
+        channel="web",
+        job_id="marleys",
+    )
+    response = asyncio.run(max_router._maybe_job_drawing_desk_response(request))
+    assert response is not None
+    assert response.model_used == "drawing-desk"
+    blob = (response.response or "").upper()
+    assert "UNKNOWN FABRIC CODE" in blob
+    assert "V999-FAKE" in blob
+    assert "249 3/4" in (response.response or "") or "10\"" in (response.response or "")
+    tools = response.tool_results or []
+    assert tools and tools[0].get("success")
+    result = tools[0]["result"]
+    pdf_path = result["pdf_path"]
+    pages = _pages(pdf_path)
+    text = "\n".join(pages)
+    assert "CONFLICTS" in pages[-1].upper()
+    assert "None — drawing matches" not in pages[-1]
+    assert "UNKNOWN FABRIC CODE" in text.upper()
+    assert "V999-FAKE" in text.upper()
+    assert "249 3/4" in text
+    assert "249-3/4" not in text
+    assert result["fabrics"]["seat"].get("unknown_code")
 
 
 def test_woodcraft_zero_invoice_and_job_link(monkeypatch, tmp_path):
