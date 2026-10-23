@@ -97,6 +97,197 @@ def _parse_inches(raw: Any) -> Optional[float]:
     return value if value > 0 else None
 
 
+_OPAQUE_JOB_ID = re.compile(
+    r"^(?:[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}|job[-_][A-Za-z0-9_-]+)$",
+    re.I,
+)
+
+
+def _opaque_job_id(value: str | None) -> bool:
+    raw = (value or "").strip()
+    return bool(raw) and bool(_OPAQUE_JOB_ID.match(raw))
+
+
+def _customer_from_job_id(job_id: str | None) -> Optional[str]:
+    raw = (job_id or "").strip()
+    if not raw:
+        return None
+    try:
+        from app.db.database import get_db
+        with get_db() as conn:
+            row = conn.execute(
+                "SELECT * FROM jobs WHERE id = ? LIMIT 1",
+                (raw,),
+            ).fetchone()
+    except Exception:
+        return None
+    if not row:
+        return None
+    data = dict(row) if not isinstance(row, dict) else row
+    for key in ("customer_name", "name", "title"):
+        val = str(data.get(key) or "").strip()
+        if val:
+            return val
+    return None
+
+
+def resolve_drawing_job_hint(
+    message: str | None = None,
+    history: Any = None,
+    job_hint: str | None = None,
+    job_id: str | None = None,
+) -> Optional[str]:
+    """Named job from the turn beats an opaque jobs-table id on the request."""
+    ctx = merge_drawing_job_context(message, history)
+    named = (ctx.get("job_hint") or extract_job_hint(message) or "").strip()
+    if named:
+        return named
+    caller = (job_hint or job_id or "").strip()
+    if caller and not _opaque_job_id(caller):
+        return caller
+    looked = _customer_from_job_id(job_id or job_hint)
+    if looked:
+        return looked
+    return caller or None
+
+
+def _uniq_misses(items: list[str]) -> list[str]:
+    seen: set[str] = set()
+    out: list[str] = []
+    for item in items:
+        key = item.strip().lower()
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        out.append(item)
+    return out
+
+
+def extract_drawing_pdf_text(pdf_path: str | Path | None) -> str:
+    """Read generated PDF text for the success gate. Empty on any read miss."""
+    if not pdf_path:
+        return ""
+    path = Path(pdf_path)
+    if not path.is_file():
+        return ""
+    try:
+        import pdfplumber
+        with pdfplumber.open(str(path)) as pdf:
+            return "\n".join((page.extract_text() or "") for page in pdf.pages)
+    except Exception:
+        return ""
+
+
+def _channel_shown_in_text(text: str, inches: float) -> bool:
+    shown = format_inches(inches)
+    spaced = shown.replace("-", " ")
+    compact = text.replace(" ", "")
+    if shown in text or spaced in text or shown.replace('"', "") in compact:
+        return True
+    try:
+        from app.services.drawing.templates.banquette_job import inch_text
+        alt = inch_text(inches)
+        if alt in text or alt.replace(" ", "") in compact:
+            return True
+    except Exception:
+        pass
+    if abs(inches - round(inches)) < 0.05:
+        whole = int(round(inches))
+        if re.search(rf'(?:@\s*)?{whole}\s*"', text):
+            return True
+    return False
+
+
+def verify_specs_in_output(
+    *,
+    pdf_path: str | Path | None,
+    requested: dict[str, Any],
+    channel_in: float,
+    fabrics: dict[str, Any],
+    pdf_text: str | None = None,
+) -> list[str]:
+    """In-memory apply check PLUS the generated PDF. Empty list = honored."""
+    misses = list(_requested_vs_applied(requested, channel_in, fabrics))
+    asked = {k: requested.get(k) for k in ("channel_width_in", "seat_fabric", "back_fabric")}
+    if not any(v not in (None, "") for v in asked.values()):
+        return _uniq_misses(misses)
+    text = pdf_text if pdf_text is not None else extract_drawing_pdf_text(pdf_path)
+    if not (text or "").strip():
+        misses.append("generated PDF has no readable spec text")
+        return _uniq_misses(misses)
+    blob = text.lower()
+    req_ch = requested.get("channel_width_in")
+    if req_ch is not None:
+        try:
+            ch = float(req_ch)
+        except (TypeError, ValueError):
+            ch = None
+        if ch is not None and not _channel_shown_in_text(text, ch):
+            misses.append(
+                f"channel width {format_inches(ch)} missing from generated PDF"
+            )
+    for role, key in (("seat", "seat_fabric"), ("back", "back_fabric")):
+        token = requested.get(key)
+        if not token:
+            continue
+        resolved = fabrics.get(role) or {}
+        needles = [resolved.get("code"), resolved.get("color"), token]
+        if not any(str(n).lower() in blob for n in needles if n):
+            misses.append(f"{role} {token} missing from generated PDF")
+    return _uniq_misses(misses)
+
+
+def _attach_drawing_to_job(
+    *,
+    job_id: str | None,
+    job_hint: str | None,
+    pdf_path: Path,
+    revision: str,
+) -> Optional[str]:
+    """Best-effort job_documents row. Never raises. Mock/temp DBs only in tests."""
+    try:
+        from app.db.database import get_db
+        with get_db() as conn:
+            resolved = (job_id or "").strip() or None
+            if resolved:
+                try:
+                    row = conn.execute(
+                        "SELECT id FROM jobs WHERE id = ? LIMIT 1", (resolved,)
+                    ).fetchone()
+                except Exception:
+                    row = None
+                if not row:
+                    resolved = None
+            if not resolved and job_hint:
+                needle = f"%{str(job_hint).lower()}%"
+                try:
+                    row = conn.execute(
+                        """SELECT id FROM jobs
+                           WHERE lower(COALESCE(name, '')) LIKE ?
+                              OR lower(COALESCE(customer_name, '')) LIKE ?
+                              OR lower(COALESCE(title, '')) LIKE ?
+                           LIMIT 1""",
+                        (needle, needle, needle),
+                    ).fetchone()
+                except Exception:
+                    row = None
+                if row:
+                    resolved = row["id"] if isinstance(row, dict) else row[0]
+            if not resolved:
+                return None
+            doc_id = uuid.uuid4().hex[:16]
+            conn.execute(
+                """INSERT INTO job_documents
+                   (id, job_id, document_type, url, filename, revision,
+                    source_channel, visible_to_client)
+                   VALUES (?, ?, 'drawing', ?, ?, ?, 'drawing_desk', 0)""",
+                (doc_id, str(resolved), str(pdf_path), pdf_path.name, revision),
+            )
+            return doc_id
+    except Exception:
+        return None
+
+
 def _fabric_token_matches(token: str, resolved: dict[str, Any] | None) -> bool:
     raw = (token or "").strip().lower()
     if not raw:
@@ -800,15 +991,19 @@ def generate_job_drawing(
     message: str = "",
     history: Any = None,
     job_hint: str | None = None,
+    job_id: str | None = None,
     quote: dict[str, Any] | None = None,
     layout_data: dict[str, Any] | None = None,
     takeoff: dict[str, Any] | None = None,
     spec_changes: dict[str, Any] | None = None,
     output_dir: str | Path | None = None,
+    verify_pdf_text: str | None = None,
 ) -> dict[str, Any]:
     """Build a revised internal drawing PDF for a job. Temp data only in tests."""
     ctx = merge_drawing_job_context(message, history)
-    hint = job_hint or ctx.get("job_hint") or extract_job_hint(message)
+    hint = resolve_drawing_job_hint(
+        message, history, job_hint=job_hint, job_id=job_id,
+    )
     changes = dict(ctx.get("spec_changes") or {})
     if spec_changes:
         changes.update(spec_changes)
@@ -988,6 +1183,12 @@ def generate_job_drawing(
         share_url = studio_found_url(str(primary)) or ""
     except Exception:
         share_url = ""
+    job_doc_id = _attach_drawing_to_job(
+        job_id=job_id,
+        job_hint=hint,
+        pdf_path=primary,
+        revision=revision,
+    )
     mtime = primary.stat().st_mtime
     link_line = f" [{primary.name}]({share_url})" if share_url else f" {primary.name}"
     asked = extract_spec_changes(message)
@@ -996,7 +1197,20 @@ def generate_job_drawing(
         for k in ("channel_width_in", "seat_fabric", "back_fabric")
         if asked.get(k) not in (None, "")
     }
-    mismatches = _requested_vs_applied(requested, channel, fabrics)
+    if not requested:
+        # Bare "change it" still has to honor specs carried from history.
+        requested = {
+            k: changes[k]
+            for k in ("channel_width_in", "seat_fabric", "back_fabric")
+            if changes.get(k) not in (None, "")
+        }
+    mismatches = verify_specs_in_output(
+        pdf_path=primary,
+        requested=requested,
+        channel_in=channel,
+        fabrics=fabrics,
+        pdf_text=verify_pdf_text,
+    )
     allow_row = lookup_fabric_allowance(foam)
     allow_in = allow_row.get("allowance_in")
     foam_txt = format_inches(foam) if foam else "TBC"
@@ -1013,6 +1227,7 @@ def generate_job_drawing(
         )
     else:
         applied_bits.append(allow_row.get("label") or NEEDS_FOAM_THICKNESS)
+    specs_honored = not mismatches
     if mismatches:
         message = (
             f"Requested change was not applied: {'; '.join(mismatches)}. "
@@ -1026,7 +1241,7 @@ def generate_job_drawing(
             + (f" Conflicts: {'; '.join(conflicts)}" if conflicts else "")
         )
     return {
-        "success": True,
+        "success": specs_honored,
         "desk": DRAWING_DESK_ID,
         "desk_label": "Kai (ForgeDesk / Drawing Studio)",
         "internal_only": True,
@@ -1057,8 +1272,11 @@ def generate_job_drawing(
         "pieces": [s.name for s in specs],
         "branding": EMPIRE_BRAND,
         "stamp": INTERNAL_STAMP,
-        "specs_honored": not mismatches,
+        "specs_honored": specs_honored,
         "spec_mismatches": mismatches,
+        "requested_specs": requested,
+        "job_id": job_id,
+        "job_document_id": job_doc_id,
         "foam_thickness_in": foam,
         "allowance_in": allow_in,
         "message": message,
@@ -1069,6 +1287,10 @@ def founder_drawing_reply(result: dict[str, Any]) -> str:
     """Short founder-facing line. Never a pipeline dump."""
     if not result:
         return "Drawing desk failed: no result."
+    if result.get("specs_honored") is False:
+        return result.get("message") or (
+            "Requested change was not applied. I will not call this a new drawing."
+        )
     if result.get("success"):
         return result.get("message") or f"New internal drawing: {result.get('pdf_filename')}"
     return f"Drawing desk could not finish: {result.get('error') or 'unknown error'}."
@@ -1078,6 +1300,7 @@ def run_job_drawing_turn(
     message: str,
     history: Any = None,
     job_hint: str | None = None,
+    job_id: str | None = None,
     **kwargs: Any,
 ) -> dict[str, Any]:
     """Chat / stream entry: classify then generate. Used by both /chat doors."""
@@ -1089,11 +1312,14 @@ def run_job_drawing_turn(
         message=message,
         history=history,
         job_hint=job_hint,
+        job_id=job_id,
         **kwargs,
     )
+    honored = result.get("specs_honored")
+    success = bool(result.get("success")) and honored is not False
     return {
         "handled": True,
-        "success": bool(result.get("success")),
+        "success": success,
         "response": founder_drawing_reply(result),
         "result": result,
         "model_used": "drawing-desk",

@@ -95,6 +95,14 @@ _SEATS_COLOR = re.compile(
     r"\b(?:with\s+)?(black|cognac|bittersweet|raven|cherrywood)\s+seats?\b",
     re.I,
 )
+_SEAT_NEAR_CODE = re.compile(
+    r"(?:seat\s+cushions?|seat\s+fabric|seats?).{0,40}?(V\d{3}-[A-Za-z0-9]+)",
+    re.I,
+)
+_BACK_NEAR_CODE = re.compile(
+    r"(?:seat\s+backs?|channel\s+backs?|backs?).{0,40}?(V\d{3}-[A-Za-z0-9]+)",
+    re.I,
+)
 _FABRIC_CODE = re.compile(r"\b(V\d{3}-[A-Za-z0-9]+)\b", re.I)
 _DOC_ONLY = re.compile(
     r"\b(?:docs?|documents?|files?|addendum|invoice)\b",
@@ -233,6 +241,18 @@ def extract_spec_changes(text: str | None) -> dict[str, Any]:
         token = seat.group(1).strip().rstrip(".,;")
         if token.lower() not in {"backs", "back", "channels", "channel"}:
             changes["seat_fabric"] = token
+    # Prefer a V###-Color next to seat/back wording over a spoken color alone
+    # ("seat cushions to Black V001-Raven, backs 12\" channel V003-Cognac").
+    seat_near = _SEAT_NEAR_CODE.search(raw)
+    if seat_near:
+        token = next((g for g in seat_near.groups() if g), None)
+        if token:
+            changes["seat_fabric"] = token.strip()
+    back_near = _BACK_NEAR_CODE.search(raw)
+    if back_near:
+        token = next((g for g in back_near.groups() if g), None)
+        if token:
+            changes["back_fabric"] = token.strip()
     return changes
 
 
