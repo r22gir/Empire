@@ -204,6 +204,13 @@ def resolve_internal_fabric(token: str | None, registry_rows: list[dict] | None 
         suffix = code.split("-", 1)[-1].lower() if "-" in code else ""
         if suffix and suffix == color_key:
             return _fabric_row_payload(row)
+    if any(marker in color_key for marker in _SUPPLIER_MARKERS):
+        return {
+            "code": None,
+            "color": None,
+            "label": "TBC — CONFIRM BEFORE CUT",
+            "brand_stripped": True,
+        }
     return {"code": None, "color": raw, "label": raw}
 
 

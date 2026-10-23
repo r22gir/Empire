@@ -25,6 +25,7 @@ from app.services.max.improvement_planner import (
     plan_improvement,
     template_plan,
 )
+from app.services.max.studio_frozen_gate import evaluate_studio_frozen_gate
 
 logger = logging.getLogger("max.improvements.worker")
 
@@ -88,6 +89,16 @@ def run_atlas_plan(job: dict) -> dict:
     req = imp.get(req_id)
     if not req:
         raise LookupError(f"improvement {req_id} not found")
+
+    gate = evaluate_studio_frozen_gate()
+    logger.info(gate["log_line"])
+    if not gate["keep"]:
+        _set_status(
+            req_id,
+            status="build_failed",
+            build_note=gate["log_line"][:500],
+        )
+        raise RuntimeError(gate["log_line"])
 
     _set_status(
         req_id,
@@ -195,6 +206,8 @@ def run_atlas_plan(job: dict) -> dict:
         "used_llm": used_llm,
         "merged": False,
         "deployed": False,
+        "kept": True,
+        "frozen_gate": gate["verdict"],
     }
     return result
 

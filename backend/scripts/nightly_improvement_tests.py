@@ -133,6 +133,25 @@ def _parse_node_failures(text: str) -> list[str]:
     return out
 
 
+def _run_frozen_gate(env: dict[str, str]) -> dict:
+    """Yes/no Studio frozen-suite gate. Must pass twice. Nothing is sent."""
+    try:
+        sys.path.insert(0, str(BACKEND))
+        from app.services.max.studio_frozen_gate import evaluate_studio_frozen_gate
+
+        return evaluate_studio_frozen_gate(env=env)
+    except Exception as exc:
+        return {
+            "keep": False,
+            "verdict": "NO",
+            "log_line": f"STUDIO_FROZEN_GATE: NO  passes=0/2  gate error: {exc}",
+            "passes": 0,
+            "required_passes": 2,
+            "runs": [{"ok": False, "output": str(exc)}],
+            "outbound": False,
+        }
+
+
 def _file_fix(title: str, problem: str, proposed: str) -> dict:
     from app.services.max import improvements as imp
 
@@ -164,7 +183,7 @@ def run_nightly(*, dry_run: bool = False, full: bool = False) -> dict:
     else:
         default = os.getenv(
             "MAX_IMPROVE_NIGHTLY_PYTEST",
-            "tests/test_growth.py tests/test_improvement_loop.py tests/test_minimax_meter.py tests/test_live_data_firewall.py",
+            "tests/test_growth.py tests/test_improvement_loop.py tests/test_minimax_meter.py tests/test_live_data_firewall.py tests/test_studio_frozen_gate.py",
         )
         backend_cmd.extend(default.split())
 
@@ -183,6 +202,7 @@ def run_nightly(*, dry_run: bool = False, full: bool = False) -> dict:
         "dry_run": dry_run,
         "backend": None,
         "frontend": None,
+        "frozen_gate": None,
         "filed": [],
         "merged": False,
         "deployed": False,
@@ -190,6 +210,7 @@ def run_nightly(*, dry_run: bool = False, full: bool = False) -> dict:
 
     results["backend"] = _run(backend_cmd, BACKEND, env, timeout=int(os.getenv("MAX_IMPROVE_NIGHTLY_BACKEND_TIMEOUT", "900")))
     results["frontend"] = _run(frontend_cmd, FRONTEND, env, timeout=int(os.getenv("MAX_IMPROVE_NIGHTLY_FRONTEND_TIMEOUT", "300")))
+    results["frozen_gate"] = _run_frozen_gate(env)
 
     failures = []
     for name in _parse_pytest_failures(results["backend"]["output"]):
@@ -218,8 +239,21 @@ def run_nightly(*, dry_run: bool = False, full: bool = False) -> dict:
                 )
             )
 
+    gate = results.get("frozen_gate") or {}
+    if not gate.get("keep"):
+        failures.append((
+            "frozen_gate",
+            gate.get("log_line") or "STUDIO_FROZEN_GATE: NO",
+            (gate.get("runs") or [{}])[-1].get("output", "")[-1500:] if isinstance(gate.get("runs"), list) else "",
+        ))
+
     results["failed_count"] = len(failures)
-    results["ok"] = results["backend"]["ok"] and results["frontend"]["ok"]
+    results["ok"] = (
+        results["backend"]["ok"]
+        and results["frontend"]["ok"]
+        and bool(gate.get("keep"))
+    )
+    print(gate.get("log_line") or "STUDIO_FROZEN_GATE: NO  (gate did not run)")
     try:
         LOG_DIR.mkdir(parents=True, exist_ok=True)
         (LOG_DIR / "nightly_improvements.json").write_text(json.dumps(results, indent=2)[:20000])

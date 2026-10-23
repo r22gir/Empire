@@ -48,6 +48,7 @@ def loop(monkeypatch, tmp_path):
     monkeypatch.setenv("MAX_IMPROVE_SPEC_DIR", str(tmp_path / "specs"))
     monkeypatch.setenv("MINIMAX_METER_DIR", str(tmp_path / "meter"))
     monkeypatch.setenv("EMPIRE_EDITION", "studio")
+    monkeypatch.setenv("MAX_IMPROVE_WORKER_ENABLED", "1")
     monkeypatch.delenv("CURSOR_API_KEY", raising=False)
     monkeypatch.delenv("GITHUB_TOKEN", raising=False)
     monkeypatch.delenv("GH_TOKEN", raising=False)
@@ -66,6 +67,18 @@ def loop(monkeypatch, tmp_path):
     from app.routers import growth as growth_router
     for m in (growth, improvements, improvement_queue, improvement_planner, improvement_github, improvement_worker, growth_router):
         importlib.reload(m)
+    monkeypatch.setattr(
+        improvement_worker,
+        "evaluate_studio_frozen_gate",
+        lambda **k: {
+            "keep": True,
+            "verdict": "YES",
+            "log_line": "STUDIO_FROZEN_GATE: YES  passes=2/2  mocked",
+            "passes": 2,
+            "required_passes": 2,
+        },
+        raising=False,
+    )
     app = FastAPI()
     app.include_router(growth_router.router, prefix="/api/v1")
     return dict(
@@ -193,6 +206,24 @@ def test_family_edition_does_not_run_planner(loop, monkeypatch):
         loop["planner"].call_minimax("s", "u")
 
 
+def test_atlas_rejects_when_frozen_gate_is_no(loop, monkeypatch):
+    loop["worker"].evaluate_studio_frozen_gate = lambda **k: {
+        "keep": False,
+        "verdict": "NO",
+        "log_line": "STUDIO_FROZEN_GATE: NO  passes=0/2  frozen suite failed on first pass — change rejected",
+        "passes": 0,
+        "required_passes": 2,
+    }
+    r = _req(loop)
+    loop["imp"].approve_build(r["id"], confirm=True)
+    out = loop["worker"].process_one()
+    assert out.get("status") == "failed" or out.get("error")
+    assert "STUDIO_FROZEN_GATE: NO" in str(out.get("error") or "")
+    got = loop["imp"].get(r["id"])
+    assert got["status"] == "build_failed"
+    assert "STUDIO_FROZEN_GATE: NO" in (got.get("build_note") or "")
+
+
 def test_nightly_files_fix_improvements_without_outbound(loop, monkeypatch, tmp_path):
     import importlib.util
     spec = importlib.util.spec_from_file_location(
@@ -215,6 +246,18 @@ def test_nightly_files_fix_improvements_without_outbound(loop, monkeypatch, tmp_
             "returncode": 0,
             "ok": True,
             "output": "ok 1 pipeline",
+        },
+    )
+    monkeypatch.setattr(
+        nightly,
+        "_run_frozen_gate",
+        lambda env: {
+            "keep": True,
+            "verdict": "YES",
+            "log_line": "STUDIO_FROZEN_GATE: YES  passes=2/2  mocked",
+            "passes": 2,
+            "required_passes": 2,
+            "runs": [],
         },
     )
     res = nightly.run_nightly(dry_run=False)
