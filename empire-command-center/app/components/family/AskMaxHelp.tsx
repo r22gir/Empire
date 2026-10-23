@@ -10,8 +10,10 @@ import {
   HelpTicket,
   attachmentUrl,
   createHelpTicket,
+  currentHelpScreen,
   familyHelpLabels,
   fetchOwnTickets,
+  lastClientError,
   formatHelpBytes,
   retryTranscript,
   validateHelpFile,
@@ -102,6 +104,8 @@ export default function AskMaxHelp({ locale, messages, onReply }: Props) {
       voice,
       voiceName,
       language: sttLanguage(locale),
+      currentScreen: currentHelpScreen('chat'),
+      lastError: lastClientError(),
     });
     setBusy(false);
     if (!result.ok) {
@@ -118,8 +122,10 @@ export default function AskMaxHelp({ locale, messages, onReply }: Props) {
     <>
       <button
         type="button"
+        data-testid="pedir-ayuda"
         onClick={() => setOpen(true)}
         title={t.ask}
+        aria-label={t.ask}
         style={{
           background: open ? '#d4a017' : 'none',
           border: open ? 'none' : '1px solid var(--border)',
@@ -219,7 +225,7 @@ export default function AskMaxHelp({ locale, messages, onReply }: Props) {
             <h4 style={{ margin: '16px 0 8px' }}>{t.replies}</h4>
             {tickets.length === 0 && <p style={{ fontSize: 13, color: 'var(--text-muted)' }}>{t.empty}</p>}
             {tickets.map((ticket) => (
-              <div key={ticket.id} style={{ border: '1px solid var(--border)', borderRadius: 8, padding: 10, marginBottom: 8 }}>
+              <div key={ticket.id} data-testid="pedir-ayuda-thread" style={{ border: '1px solid var(--border)', borderRadius: 8, padding: 10, marginBottom: 8 }}>
                 <div style={{ fontSize: 12, opacity: 0.7 }}>{ticket.id} · {ticket.status}</div>
                 <div>{ticket.message}</div>
                 {ticket.transcript ? <div style={{ fontSize: 13 }}><em>{t.transcript}:</em> {ticket.transcript}</div> : null}

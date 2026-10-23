@@ -476,6 +476,10 @@ def _connect(edition: str) -> sqlite3.Connection:
         conn.execute(
             "ALTER TABLE tickets ADD COLUMN transcript_pending INTEGER NOT NULL DEFAULT 0"
         )
+    if "current_screen" not in ticket_cols:
+        conn.execute("ALTER TABLE tickets ADD COLUMN current_screen TEXT")
+    if "last_error" not in ticket_cols:
+        conn.execute("ALTER TABLE tickets ADD COLUMN last_error TEXT")
     reply_cols = {row[1] for row in conn.execute("PRAGMA table_info(replies)")}
     if "usage_tokens" not in reply_cols:
         conn.execute(
@@ -733,6 +737,8 @@ def _row_ticket(row: sqlite3.Row, *, include_private: bool = False) -> dict:
         "status": row["status"],
         "created_at": row["created_at"],
         "updated_at": row["updated_at"],
+        "current_screen": (row["current_screen"] if "current_screen" in keys else None) or "",
+        "last_error": (row["last_error"] if "last_error" in keys else None) or "",
         "attachments": [],
         "replies": [],
         "usage": {
@@ -881,6 +887,8 @@ def create_ticket(
     attachments: Optional[list[dict]] = None,
     edition: Optional[str] = None,
     notify: bool = True,
+    current_screen: Optional[str] = None,
+    last_error: Optional[str] = None,
 ) -> dict:
     if not is_family_edition():
         raise PermissionError("solo Max-e y Maxine pueden crear tickets de ayuda")
@@ -942,6 +950,8 @@ def create_ticket(
     now = _iso()
     sender_name = (sender or "").strip() or edition_owner_name(mine)
     context = sanitize_context_turns(history, edition=mine)
+    screen = redact_text((current_screen or "").strip(), edition=mine)[:500]
+    error_note = redact_text((last_error or "").strip(), edition=mine)[:800]
     files_root = None
     conn = _connect(mine)
     saved_files = []
@@ -950,13 +960,15 @@ def create_ticket(
             """
             INSERT INTO tickets (
                 id, edition, sender, message, transcript, context_json,
-                status, created_at, updated_at, attachments_revealed, transcript_pending
-            ) VALUES (?, ?, ?, ?, ?, ?, 'new', ?, ?, 0, ?)
+                status, created_at, updated_at, attachments_revealed, transcript_pending,
+                current_screen, last_error
+            ) VALUES (?, ?, ?, ?, ?, ?, 'new', ?, ?, 0, ?, ?, ?)
             """,
             (
                 ticket_id, mine, sender_name, text, voice_text,
                 json.dumps(context, ensure_ascii=False), now, now,
                 1 if pending else 0,
+                screen, error_note,
             ),
         )
         for item in prepared:
@@ -1013,11 +1025,19 @@ def create_ticket(
         "status": "new",
         "created_at": now,
         "updated_at": now,
+        "current_screen": screen,
+        "last_error": error_note,
         "attachments": saved_files,
         "replies": [],
     }
     if notify:
         notify_new_ticket(ticket)
+        try:
+            from app.services.support_bridge import schedule_support_webhook
+
+            schedule_support_webhook(ticket)
+        except Exception:
+            pass
     return ticket
 
 
