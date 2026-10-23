@@ -1,6 +1,8 @@
 import { API } from './api';
 import { editionFromEnv, isFamilyEdition } from './edition';
+import { currentHelpScreen, lastClientError, recordClientError } from './lastClientError';
 export { familyHelpLabels } from './familyHelpCopy';
+export { currentHelpScreen, lastClientError } from './lastClientError';
 export {
   HELP_FILE_ACCEPT,
   HELP_MAX_FILE_BYTES,
@@ -55,6 +57,8 @@ export type HelpTicket = {
   attachments_hidden?: boolean;
   attachments_revealed?: boolean;
   attachment_count?: number;
+  current_screen?: string;
+  last_error?: string;
   context?: Array<{ role: string; content: string }>;
   status: HelpStatus;
   created_at: string;
@@ -125,6 +129,8 @@ export async function createHelpTicket(input: {
   voice?: Blob | null;
   voiceName?: string;
   language?: string | null;
+  currentScreen?: string | null;
+  lastError?: string | null;
 }): Promise<{ ok: boolean; ticket?: HelpTicket; detail?: string }> {
   const rejected: string[] = [];
   const kept: File[] = [];
@@ -146,6 +152,10 @@ export async function createHelpTicket(input: {
   body.append('message', input.message || '');
   body.append('history_json', JSON.stringify(input.history || []));
   if (input.language) body.append('language', input.language);
+  const screen = (input.currentScreen || currentHelpScreen()).trim();
+  const recentError = (input.lastError || lastClientError()).trim();
+  if (screen) body.append('current_screen', screen);
+  if (recentError) body.append('last_error', recentError);
   if (input.voice) {
     body.append('voice', input.voice, input.voiceName || 'recording.webm');
   }
@@ -156,6 +166,10 @@ export async function createHelpTicket(input: {
     credentials: 'include',
   });
   const data = await res.json().catch(() => ({}));
-  if (!res.ok) return { ok: false, detail: data.detail || `HTTP ${res.status}` };
+  if (!res.ok) {
+    const detail = data.detail || `HTTP ${res.status}`;
+    recordClientError(detail);
+    return { ok: false, detail };
+  }
   return { ok: true, ticket: data.ticket };
 }
