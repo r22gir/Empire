@@ -52,6 +52,21 @@ def client_facing_website(raw: str | None) -> str:
     return text.replace("https://", "").replace("http://", "").rstrip("/")
 
 
+def locale_from_address(address: str | None) -> str:
+    """City + state from a US-style address. Empty when the address has no city.
+
+    '5124 Frolich Ln, Hyattsville, MD 20781' → 'HYATTSVILLE MD'
+    '100 Test Lane' → '' (no hardcoded fallback city)
+    """
+    parts = [p.strip() for p in str(address or "").split(",") if p.strip()]
+    if len(parts) < 2:
+        return ""
+    city = parts[-2]
+    state = re.sub(r"[0-9]", "", parts[-1]).strip()
+    bits = [b for b in (city, state) if b]
+    return " ".join(bits).upper()
+
+
 def client_facing_origin(raw: str | None = None) -> str:
     """Absolute public origin for a client link. Internal hosts are replaced."""
     text = (raw or "").strip()
@@ -95,12 +110,8 @@ class WorkroomBilling:
 
     @property
     def chrome_locale(self) -> str:
-        if self.billed_by == BILLED_BY_EMPIRE:
-            return "HYATTSVILLE MD"
-        addr = (self.address or "").strip()
-        if not addr:
-            return ""
-        return addr.upper()
+        """City + state from this shop's address. Never a hardcoded city."""
+        return locale_from_address(self.address)
 
     @property
     def signature_phone_plain(self) -> str:

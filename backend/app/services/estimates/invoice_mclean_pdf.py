@@ -3,7 +3,7 @@
 Same dark header bar, cream paper, fonts, area bands, subtotal bars, totals panel,
 notes panel and footer as mclean_estimate_pdf. Title is 'Invoice INV-xxxx'.
 Covers deposit, change-order and final invoices: payments & credits applied,
-balance due, and the Stripe pay link + QR (balance only) inside the PDF.
+balance due, and the gold PAY HERE button + QR (balance only) inside the PDF.
 """
 from __future__ import annotations
 
@@ -12,6 +12,7 @@ import re
 from io import BytesIO
 from typing import Any, Dict, List, Optional, Tuple
 
+from reportlab.lib.colors import HexColor, white
 from reportlab.lib.utils import ImageReader
 from reportlab.pdfgen import canvas
 
@@ -139,7 +140,15 @@ def render_invoice_bytes(invoice: dict, customer: Optional[dict] = None, *, dry_
     num = str(inv.get("invoice_number") or "")
     created = inv.get("invoice_date") or inv.get("created_at") or ""
     suffix = _title_suffix(inv)
-    fake_q = {"customer_name": name, "quote_number": num, "created_at": created}
+    fake_q = {
+        "customer_name": name, "quote_number": num, "created_at": created,
+        "billed_by": inv.get("billed_by"), "business": inv.get("business") or inv.get("business_unit"),
+        "business_name": inv.get("business_name"), "business_phone": inv.get("business_phone"),
+        "business_email": inv.get("business_email"), "business_address": inv.get("business_address"),
+        "business_website": inv.get("business_website"), "business_tagline": inv.get("business_tagline"),
+        "edition": inv.get("edition"), "metadata": inv.get("metadata") if isinstance(inv.get("metadata"), dict) else {},
+    }
+    bill = E._estimate_bill(fake_q)
     pay = S.invoice_pay_link(inv)
     total_rows = _total_rows(inv, pay)
 
@@ -166,8 +175,9 @@ def render_invoice_bytes(invoice: dict, customer: Optional[dict] = None, *, dry_
     def chrome(c, page, pages):
         client, project = E._client_project(fake_q)
         render_chrome_bands(c, sheet_no=page, total=pages, right_title="INVOICE",
-                            letterhead=E._estimate_bill().letterhead_upper,
-                            powered_by=E._estimate_bill().chrome_subheader_upper,
+                            letterhead=bill.letterhead_upper,
+                            powered_by=bill.chrome_subheader_upper,
+                            locale=bill.chrome_locale,
                             client=client, project=num, rev="A", date=E._fmt_date(created),
                             status=_DRY_TEXT if dry else "INVOICE")
         y = E.CONTENT_TOP
@@ -186,7 +196,7 @@ def render_invoice_bytes(invoice: dict, customer: Optional[dict] = None, *, dry_
     def draw(total_pages: int) -> Tuple[bytes, int]:
         buf = BytesIO()
         c = canvas.Canvas(buf, pagesize=(PW, PH))
-        c.setTitle(f"Invoice {num} — Empire Workroom"); c.setAuthor("Empire Workroom"); c.setCreator("Empire Workroom")
+        c.setTitle(f"Invoice {num} — {bill.name}"); c.setAuthor(bill.name); c.setCreator(bill.name)
         page = 1
         chrome(c, page, total_pages)
         y = E.CONTENT_TOP - 22
@@ -304,33 +314,39 @@ def render_invoice_bytes(invoice: dict, customer: Optional[dict] = None, *, dry_
                     c.drawString(E.MARGIN_L, ly, ln); ly -= 10
         y = top - heights - 14
 
-        # pay box (balance only)
+        # pay card (balance only) — gold PAY HERE button + QR; rest of the sheet is unchanged
         if pay:
-            bh = 84.0
+            bh = 96.0
             need(bh + 10)
-            E._panel(c, E.MARGIN_L, y - bh, E.CONTENT_W, bh)
+            pay_gold = HexColor("#C9A227")
+            c.setFillColor(HexColor("#FBF6E6"))
+            c.setStrokeColor(pay_gold)
+            c.setLineWidth(1.2)
+            c.roundRect(E.MARGIN_L, y - bh, E.CONTENT_W, bh, 8, fill=1, stroke=1)
             qr = _qr_png(pay["url"])
-            tx = E.MARGIN_L + 14
-            if qr:
-                c.drawImage(qr, E.MARGIN_L + 10, y - bh + 6, width=72, height=72)
-                tx = E.MARGIN_L + 96
-            E._section_label(c, tx, y - 16, "PAY ONLINE", mono)
-            label = f"{pay['label']}: {_money(pay['amount'])}"
-            c.setFont(sans_b, 13); c.setFillColor(GOLD)
-            c.drawString(tx, y - 40, label)
-            c.linkURL(pay["url"], (tx, y - 46, tx + c.stringWidth(label, sans_b, 13), y - 34), relative=0)
-            c.setStrokeColor(GOLD); c.setLineWidth(0.6)
-            c.line(tx, y - 43, tx + c.stringWidth(label, sans_b, 13), y - 43)
+            qr_size = 72.0
+            qr_x = E.MARGIN_L + E.CONTENT_W - qr_size - 14
+            qr_y = y - bh + (bh - qr_size) / 2.0
+            c.setFillColor(E.DK); c.setFont(sans_b, 11)
+            c.drawString(E.MARGIN_L + 16, y - 20, "Pay online by card — secure checkout")
             c.setFont(sans, 8); c.setFillColor(E.MUTE)
-            c.drawString(tx, y - 56, "Click the link or scan the code to pay securely by card (Stripe). Link does not expire.")
-            url_font = 7.5
-            while c.stringWidth(pay["url"], mono, url_font) > E.CONTENT_W - (tx - E.MARGIN_L) - 12 and url_font > 5:
+            c.drawString(E.MARGIN_L + 16, y - 34, "Click the button or scan the QR code.")
+            bx, by, bw, btn_h = E.MARGIN_L + 16, y - bh + 22, 210, 28
+            c.setFillColor(pay_gold)
+            c.roundRect(bx, by, bw, btn_h, 6, fill=1, stroke=0)
+            c.setFillColor(white); c.setFont(sans_b, 12)
+            btn = f"PAY HERE · {_money(pay['amount'])}"
+            c.drawCentredString(bx + bw / 2, by + 9, btn)
+            c.linkURL(pay["url"], (bx, by, bx + bw, by + btn_h), relative=0)
+            url_font = 7.0
+            url_max = qr_x - E.MARGIN_L - 24
+            while c.stringWidth(pay["url"], mono, url_font) > url_max and url_font > 5:
                 url_font -= 0.5
-            c.setFont(mono, url_font); c.setFillColor(GOLD)
-            c.drawString(tx, y - 70, pay["url"])
-            c.linkURL(pay["url"], (tx, y - 74, tx + c.stringWidth(pay["url"], mono, url_font), y - 64), relative=0)
+            c.setFont(mono, url_font); c.setFillColor(E.MUTE)
+            c.drawString(E.MARGIN_L + 16, y - bh + 10, pay["url"])
             if qr:
-                c.linkURL(pay["url"], (E.MARGIN_L + 10, y - bh + 6, E.MARGIN_L + 82, y - bh + 78), relative=0)
+                c.drawImage(qr, qr_x, qr_y, width=qr_size, height=qr_size)
+                c.linkURL(pay["url"], (qr_x, qr_y, qr_x + qr_size, qr_y + qr_size), relative=0)
             y -= bh + 12
 
         # notes panel

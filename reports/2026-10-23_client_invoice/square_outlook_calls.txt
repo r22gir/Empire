@@ -1,0 +1,17 @@
+Max produce_client_invoice proof — mocked Square + Outlook, mock client data
+business=Mock Atelier
+square.delivery_method=SHARE_MANUALLY
+square.delivery_label=Share link
+outlook.is_draft=True
+outlook.sent=False
+sent=False
+
+HTTP calls:
+SQUARE POST /v2/customers delivery_method=None
+SQUARE POST /v2/orders delivery_method=None
+SQUARE POST /v2/invoices delivery_method=SHARE_MANUALLY
+SQUARE POST /v2/invoices/SQINV_MOCK/publish delivery_method=None
+OUTLOOK GET /v1.0/users/hello@mockatelier.test/messages draft_only
+OUTLOOK POST /v1.0/users/hello@mockatelier.test/messages/MSG_THREAD/createReply draft_only
+OUTLOOK PATCH /v1.0/users/hello@mockatelier.test/messages/DRAFT_REPLY draft_only
+OUTLOOK POST /v1.0/users/hello@mockatelier.test/messages/DRAFT_REPLY/attachments draft_only
