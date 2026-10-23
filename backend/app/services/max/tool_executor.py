@@ -2466,6 +2466,16 @@ def _create_engine_quote(params: dict, desk: Optional[str] = None) -> ToolResult
         area = li.get("room") or li.get("area") or li.get("section")
         if isinstance(area, str) and area.strip():
             item["room"] = area.strip()
+        group = li.get("group") or li.get("line_group")
+        if isinstance(group, str) and group.strip():
+            item["group"] = group.strip()
+            snap = item.get("pricing_snapshot")
+            if not isinstance(snap, dict):
+                snap = {}
+            snap["group"] = group.strip()
+            if item.get("room"):
+                snap["area"] = item["room"]
+            item["pricing_snapshot"] = snap
         for k in ("width", "height", "depth", "unit"):
             if li.get(k) not in (None, ""):
                 item[k] = li.get(k)
@@ -3349,7 +3359,8 @@ def _estimate_email_stamp(quote: dict) -> str:
 async def _generate_pdf_for_quote(quote_id: str) -> str:
     """Generate the estimate PDF for a quote.
 
-    Quotes WITH line items use the McLean landscape renderer (same as
+    Quotes WITH line items use generate_quote_pdf (Willard for Max
+    drapery estimates, McLean grouped sq-ft for upholstery — same as
     GET /quotes/{id}/pdf). Quotes WITHOUT line items (legacy room/tier)
     keep the WeasyPrint generate_pdf path, including skip/verification
     and QuotePdfGenerationError when verification returns JSON.
@@ -3359,6 +3370,8 @@ async def _generate_pdf_for_quote(quote_id: str) -> str:
 
     from app.services.quote_service import resolve_quote
     from app.services.estimates.mclean_estimate_pdf import render_and_save_mclean_pdf
+    from app.services.estimates.rafael_format import VARIANT_CLIENT, uses_willard_layout
+    from app.services.quote_pdf_service import generate_quote_pdf as _unity_quote_pdf
 
     quote = resolve_quote(quote_id)
     if not quote:
@@ -3369,6 +3382,15 @@ async def _generate_pdf_for_quote(quote_id: str) -> str:
     os.makedirs(pdf_dir, exist_ok=True)
 
     if items:
+        if uses_willard_layout(quote):
+            pdf_bytes = _unity_quote_pdf(quote_id, variant=VARIANT_CLIENT)
+            qn = quote.get("quote_number") or quote_id
+            pdf_path = os.path.join(pdf_dir, f"{qn}.pdf")
+            with open(pdf_path, "wb") as fh:
+                fh.write(pdf_bytes)
+            if not os.path.exists(pdf_path) or os.path.getsize(pdf_path) == 0:
+                raise QuotePdfGenerationError("PDF generation failed: file was not written")
+            return pdf_path
         _pdf_bytes, pdf_path = render_and_save_mclean_pdf(quote, pdf_dir=pdf_dir)
         if not os.path.exists(pdf_path) or os.path.getsize(pdf_path) == 0:
             raise QuotePdfGenerationError("PDF generation failed: file was not written")
@@ -6492,6 +6514,10 @@ def _draft_estimate_and_presentation(params: dict, desk: Optional[str] = None) -
         "date": params.get("date"),
         "quote_number": params.get("quote_number"),
         "tax_rate": params.get("tax_rate") or 0,
+        "client_factor": params.get("client_factor"),
+        "designer_name": params.get("designer_name"),
+        "designer_markup_factor": params.get("designer_markup_factor"),
+        "estimate_format": params.get("estimate_format"),
     }
     try:
         drafted = draft_packet(spec, save_quote=bool(params.get("save_quote", True)))
@@ -6512,10 +6538,19 @@ def _draft_estimate_and_presentation(params: dict, desk: Optional[str] = None) -
             "quote_number": quote.get("quote_number") or drafted["packet"]["quote_number"],
             "project_address": (drafted["packet"].get("project") or {}).get("address"),
             "total": drafted["packet"]["total"],
+            "base_total": drafted["packet"].get("base_total", drafted["packet"]["total"]),
+            "client_total": drafted["packet"].get("client_total"),
+            "designer_share_20pct": drafted["packet"].get("designer_share_20pct"),
             "deposit": drafted["packet"]["deposit"],
             "payment_line": drafted["packet"]["payment_line"],
             "estimate_bytes": len(drafted["estimate_pdf"]),
+            "estimate_internal_bytes": len(drafted.get("estimate_internal_pdf") or b""),
             "presentation_bytes": len(drafted["presentation_pdf"]),
+            "estimate_format": drafted.get("estimate_format"),
+            "areas": [
+                {"name": a.get("name"), "subtotal": a.get("subtotal")}
+                for a in (drafted["packet"].get("areas") or [])
+            ],
         },
     )
 
@@ -6569,10 +6604,11 @@ If a tool call fails with "Unknown tool", check the name against this list.
 - **deposit_pay_link** — Workroom or WoodCraft quote only. Creates (or reuses) a deposit invoice on the finance router and a Stripe Checkout link on the payments router. Client name/email/phone/address are copied from the quote. A second call returns the same invoice and the same open link. payment_status stays `link_ready` until Stripe reports paid — do not tell the founder the deposit is collected when status is not `paid`.
   `{"tool": "deposit_pay_link", "quote_id": "abc123"}`
 - **create_quick_quote** — DEPRECATED. Legacy JSON store (`/home/rg/empire-data/quotes/*.json`). Does NOT use the pricing engine. Returns `store: "json_legacy"`, `engine: "qis"`, `deprecation_notice`. Will be retired in sprint 1d. **Do NOT pick this tool for new quotes — use `create_engine_quote` instead.**
-- **draft_estimate_and_presentation** — Draft only. Builds the header-B estimate and the landscape presentation from `openings` (width, height, panels, optional sheers, install_flat, photos). Saves a draft quote. Never emails, never creates a Square link. The deposit line stays `Pay deposit online: [Square payment link]`. Re-line options per opening: default is "Re-line with lining and bump" ($150/width + lining + bump yardage); pass `"bump": false` for **"Re-line with lining (no bump)"** — lining only, no bump material, labor $125/width (Pricing Studio rule `reline_no_bump_per_width`). Widths are counted the same way for both (per 48" finished panel at 100% fullness). Use the no-bump option only when the founder/client asks for it; never change existing quotes.
-  `{"tool": "draft_estimate_and_presentation", "billed_by": "nelmas_workroom", "project": {"address": "9408 Old Courthouse Rd"}, "openings": [{"room": "Living Room", "width": 160, "height": 119.75, "panels": 2}]}`
+- **draft_estimate_and_presentation** — Draft only. Builds the Willard-layout estimate (Rafael 2026-10-23: areas Main Drapery / Sheers → Labor / Materials / Installation, client + internal variants) and the landscape presentation from `openings`. Two job types: (1) **new fabrication** — pass `"fabrication": "new"` or `"reline": false` for lined main drapery + sheers, per-width labor, 2.5× fullness on 54" goods (sheers 110" goods); (2) **re-line** — default, 48" half-width math, bump or `"bump": false`. Track is a complete track per ft ($325 / 8 ft prorated, carriers included) on BOTH main and sheer — never an hourly "track re-center" line. Install is $245 / 8 ft prorated per track. COM fabrics print as COM. Client PDF = base +20%; internal adds RATE / AMOUNT / MARKUP / TOTAL and designer share. Saves a draft quote. Never emails, never creates a Square link.
+  `{"tool": "draft_estimate_and_presentation", "billed_by": "empire_workroom", "openings": [{"room": "Office", "fabrication": "new", "width": 249.3125, "finished_length": 93.3125, "panels": 2, "sheers": {"coverage": 189.375}}]}`
 - **create_engine_quote** — CANONICAL. Creates a quote in `quotes_v2` (SQL) via `quote_service.create_quote`. Catalog categories route through the pricing engine (proposed_price + computed_json returned). Multi-line: pass `line_items[]`. Accepts `business_unit` (default "workroom"). Returns `store: "quotes_v2"`, `engine: "pricing_engine_v1"`, per-line `proposed_price` + `final_price`, plus `quote_number`. **Use this for all new quotes.** For drawn pieces (bench, banquette, cushion, back, headboard, panel, pillow) put the real inch dimensions on each line (`width`, `height`, `depth`, or `inputs`) so its idea diagram renders; a line without dimensions simply gets no diagram.
   Upholstery estimates (Rafael 10/8): group lines by area with `room` ("U banquette", "L banquette", "Material"); for pieces priced by area pass `sq_ft` (per item) and `price_per_sqft` (category "manual_line"; the total is computed); description = piece name, then a second line with the measurements in fractions (e.g. "Seat back — main\n249 3/4\" run · back 26 3/4\" · 12\" channels"). The PDF shows Description | Qty | Unit | Sq ft | Price/sq ft | Total, a subtotal per area, then grand total, deposit and balance.
+  Drapery estimates (Rafael 10/23, Willard): pass `room`/`area` as Main Drapery or Sheers and `group` as Labor / Materials / Installation. Install lines use 8 ft-section prorate, not hours. The Max PDF is the Willard client/internal layout (base +20% on the client copy).
   `{"tool": "create_engine_quote", "customer_name": "...", "business_unit": "workroom", "line_items": [{"category": "drapery", "description": "...", "inputs": {"window_width_in": 84, "length_in": 96, "fullness": 2.5, "lining_type": "blackout"}}, {"category": "hardware_rod_1_1_8", "inputs": {"width_in": 84}}, {"category": "hardware_rings", "inputs": {"widths": 4, "packs": 4}}, {"category": "hardware_brackets", "inputs": {"width_in": 84}}]}`
   Categories (from PRICING_SPECS in `backend/app/data/product_catalog.py`): `drapery`, `roman_shade`, `valance`, `cornice`, `fabric_only`, `hardware_rod_1_1_8`, `hardware_ripplefold_track`, `hardware_rings`, `hardware_brackets`, `labor`, `pillow`, `cover`. NEW (D38 / H77): `com_fabric` (the one permitted $0 line — pass `customer_supplied: true` with `fabric_name` and `quantity`), `hardware_rod_set` ($325 flat for 4-8 ft, founder supplies `override_price` beyond), `hardware_ripplefold_set` ($250 flat for 4-8 ft, founder supplies `override_price` beyond), `installation` (pass `treatment: roman_shade` $95/each or `treatment: drapery` $145 for first 8 ft), `manual_line` (pass-through: `description` + `unit_price` + `quantity`). PricingInputError → HTTP 400 (never silent fallback for catalog items).
 
