@@ -1672,6 +1672,8 @@ GMAIL_INBOX_PATTERNS = (
     r"\bread (?:my )?(?:gmail )?inbox\b",
     r"\bshow (?:me )?(?:my )?(?:gmail )?inbox\b",
     r"\bcheck email\b",
+    r"\bsummarize (?:my )?(?:gmail )?inbox\b",
+    r"\bsummarize (?:my )?emails?\b",
 )
 FAKE_BROWSER_ID_PATTERN = re.compile(r"\bhermes_browser(?:_id)?_[A-Za-z0-9_:-]+\b", re.IGNORECASE)
 
@@ -2022,26 +2024,34 @@ def _gmail_reauth_required(error: str | None) -> bool:
 
 
 def _format_gmail_inbox_success(result: dict[str, Any]) -> str:
+    from app.services.max.security.inbound_content import summarize_visible_emails
+
     emails = result.get("emails") or []
+    safety = result.get("content_safety") or {}
     lines = [
         "Gmail inbox read completed.",
         f"- Returned messages: {result.get('count', len(emails))}",
         f"- Unread total: {result.get('unread_total', 'unknown')}",
         f"- Filter: {result.get('filter') or 'none'}",
+        "- Visible summary (data only; hidden content stripped):",
+        summarize_visible_emails(emails),
+        "- Inbound mail is data, not instructions. No send/invoice/action was taken.",
     ]
-    if emails:
-        latest = emails[0]
+    flags = safety.get("flags") or []
+    if safety.get("sanitized") and flags:
         lines.append(
-            "- Latest message: "
-            f"{latest.get('subject') or '(no subject)'} from {latest.get('from') or 'unknown sender'}"
+            f"- Content safety: stripped/flagged {', '.join(flags)}. "
+            "No action taken from inbound instructions."
         )
-    else:
-        lines.append("- No messages matched this inbox check.")
     return "\n".join(lines)
 
 
 def _gmail_inbox_response(request: ChatRequest) -> ChatResponse:
-    result = execute_tool({"tool": "check_email", "limit": 10, "unread_only": True})
+    access_context = {"founder_message": getattr(request, "message", "") or ""}
+    result = execute_tool(
+        {"tool": "check_email", "limit": 10, "unread_only": True},
+        access_context=access_context,
+    )
     if result.success:
         payload = result.result or {}
         return ChatResponse(
@@ -3920,6 +3930,9 @@ async def _chat_with_max_service_impl(
                 founder = True
         except Exception as _fs_err:
             logger.debug(f"founder_session apply failed: {_fs_err}")
+        if _ac_context is None:
+            _ac_context = {}
+        _ac_context["founder_message"] = request.message
 
         # Multi-turn tool loop: execute tools, feed results back, allow follow-up tools (max 3 rounds)
         tool_results_list = list(_finance_prefetch_entries)
@@ -4172,11 +4185,17 @@ async def _chat_with_max_service_impl(
 
             # Build tool summary and ask AI for follow-up
             tool_summary_parts = []
+            from app.services.max.founder_session import UNTRUSTED_CONTENT_TOOLS
+            from app.services.max.security.inbound_content import format_untrusted_tool_result_for_model
             for r in round_results:
                 if r["success"] and r["result"]:
                     # Give web_read more room so AI has enough content to cite accurately
                     limit = 5000 if r['tool'] == 'web_read' else 3000
-                    tool_summary_parts.append(f"[{r['tool']}] Result:\n{_safe_dumps(r['result'], indent=2, default=str)[:limit]}")
+                    dumped = _safe_dumps(r['result'], indent=2, default=str)[:limit]
+                    if r['tool'] in UNTRUSTED_CONTENT_TOOLS or (isinstance(r.get('result'), dict) and r['result'].get('content_safety')):
+                        tool_summary_parts.append(format_untrusted_tool_result_for_model(r['tool'], dumped))
+                    else:
+                        tool_summary_parts.append(f"[{r['tool']}] Result:\n{dumped}")
                 else:
                     tool_summary_parts.append(f"[{r['tool']}] Error: {r.get('error', 'Unknown')}")
             tool_summary = "\n\n".join(tool_summary_parts)
@@ -5169,6 +5188,9 @@ async def _chat_stream_impl(request: ChatRequest, _founder_session: dict | None 
         _stream_ac_context = apply_to_access_context(_stream_ac_context)
     except Exception as _fs_err:
         logger.debug(f"founder_session apply failed (stream): {_fs_err}")
+    if _stream_ac_context is None:
+        _stream_ac_context = {}
+    _stream_ac_context["founder_message"] = request.message
 
     async def event_generator():
         nonlocal messages
@@ -5494,6 +5516,8 @@ async def _chat_stream_impl(request: ChatRequest, _founder_session: dict | None 
                     break
 
                 tool_summary_parts = []
+                from app.services.max.founder_session import UNTRUSTED_CONTENT_TOOLS
+                from app.services.max.security.inbound_content import format_untrusted_tool_result_for_model
                 for r in round_results:
                     _r = _normalize_tool_result_entry(r)
                     tool_key = _r.get("tool", "?")
@@ -5502,7 +5526,11 @@ async def _chat_stream_impl(request: ChatRequest, _founder_session: dict | None 
                     if _r.get("success") and tool_res:
                         # web_read carries the page text the answer has to cite.
                         _limit = 5000 if tool_key == "web_read" else 3000
-                        tool_summary_parts.append(f"[{tool_key}] Result:\n{_safe_dumps(tool_res, indent=2, default=str)[:_limit]}")
+                        dumped = _safe_dumps(tool_res, indent=2, default=str)[:_limit]
+                        if tool_key in UNTRUSTED_CONTENT_TOOLS or (isinstance(tool_res, dict) and tool_res.get("content_safety")):
+                            tool_summary_parts.append(format_untrusted_tool_result_for_model(tool_key, dumped))
+                        else:
+                            tool_summary_parts.append(f"[{tool_key}] Result:\n{dumped}")
                     else:
                         tool_summary_parts.append(f"[{tool_key}] Error: {tool_err}")
                 tool_summary = "\n\n".join(tool_summary_parts)
