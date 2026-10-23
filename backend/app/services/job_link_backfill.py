@@ -152,6 +152,7 @@ def _record_when(row: dict) -> datetime | None:
 def build_job_indexes(jobs: list[dict], aliases: dict[str, str]) -> dict[str, Any]:
     by_quote_id: dict[str, dict] = {}
     by_name: dict[str, list[dict]] = {}
+    by_customer_id: dict[str, list[dict]] = {}
     for job in jobs:
         qid = job.get("quote_id")
         if qid:
@@ -159,7 +160,16 @@ def build_job_indexes(jobs: list[dict], aliases: dict[str, str]) -> dict[str, An
         name = resolve_name(job.get("client_name") or job.get("customer_name") or job.get("title"), aliases)
         if name:
             by_name.setdefault(name, []).append(job)
-    return {"by_quote_id": by_quote_id, "by_name": by_name, "jobs": jobs}
+        cid = str(job.get("customer_id") or "").strip()
+        if cid:
+            by_customer_id.setdefault(cid, []).append(job)
+        for extra in job.get("client_ids") or []:
+            extra_id = str(extra or "").strip()
+            if extra_id:
+                bucket = by_customer_id.setdefault(extra_id, [])
+                if job not in bucket:
+                    bucket.append(job)
+    return {"by_quote_id": by_quote_id, "by_name": by_name, "by_customer_id": by_customer_id, "jobs": jobs}
 
 
 def pick_job(record: dict, indexes: dict[str, Any], aliases: dict[str, str], *, record_quote_id: str | None, record_name: str | None) -> tuple[dict | None, str, str, str]:
@@ -168,6 +178,15 @@ def pick_job(record: dict, indexes: dict[str, Any], aliases: dict[str, str], *, 
         job = indexes["by_quote_id"].get(str(record_quote_id))
         if job:
             return job, "quote_id", "auto", f"quote_id {record_quote_id} matches job.quote_id"
+
+    record_cid = str(record.get("customer_id") or "").strip()
+    if record_cid:
+        cid_jobs = list(indexes.get("by_customer_id", {}).get(record_cid) or [])
+        if len(cid_jobs) > 1:
+            refs = ", ".join(str(j.get("job_number") or j.get("id")) for j in cid_jobs[:6])
+            return cid_jobs[0], "customer_id_shared", "review", f"shared client {record_cid} maps to {len(cid_jobs)} jobs ({refs})"
+        if len(cid_jobs) == 1:
+            return cid_jobs[0], "customer_id", "auto", f"unique customer_id {record_cid}"
 
     name = resolve_name(record_name, aliases)
     if not name:
@@ -209,6 +228,18 @@ def propose_links(
     # customer_name is not always a column
     if jobs and "client_name" not in jobs[0] and "title" in jobs[0]:
         pass
+    if jobs and _table_exists(conn, "job_clients"):
+        extra: dict[str, list[str]] = {}
+        for row in _rows(conn, "SELECT job_id, customer_id FROM job_clients"):
+            extra.setdefault(str(row["job_id"]), []).append(str(row["customer_id"]))
+        for job in jobs:
+            extra_ids = extra.get(str(job.get("id") or ""), [])
+            if extra_ids:
+                job["client_ids"] = extra_ids
+            cid = str(job.get("customer_id") or "").strip()
+            if cid and cid not in extra_ids:
+                extra_ids = [cid, *extra_ids]
+                job["client_ids"] = extra_ids
     indexes = build_job_indexes(jobs, aliases)
     q_by_num: dict[str, dict] = {}
     q_by_id: dict[str, dict] = {}
@@ -389,6 +420,21 @@ def propose_links(
                 proposed_job_id=str(job["id"]),
                 proposed_customer_id=str(job.get("customer_id") or ""),
             ))
+
+    # Client on more than one job: never auto-link by client match.
+    by_cid = indexes.get("by_customer_id") or {}
+    for row in out:
+        if row.match_by == "quote_id":
+            continue
+        cid = str(row.current_customer_id or row.proposed_customer_id or row.customer_id or "").strip()
+        mapped = by_cid.get(cid) or []
+        if cid and len(mapped) > 1:
+            row.confidence = "review"
+            if "shared client" not in row.reason.lower():
+                refs = ", ".join(str(j.get("job_number") or j.get("id")) for j in mapped[:6])
+                row.reason = f"shared client {cid} maps to {len(mapped)} jobs ({refs}); {row.reason}"
+            if "shared" not in row.match_by:
+                row.match_by = f"{row.match_by or 'customer_id'}_shared"
 
     return out
 

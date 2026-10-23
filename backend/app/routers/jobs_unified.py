@@ -661,6 +661,9 @@ def init_schema():
             except sqlite3.OperationalError:
                 pass
 
+        from app.services.job_clients import ensure_job_clients_schema
+        ensure_job_clients_schema(conn)
+
 
 # Run schema on import
 try:
@@ -698,6 +701,14 @@ def _enrich_job(row):
         return row
     d = dict_row(row) if not isinstance(row, dict) else row
     return _parse_json_fields(d, _JOB_JSON_FIELDS)
+
+
+def _attach_clients(conn, jobs):
+    from app.services.job_clients import attach_clients
+    if isinstance(jobs, dict):
+        attach_clients(conn, [jobs])
+        return jobs
+    return attach_clients(conn, jobs)
 
 
 def _enrich_invoice(row):
@@ -1062,6 +1073,7 @@ def jobs_active():
             if canonical in ("paid_closed", "closed") or str(job.get("status") or "").lower() in ("cancelled", "canceled"):
                 continue
             jobs.append(job)
+        _attach_clients(conn, jobs)
         return {"jobs": jobs, "total": len(jobs)}
 
 
@@ -1076,19 +1088,24 @@ def jobs_search(q: str = Query(..., min_length=1)):
                LEFT JOIN customers c ON j.customer_id = c.id
                LEFT JOIN job_items ji ON ji.job_id = j.id
                LEFT JOIN job_selections js ON js.job_id = j.id
+               LEFT JOIN job_clients jc ON jc.job_id = j.id
+               LEFT JOIN customers jc_c ON jc_c.id = jc.customer_id
                WHERE j.client_name LIKE ?
                   OR j.job_number LIKE ?
                   OR j.title LIKE ?
                   OR j.description LIKE ?
                   OR c.name LIKE ?
+                  OR jc_c.name LIKE ?
                   OR ji.name LIKE ?
                   OR js.selection_code LIKE ?
                   OR js.selection_name LIKE ?
                ORDER BY j.created_at DESC
                LIMIT 50""",
-            (pattern, pattern, pattern, pattern, pattern, pattern, pattern, pattern),
+            (pattern, pattern, pattern, pattern, pattern, pattern, pattern, pattern, pattern),
         ).fetchall()
-        return {"jobs": [_enrich_job(dict_row(r)) for r in rows], "total": len(rows)}
+        jobs = [_enrich_job(dict_row(r)) for r in rows]
+        _attach_clients(conn, jobs)
+        return {"jobs": jobs, "total": len(rows)}
 
 
 @router.get("/jobs/dashboard")
@@ -1187,6 +1204,7 @@ def jobs_kanban(business: Optional[str] = None):
                    ORDER BY j.priority DESC, j.created_at DESC"""
             ).fetchall()
         jobs = [_enrich_job(dict_row(r)) for r in rows]
+        _attach_clients(conn, jobs)
 
         # Initialize 11 canonical columns in order
         col_map = {
@@ -1282,11 +1300,11 @@ def list_jobs(
         clauses.append("j.business_unit = ?")
         params.append(_normalise_business(business_unit))
     if client:
-        clauses.append("(j.client_name LIKE ? OR c.name LIKE ?)")
-        params.extend([f"%{client}%", f"%{client}%"])
+        clauses.append("(j.client_name LIKE ? OR c.name LIKE ? OR EXISTS (SELECT 1 FROM job_clients jc JOIN customers jc_c ON jc_c.id = jc.customer_id WHERE jc.job_id = j.id AND jc_c.name LIKE ?))")
+        params.extend([f"%{client}%", f"%{client}%", f"%{client}%"])
     if search:
-        clauses.append("(j.title LIKE ? OR j.job_number LIKE ? OR j.client_name LIKE ? OR j.description LIKE ?)")
-        params.extend([f"%{search}%"] * 4)
+        clauses.append("(j.title LIKE ? OR j.job_number LIKE ? OR j.client_name LIKE ? OR j.description LIKE ? OR EXISTS (SELECT 1 FROM job_clients jc JOIN customers jc_c ON jc_c.id = jc.customer_id WHERE jc.job_id = j.id AND jc_c.name LIKE ?))")
+        params.extend([f"%{search}%"] * 5)
     if pipeline_stage:
         clauses.append("j.pipeline_stage = ?")
         params.append(pipeline_stage)
@@ -1294,8 +1312,8 @@ def list_jobs(
         clauses.append("j.job_type = ?")
         params.append(job_type)
     if customer_id:
-        clauses.append("j.customer_id = ?")
-        params.append(customer_id)
+        clauses.append("(j.customer_id = ? OR EXISTS (SELECT 1 FROM job_clients jc WHERE jc.job_id = j.id AND jc.customer_id = ?))")
+        params.extend([customer_id, customer_id])
     if priority:
         clauses.append("j.priority = ?")
         params.append(priority)
@@ -1317,7 +1335,9 @@ def list_jobs(
             count_params,
         ).fetchone()[0]
 
-        return {"jobs": [_enrich_job(dict_row(r)) for r in rows], "total": total, "limit": limit, "offset": offset}
+        jobs = [_enrich_job(dict_row(r)) for r in rows]
+        _attach_clients(conn, jobs)
+        return {"jobs": jobs, "total": total, "limit": limit, "offset": offset}
 
 
 @router.post("/jobs")
@@ -1390,6 +1410,9 @@ def create_job(job: JobCreateSchema):
         ).fetchone()
         result = _enrich_job(dict_row(row))
         job_id = result["id"]
+        from app.services.job_clients import link_primary_client
+        link_primary_client(conn, job_id, customer_id)
+        _attach_clients(conn, result)
 
         _add_event(conn, job_id, "created", f"Job {job_number} created", "system",
                    {"pipeline_stage": job.pipeline_stage})
@@ -1412,6 +1435,7 @@ def get_job(job_id: str):
             raise HTTPException(status_code=404, detail="Job not found")
 
         job = _enrich_job(dict_row(row))
+        _attach_clients(conn, job)
 
         # Child data
         items = [_parse_json_fields(dict_row(r), ["measurements"]) for r in
@@ -1477,7 +1501,8 @@ def get_job(job_id: str):
 def get_job_related(job_id: str):
     """Everything tied to a job: quotes, invoices, documents, photos, drawings, folder files.
 
-    Matches on job id, any quote_ids, customer_id, and jobs.metadata.job_folder_slug.
+    Matches on job id, quote links, and every job_clients customer.
+    Shared-client quotes/invoices are review-only unless they have a job_id or quote link.
     """
     from app.services.job_related import gather_related
 
@@ -1486,6 +1511,51 @@ def get_job_related(job_id: str):
     if not payload:
         raise HTTPException(status_code=404, detail="Job not found")
     return payload
+
+
+class JobClientAdd(BaseModel):
+    customer_id: str
+    role: Optional[str] = "contact"
+
+
+@router.get("/jobs/{job_id}/clients")
+def get_job_clients(job_id: str):
+    """Every customer linked to this job (primary + extra contacts)."""
+    from app.services.job_clients import list_clients
+    with get_db() as conn:
+        exists = conn.execute("SELECT id FROM jobs WHERE id = ?", (job_id,)).fetchone()
+        if not exists:
+            raise HTTPException(status_code=404, detail="Job not found")
+        return {"job_id": job_id, "clients": list_clients(conn, job_id)}
+
+
+@router.post("/jobs/{job_id}/clients")
+def add_job_client(job_id: str, body: JobClientAdd):
+    """Link an existing customer to a job. Never splits or copies the customer row."""
+    from app.services.job_clients import add_client, list_clients
+    with get_db() as conn:
+        try:
+            client = add_client(conn, job_id, body.customer_id, body.role)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=str(exc))
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+        _add_event(conn, job_id, "client_added", f"Client {client.get('name') or body.customer_id} added as {client.get('role')}")
+        return {"client": client, "clients": list_clients(conn, job_id)}
+
+
+@router.delete("/jobs/{job_id}/clients/{customer_id}")
+def remove_job_client(job_id: str, customer_id: str):
+    from app.services.job_clients import remove_client, list_clients
+    with get_db() as conn:
+        try:
+            removed = remove_client(conn, job_id, customer_id)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=str(exc))
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+        _add_event(conn, job_id, "client_removed", f"Client {customer_id} removed")
+        return {**removed, "clients": list_clients(conn, job_id)}
 
 
 def _growth_hook(name: str, *args):
@@ -1529,6 +1599,10 @@ def update_job(job_id: str, update: JobUpdateSchema):
 
         conn.execute(f"UPDATE jobs SET {', '.join(fields)} WHERE id = ?", values)
 
+        if data.get("customer_id"):
+            from app.services.job_clients import link_primary_client
+            link_primary_client(conn, job_id, data["customer_id"])
+
         row = conn.execute(
             """SELECT j.*, c.name as customer_name
                FROM jobs j LEFT JOIN customers c ON j.customer_id = c.id
@@ -1538,7 +1612,9 @@ def update_job(job_id: str, update: JobUpdateSchema):
 
         _add_event(conn, job_id, "updated", f"Job updated: {', '.join(data.keys())}", "system")
 
-        result = {"job": _enrich_job(dict_row(row))}
+        job_out = _enrich_job(dict_row(row))
+        _attach_clients(conn, job_out)
+        result = {"job": job_out}
     if data.get("status") == "completed":
         result["social_proof"] = _growth_hook("on_job_completed", job_id)
     return result
@@ -1768,10 +1844,12 @@ async def upload_job_file(
         if not exists:
             raise HTTPException(status_code=404, detail="Job not found")
 
-        job_dir = Path(os.getenv("EMPIRE_DATA_DIR") or (Path.home() / "empire-data")) / "uploads" / "jobs" / job_id
+        from app.services.job_uploads import job_upload_dir, safe_job_filename
+
+        job_dir = job_upload_dir(job_id)
         job_dir.mkdir(parents=True, exist_ok=True)
 
-        safe_filename = file.filename or f"upload_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        safe_filename = safe_job_filename(file.filename)
         save_path = job_dir / safe_filename
         if save_path.exists():
             stem, suffix = save_path.stem, save_path.suffix
@@ -1794,6 +1872,22 @@ async def upload_job_file(
 
         row = conn.execute("SELECT * FROM job_documents WHERE id = ?", (doc_id,)).fetchone()
         return {"document": dict_row(row)}
+
+
+@router.get("/jobs/{job_id}/files/{filename}")
+def download_job_file(job_id: str, filename: str):
+    """Serve a file from ~/empire-data/uploads/jobs/<id>/. Path-traversal protected."""
+    from fastapi.responses import FileResponse
+    from app.services.job_uploads import resolve_job_upload
+
+    with get_db() as conn:
+        exists = conn.execute("SELECT id FROM jobs WHERE id = ?", (job_id,)).fetchone()
+        if not exists:
+            raise HTTPException(status_code=404, detail="Job not found")
+    path = resolve_job_upload(job_id, filename)
+    if path is None:
+        raise HTTPException(status_code=404, detail="File not found")
+    return FileResponse(path, filename=path.name)
 
 
 @router.post("/jobs/{job_id}/change-orders")

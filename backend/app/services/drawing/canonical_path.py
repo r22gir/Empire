@@ -166,7 +166,8 @@ def extra_drawing_search_roots() -> list[Path]:
     return roots
 
 
-def _walk_for_filename(root: Path, safe: str, *, max_depth: int = 3, max_files: int = 400) -> Path | None:
+def _walk_for_filename(root: Path, safe: str, *, max_depth: int = 3, max_files: int = 2000) -> Path | None:
+    """Walk one folder (typically a single job folder). Cap is per-root, not global."""
     if not root.is_dir():
         return None
     examined = 0
@@ -210,9 +211,24 @@ def resolve_existing_drawing_file(filename: str) -> Path | None:
         if candidate.is_file():
             return candidate
     jobs_root = Path(os.getenv("EMPIRE_JOBS_DIR") or (Path.home() / "jobs"))
-    walked = _walk_for_filename(jobs_root, safe)
-    if walked is not None:
-        return walked
+    # Walk each job folder on its own so a 400+ file sibling cannot hide this file.
+    if jobs_root.is_dir():
+        try:
+            children = sorted(
+                p for p in jobs_root.iterdir()
+                if p.is_dir() and not p.name.startswith(".")
+            )
+        except OSError:
+            children = []
+        if children:
+            for job_folder in children:
+                walked = _walk_for_filename(job_folder, safe)
+                if walked is not None:
+                    return walked
+        else:
+            walked = _walk_for_filename(jobs_root, safe)
+            if walked is not None:
+                return walked
     return None
 
 

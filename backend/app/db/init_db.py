@@ -223,6 +223,18 @@ CREATE TABLE IF NOT EXISTS jobs (
     FOREIGN KEY (customer_id) REFERENCES customers(id)
 );
 
+CREATE TABLE IF NOT EXISTS job_clients (
+    job_id TEXT NOT NULL,
+    customer_id TEXT NOT NULL,
+    role TEXT NOT NULL DEFAULT 'primary',
+    created_at TEXT DEFAULT (datetime('now')),
+    PRIMARY KEY (job_id, customer_id),
+    FOREIGN KEY (job_id) REFERENCES jobs(id),
+    FOREIGN KEY (customer_id) REFERENCES customers(id)
+);
+CREATE INDEX IF NOT EXISTS idx_job_clients_customer ON job_clients(customer_id);
+CREATE INDEX IF NOT EXISTS idx_job_clients_job ON job_clients(job_id);
+
 -- Saved pattern templates
 CREATE TABLE IF NOT EXISTS saved_patterns (
     id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(8)))),
@@ -557,6 +569,11 @@ def init_database():
     with get_db() as conn:
         conn.executescript(SCHEMA_SQL)
         print(f"✓ Task Engine database initialized at {DB_PATH}")
+        try:
+            from app.services.job_clients import ensure_job_clients_schema
+            ensure_job_clients_schema(conn)
+        except Exception as exc:
+            print(f"✗ job_clients schema: {exc}")
 
         # v6.0 Pipeline columns (additive migration — safe to re-run)
         _migrate_pipeline_columns(conn)

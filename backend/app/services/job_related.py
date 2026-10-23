@@ -1,7 +1,10 @@
 """Gather every quote, invoice, document, photo, drawing, and folder file for one job.
 
 Used by GET /jobs/{id}/related. Matching is read-only: job id, quote ids,
-customer id, and the job's folder slug (jobs.metadata.job_folder_slug).
+every job_clients customer, and the job's folder slug (jobs.metadata.job_folder_slug).
+
+When a client sits on more than one job, quotes/invoices matched only by
+customer_id go under possibly_related (review) — never auto-attached.
 """
 from __future__ import annotations
 
@@ -200,10 +203,52 @@ def gather_related(conn, job_id: str, *, jobs_dir: Path | None = None, data_dir:
     job = dict_row(row)
     job["metadata"] = parse_json(job.get("metadata"), {}) or {}
     qids = quote_ids_for_job(conn, job)
-    customer_id = job.get("customer_id")
+    qid_set = {str(x) for x in qids}
+    from app.services.job_clients import customer_ids_for_job, list_clients, shared_customer_ids
+    customer_ids = customer_ids_for_job(conn, job["id"], job)
+    customer_id = job.get("customer_id") or (customer_ids[0] if customer_ids else None)
+    shared_ids = shared_customer_ids(conn, customer_ids)
+    clients = list_clients(conn, job["id"])
     slug = job_folder_slug(job)
 
+    def _quote_item(q: dict) -> dict:
+        qid = str(q.get("id") or "")
+        title = q.get("quote_number") or "Estimate"
+        return {
+            **{k: q.get(k) for k in ("id", "quote_number", "project_name", "customer_name", "status", "total", "job_id", "customer_id", "created_at")},
+            "viewer_url": QUOTE_PDF.format(id=qid),
+            "viewer": viewer_for(QUOTE_PDF.format(id=qid), str(title), "pdf"),
+        }
+
+    def _invoice_item(inv: dict) -> dict:
+        iid = str(inv.get("id") or "")
+        title = inv.get("invoice_number") or "Invoice"
+        return {
+            **{k: inv.get(k) for k in ("id", "invoice_number", "status", "total", "balance_due", "amount_paid", "job_id", "quote_id", "customer_id", "client_name", "created_at")},
+            "viewer_url": INVOICE_PDF.format(id=iid),
+            "viewer": viewer_for(INVOICE_PDF.format(id=iid), str(title), "pdf"),
+        }
+
+    def _hard_linked_quote(q: dict) -> bool:
+        if str(q.get("job_id") or "") == str(job["id"]):
+            return True
+        if str(q.get("id") or "") in qid_set:
+            return True
+        return False
+
+    def _hard_linked_invoice(inv: dict) -> bool:
+        if str(inv.get("job_id") or "") == str(job["id"]):
+            return True
+        if str(inv.get("quote_id") or "") in qid_set:
+            return True
+        return False
+
+    def _client_only_review(record: dict) -> bool:
+        cid = str(record.get("customer_id") or "")
+        return bool(cid and cid in shared_ids)
+
     quotes: list[dict] = []
+    review_quotes: list[dict] = []
     if _table_exists(conn, "quotes_v2"):
         seen_q: set[str] = set()
         clauses = ["job_id = ?"]
@@ -212,22 +257,27 @@ def gather_related(conn, job_id: str, *, jobs_dir: Path | None = None, data_dir:
             ph, vals = _in_clause(qids)
             clauses.append(f"id IN ({ph})")
             params.extend(vals)
-        if customer_id:
-            clauses.append("customer_id = ?")
-            params.append(customer_id)
+        if customer_ids:
+            ph, vals = _in_clause(customer_ids)
+            clauses.append(f"customer_id IN ({ph})")
+            params.extend(vals)
         for q in _safe_rows(conn, f"SELECT * FROM quotes_v2 WHERE {' OR '.join(clauses)} ORDER BY created_at DESC", tuple(params)):
             qid = str(q.get("id") or "")
             if not qid or qid in seen_q:
                 continue
             seen_q.add(qid)
-            title = q.get("quote_number") or "Estimate"
-            quotes.append({
-                **{k: q.get(k) for k in ("id", "quote_number", "project_name", "customer_name", "status", "total", "job_id", "customer_id", "created_at")},
-                "viewer_url": QUOTE_PDF.format(id=qid),
-                "viewer": viewer_for(QUOTE_PDF.format(id=qid), str(title), "pdf"),
-            })
+            item = _quote_item(q)
+            if _hard_linked_quote(q):
+                quotes.append(item)
+            elif _client_only_review(q):
+                item["review"] = True
+                item["match_by"] = "customer_id_shared"
+                review_quotes.append(item)
+            else:
+                quotes.append(item)
 
     invoices: list[dict] = []
+    review_invoices: list[dict] = []
     if _table_exists(conn, "invoices"):
         seen_i: set[str] = set()
         clauses = ["job_id = ?"]
@@ -236,22 +286,25 @@ def gather_related(conn, job_id: str, *, jobs_dir: Path | None = None, data_dir:
             ph, vals = _in_clause(qids)
             clauses.append(f"quote_id IN ({ph})")
             params.extend(vals)
-        if customer_id:
-            inv_cols = _cols(conn, "invoices")
-            if "customer_id" in inv_cols:
-                clauses.append("customer_id = ?")
-                params.append(customer_id)
+        inv_cols = _cols(conn, "invoices")
+        if customer_ids and "customer_id" in inv_cols:
+            ph, vals = _in_clause(customer_ids)
+            clauses.append(f"customer_id IN ({ph})")
+            params.extend(vals)
         for inv in _safe_rows(conn, f"SELECT * FROM invoices WHERE {' OR '.join(clauses)} ORDER BY created_at DESC", tuple(params)):
             iid = str(inv.get("id") or "")
             if not iid or iid in seen_i:
                 continue
             seen_i.add(iid)
-            title = inv.get("invoice_number") or "Invoice"
-            invoices.append({
-                **{k: inv.get(k) for k in ("id", "invoice_number", "status", "total", "balance_due", "amount_paid", "job_id", "quote_id", "customer_id", "client_name", "created_at")},
-                "viewer_url": INVOICE_PDF.format(id=iid),
-                "viewer": viewer_for(INVOICE_PDF.format(id=iid), str(title), "pdf"),
-            })
+            item = _invoice_item(inv)
+            if _hard_linked_invoice(inv):
+                invoices.append(item)
+            elif _client_only_review(inv):
+                item["review"] = True
+                item["match_by"] = "customer_id_shared"
+                review_invoices.append(item)
+            else:
+                invoices.append(item)
 
     documents: list[dict] = []
     if _table_exists(conn, "job_documents"):
@@ -356,6 +409,35 @@ def gather_related(conn, job_id: str, *, jobs_dir: Path | None = None, data_dir:
         groups.append({"type": "estimate", "title": q.get("quote_number") or "Estimate", "final": q["viewer"], "older": [], "source": "quotes_v2"})
     for inv in invoices:
         groups.append({"type": "invoice", "title": inv.get("invoice_number") or "Invoice", "final": inv["viewer"], "older": [], "source": "invoices"})
+    review_groups: list[dict] = []
+    for q in review_quotes:
+        review_groups.append({
+            "type": "estimate",
+            "title": q.get("quote_number") or "Estimate",
+            "final": q["viewer"],
+            "older": [],
+            "source": "possibly_related",
+            "review": True,
+        })
+    for inv in review_invoices:
+        review_groups.append({
+            "type": "invoice",
+            "title": inv.get("invoice_number") or "Invoice",
+            "final": inv["viewer"],
+            "older": [],
+            "source": "possibly_related",
+            "review": True,
+        })
+    if review_groups:
+        groups.append({
+            "type": "review",
+            "title": "Possibly related (review)",
+            "final": review_groups[0].get("final"),
+            "older": [g["final"] for g in review_groups[1:]],
+            "source": "possibly_related",
+            "review": True,
+            "items": review_groups,
+        })
     for d in drawings + mockups:
         if d.get("viewer"):
             groups.append({"type": "drawing", "title": d.get("title") or d.get("filename"), "final": d["viewer"], "older": [], "source": d.get("source")})
@@ -391,9 +473,17 @@ def gather_related(conn, job_id: str, *, jobs_dir: Path | None = None, data_dir:
         "quote_id": job.get("quote_id"),
         "quote_ids": qids,
         "customer_id": customer_id,
+        "customer_ids": customer_ids,
+        "clients": clients,
+        "shared_customer_ids": sorted(shared_ids),
         "job_folder_slug": slug,
         "quotes": quotes,
         "invoices": invoices,
+        "possibly_related": {
+            "quotes": review_quotes,
+            "invoices": review_invoices,
+            "groups": review_groups,
+        },
         "documents": documents,
         "photos": photos,
         "drawings": drawings,

@@ -27,6 +27,10 @@ def _schema(conn: sqlite3.Connection):
             id TEXT PRIMARY KEY, job_id TEXT, quote_id TEXT, document_type TEXT,
             url TEXT, filename TEXT, revision INTEGER, source_channel TEXT, created_at TEXT
         );
+        CREATE TABLE job_clients (
+            job_id TEXT NOT NULL, customer_id TEXT NOT NULL, role TEXT NOT NULL DEFAULT 'primary',
+            created_at TEXT DEFAULT (datetime('now')), PRIMARY KEY (job_id, customer_id)
+        );
         """
     )
 
@@ -97,3 +101,51 @@ def test_related_404_for_unknown_job(monkeypatch, tmp_path):
     from app.services.job_related import gather_related
     assert gather_related(conn, "missing") is None
     conn.close()
+
+
+def test_shared_client_quotes_are_review_not_auto(monkeypatch, tmp_path):
+    """EST-2026-292/293 (Willard Est 838 addendums) must not auto-link to Le Midi."""
+    database, conn = _load(monkeypatch, tmp_path)
+    shared = "f230cd42ff61aea9"
+    conn.execute("INSERT INTO customers VALUES (?,\"Maggie O'Neill\",'m@example.test',NULL,NULL,'workroom')", (shared,))
+    conn.execute("INSERT INTO customers VALUES ('cust-lauren','Lauren Bassett',NULL,NULL,NULL,'workroom')")
+    conn.execute(
+        """INSERT INTO jobs VALUES (
+            'job-willard','Willard Est 838','{cid}','q-willard','JOB-W',\"Maggie O'Neill\",'in_progress','in_production',
+            '{{}}', '[]', '[]', '[]', 1000, '2026-01-10')""".format(cid=shared)
+    )
+    conn.execute(
+        """INSERT INTO jobs VALUES (
+            'job-midi','Le Midi banquettes','{cid}',NULL,'JOB-M',\"Maggie O'Neill\",'in_progress','in_production',
+            '{{}}', '[]', '[]', '[]', 2400, '2026-03-01')""".format(cid=shared)
+    )
+    conn.execute("INSERT INTO job_clients VALUES ('job-willard', ?, 'primary', '2026-01-10')", (shared,))
+    conn.execute("INSERT INTO job_clients VALUES ('job-midi', ?, 'primary', '2026-03-01')", (shared,))
+    conn.execute("INSERT INTO job_clients VALUES ('job-midi', 'cust-lauren', 'designer', '2026-03-02')")
+    conn.execute(
+        "INSERT INTO quotes_v2 VALUES ('q-willard','EST-2026-0100',NULL,?,'Maggie','Willard','sent',1000,'2026-01-11',0)",
+        (shared,),
+    )
+    conn.execute(
+        "INSERT INTO quotes_v2 VALUES ('q-292','EST-2026-292',NULL,?,'Maggie','Willard Est 838 addendum','sent',200,'2026-01-20',0)",
+        (shared,),
+    )
+    conn.execute(
+        "INSERT INTO quotes_v2 VALUES ('q-293','EST-2026-293',NULL,?,'Maggie','Willard Est 838 addendum 2','sent',150,'2026-01-21',0)",
+        (shared,),
+    )
+    conn.commit()
+
+    from app.services.job_related import gather_related
+
+    payload = gather_related(conn, "job-midi")
+    conn.close()
+    assert payload is not None
+    assert {c["customer_id"] for c in payload["clients"]} == {shared, "cust-lauren"}
+    auto_nums = {q["quote_number"] for q in payload["quotes"]}
+    review_nums = {q["quote_number"] for q in payload["possibly_related"]["quotes"]}
+    assert "EST-2026-292" not in auto_nums
+    assert "EST-2026-293" not in auto_nums
+    assert {"EST-2026-292", "EST-2026-293"} <= review_nums
+    assert any(g.get("review") for g in payload["groups"])
+    assert any("Possibly related" in str(g.get("title")) for g in payload["groups"])
