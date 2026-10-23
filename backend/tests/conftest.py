@@ -279,6 +279,15 @@ def _truncate_test_db_between_tests(isolated_empire_db, request):
     finally:
         conn.close()
     yield
+    # Jobs helpers reload app.db.database and leave DB_PATH on a per-test
+    # tmp file. Reset so the next test (even in another file) sees the
+    # session isolated DB — test-order isolation.
+    try:
+        from app.db import database
+        database.DB_PATH = isolated_empire_db
+        os.environ["EMPIRE_TASK_DB"] = isolated_empire_db
+    except Exception:
+        pass
 
 
 @pytest.fixture(autouse=True)

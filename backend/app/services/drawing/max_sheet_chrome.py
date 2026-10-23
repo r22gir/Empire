@@ -122,6 +122,15 @@ def _ensure_fonts() -> Tuple[str, str, str, str]:
     )
 
 
+def _ls_width(c: canvas.Canvas, text: str, font: str, size: float, tracking: float = 0.0) -> float:
+    text = text or ""
+    if not text:
+        return 0.0
+    widths = [c.stringWidth(ch, font, size) + tracking for ch in text]
+    widths[-1] -= tracking
+    return sum(widths)
+
+
 def _ls_draw(c: canvas.Canvas, x: float, y: float, text: str,
              font: str, size: float, color: Color,
              tracking: float = 0.0, align: str = "left") -> float:
@@ -143,6 +152,69 @@ def _ls_draw(c: canvas.Canvas, x: float, y: float, text: str,
         c.drawString(cursor, y, ch)
         cursor += w
     return total
+
+
+def _wrap_project_words(text: str, c: canvas.Canvas, font: str, size: float,
+                        tracking: float, max_width: float) -> list[str]:
+    words = [w for w in (text or "").split() if w]
+    if not words:
+        return [""]
+    lines: list[str] = []
+    current = words[0]
+    for word in words[1:]:
+        trial = f"{current} {word}"
+        if _ls_width(c, trial, font, size, tracking) <= max_width:
+            current = trial
+        else:
+            lines.append(current)
+            current = word
+    lines.append(current)
+    return lines
+
+
+def _draw_fitted_project_line(
+    c: canvas.Canvas,
+    x: float,
+    y: float,
+    text: str,
+    font: str,
+    size: float,
+    color: Color,
+    tracking: float,
+    max_width: float,
+    min_size: float = 4.4,
+) -> list[tuple[str, float, float]]:
+    """Shrink, then wrap, so a long CLIENT · PROJECT line stays left of the stamp.
+
+    Returns the drawn (line, x, y) runs for tests.
+    """
+    text = (text or "").strip()
+    if max_width <= 8:
+        max_width = 8
+    chosen = size
+    for trial in (size, size - 0.6, size - 1.2, min_size):
+        if trial < min_size:
+            continue
+        if _ls_width(c, text, font, trial, tracking) <= max_width:
+            chosen = trial
+            _ls_draw(c, x, y, text, font, chosen, color, tracking=tracking)
+            return [(text, x, y)]
+        chosen = trial
+    lines = _wrap_project_words(text, c, font, chosen, tracking, max_width)
+    if len(lines) > 2:
+        head = " ".join(lines[:-1])
+        while len(head) > 4 and _ls_width(c, head + "…", font, chosen, tracking) > max_width:
+            head = head.rsplit(" ", 1)[0] if " " in head else head[:-1]
+        lines = [head + "…", lines[-1]]
+        while lines[-1] and _ls_width(c, lines[-1], font, chosen, tracking) > max_width:
+            lines[-1] = lines[-1].rsplit(" ", 1)[0] if " " in lines[-1] else lines[-1][:-1]
+    drawn = []
+    step = max(7.0, chosen + 1.4)
+    for i, line in enumerate(lines[:2]):
+        yy = y - i * step
+        _ls_draw(c, x, yy, line, font, chosen, color, tracking=tracking)
+        drawn.append((line, x, yy))
+    return drawn
 
 
 def render_chrome_bands(
@@ -182,21 +254,29 @@ def render_chrome_bands(
     c.line(dv, hy + 11, dv, hy + 33)
 
     _ls_draw(c, dv + 12, hy + 20.5 - 6.2, powered_by, mono_b, 6.2, GOLD, tracking=1.5)
-    _ls_draw(
-        c, dv + 12, hy + 31.5 - 6.0,
-        project_line(client, project), mono, 6.0, MUTE_BAND, tracking=0.8,
+    title = right_title.upper()
+    stamp = sheet_stamp(sheet_no, total, rev, date)
+    title_w = _ls_width(c, title, mono_b, 8.4, 1.2)
+    stamp_w = _ls_width(c, stamp, mono, 6.2, 0.9)
+    right_block = max(title_w, stamp_w)
+    project_x = dv + 12
+    max_project_w = max(48.0, (PW - 30 - right_block - 14) - project_x)
+    _draw_fitted_project_line(
+        c, project_x, hy + 31.5 - 6.0,
+        project_line(client, project),
+        mono, 6.0, MUTE_BAND, 0.8, max_project_w,
     )
 
     _ls_draw(
         c, PW - 30, hy + 20.5 - 8.4,
-        right_title.upper(), mono_b, 8.4, CREAM_TEXT, tracking=1.2, align="right",
+        title, mono_b, 8.4, CREAM_TEXT, tracking=1.2, align="right",
     )
     # McLean places SHEET stamp on the UPPER right line (y≈32.5 in SVG TL coords)
     # SVG y is top-down; reportlab is bottom-up. SVG y=32.5 → from top → PH-32.5
     # but baseline sits near that. Mirror reference: stamp near top of band.
     _ls_draw(
         c, PW - 30, hy + 32.5 - 6.2,
-        sheet_stamp(sheet_no, total, rev, date),
+        stamp,
         mono, 6.2, MUTE_BAND, tracking=0.9, align="right",
     )
 

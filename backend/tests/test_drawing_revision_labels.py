@@ -97,8 +97,8 @@ def test_generate_job_drawing_revision_is_new_file(tmp_path, monkeypatch):
     csv_path.write_text(
         "code,color,material_type,width_inches,pattern_repeat_v,pattern_repeat_h,"
         "backing,specs,brand,supplier,supplier_sku,notes\n"
-        "V100-Cognac,Cognac,vinyl,54,0,0,,,,SecretBrand,HiddenSupplier,SKU1,\n"
-        "V101-Black,Black,vinyl,54,0,0,,,,SecretBrand,HiddenSupplier,SKU2,\n"
+        "V003-Cognac,Cognac,vinyl,54,0,0,,,,SecretBrand,HiddenSupplier,SKU1,\n"
+        "V001-Raven,Black,vinyl,54,0,0,,,,SecretBrand,HiddenSupplier,SKU2,\n"
     )
     monkeypatch.setenv("EMPIRE_FABRIC_CODES_CSV", str(csv_path))
     first = generate_job_drawing(
@@ -117,11 +117,13 @@ def test_generate_job_drawing_revision_is_new_file(tmp_path, monkeypatch):
     assert "REV" in first_path.name
     text = extract_pdf_text(str(first_path))
     assert shop_today() in text
-    assert "V100-Cognac" in text
-    assert "V101-Black" in text
+    assert "V003-Cognac" in text
+    assert "V001-Raven" in text
     assert "SecretBrand" not in text
     assert "Spradling" not in text
+    assert first["fabrics"]["seat"]["code"] == "V001-Raven"
     assert first["fabrics"]["seat"]["color"].lower() == "black"
+    assert first["fabrics"]["back"]["code"] == "V003-Cognac"
     assert first["fabrics"]["back"]["color"].lower() == "cognac"
     assert first.get("job_set") is True
     assert len(first.get("pieces") or []) == 2

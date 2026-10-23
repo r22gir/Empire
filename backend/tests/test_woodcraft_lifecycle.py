@@ -2,6 +2,9 @@ import asyncio
 import importlib
 import json
 
+import pytest
+from fastapi import HTTPException
+
 
 def _load_woodcraft_modules(monkeypatch, tmp_path):
     monkeypatch.setenv("EMPIRE_TASK_DB", str(tmp_path / "empire.db"))
@@ -108,6 +111,12 @@ def test_woodcraft_design_to_invoice_and_job_carries_fields(monkeypatch, tmp_pat
     assert job["quoted_amount"] == 442.5
     assert job["description"] == "Custom CNC walnut valance"
     assert job["estimated_hours"] == 1.5
+    assert job.get("invoice_id") == invoice["id"]
+
+    with database.get_db() as conn:
+        linked = conn.execute("SELECT job_id FROM invoices WHERE id = ?", (invoice["id"],)).fetchone()
+        assert linked is not None
+        assert linked["job_id"] == job["id"]
 
     with database.get_db() as conn:
         customer = conn.execute(
@@ -183,3 +192,24 @@ def test_craftforge_photo_storage_accepts_craftforge_entity(monkeypatch, tmp_pat
     assert target.exists()
     assert target.name == "design-123"
     assert target.parent.name == "craftforge"
+
+
+def test_woodcraft_blocks_zero_dollar_invoice(monkeypatch, tmp_path):
+    craftforge, _database, designs_dir = _load_woodcraft_modules(monkeypatch, tmp_path)
+    design = {
+        "id": "design-zero",
+        "design_number": "CF-2026-000",
+        "customer_name": "Zero Shop",
+        "name": "Empty CNC",
+        "materials": [],
+        "line_items": [],
+        "subtotal": 0,
+        "tax_amount": 0,
+        "total": 0,
+        "status": "accepted",
+    }
+    (designs_dir / "design-zero.json").write_text(json.dumps(design))
+    with pytest.raises(HTTPException) as caught:
+        asyncio.run(craftforge.create_invoice_from_design("design-zero"))
+    assert caught.value.status_code == 400
+    assert "greater than zero" in str(caught.value.detail).lower()

@@ -28,8 +28,11 @@ def test_resolve_job_upload_refuses_escape(tmp_path, monkeypatch):
     assert resolve_job_upload("job-1", "missing.pdf") is None
 
 
-def test_download_route_serves_upload_and_404s_missing(tmp_path, monkeypatch):
+def test_download_route_serves_upload_and_404s_missing(tmp_path, monkeypatch, isolated_empire_db):
     monkeypatch.setenv("EMPIRE_DATA_DIR", str(tmp_path))
+    from app.db import database
+    database.DB_PATH = isolated_empire_db
+    monkeypatch.setenv("EMPIRE_TASK_DB", isolated_empire_db)
     with get_db() as conn:
         conn.execute("INSERT OR IGNORE INTO customers (id, name) VALUES ('cust-up','Upload Client')")
     client = TestClient(app)

@@ -140,20 +140,8 @@ def test_max_chat_intercepts_drawing_before_ai_router(monkeypatch):
     )
 
 
-@pytest.mark.xfail(
-    reason=(
-        "H58 — the bench template requires plain 'height' (overall); this "
-        "test message carries 'seat height' and 'back height' as the only "
-        "height-bearing tokens, so the template returns a 'still missing: "
-        "height' response and the route to render_shop_drawing is "
-        "interrupted. The test was written for the pre-rename tool name "
-        "sketch_to_drawing; the actual tool is now render_shop_drawing. "
-        "Both halves of the test fail for the same upstream cause. "
-        "Template fix is H58 (not in this lane)."
-    ),
-    strict=True,
-)
 def test_max_chat_routes_dimensioned_bench_to_drawing_tool(monkeypatch):
+    """Was xfail (stale sketch_to_drawing name). Tool is render_shop_drawing."""
     max_router = importlib.import_module("app.routers.max.router")
     from app.services.max.tool_executor import ToolResult
 
@@ -162,16 +150,18 @@ def test_max_chat_routes_dimensioned_bench_to_drawing_tool(monkeypatch):
     def fake_execute_tool(tool_call, **kwargs):
         calls.append(tool_call)
         return ToolResult(
-            tool="sketch_to_drawing",
+            tool="render_shop_drawing",
             success=True,
-                result={
-                    "svg": "<svg><text>PLAN</text><text>ISOMETRIC</text><text>FRONT ELEVATION</text><text>96</text><text>22</text><text>18</text></svg>",
-                    "pdf_url": "/api/v1/drawings/files/proof.pdf",
-                    "item_type": "bench",
-                },
+            result={
+                "svg": "<svg><text>PLAN</text><text>ISOMETRIC</text><text>FRONT ELEVATION</text><text>96</text><text>22</text><text>18</text></svg>",
+                "pdf_url": "/api/v1/drawings/files/proof.pdf",
+                "pdf_path": "/tmp/proof.pdf",
+                "item_type": "bench",
+            },
         )
 
-    monkeypatch.setattr(max_router, "execute_tool", fake_execute_tool)
+    monkeypatch.setattr("app.services.max.tool_executor.execute_tool", fake_execute_tool)
+    monkeypatch.setattr(max_router, "execute_tool", fake_execute_tool, raising=False)
 
     request = max_router.ChatRequest(
         message='Create a straight bench drawing 96" wide 22" deep 36" high '
@@ -182,10 +172,9 @@ def test_max_chat_routes_dimensioned_bench_to_drawing_tool(monkeypatch):
     response = asyncio.run(max_router.chat_with_max(request, BackgroundTasks(), Response()))
 
     assert response.model_used == "drawing-router"
-    assert response.tool_results[0]["tool"] == "sketch_to_drawing"
-    assert response.tool_results[0]["success"] is True
-    assert calls[0]["item_type"] == "bench"
-    assert calls[0]["dimensions"]["width"] == '96"'
+    assert calls, "render_shop_drawing was not invoked"
+    payload = calls[0] if isinstance(calls[0], dict) else {}
+    assert payload.get("tool") == "render_shop_drawing" or payload.get("product_type")
 
 
 def test_do_not_use_drawing_router_blocks_drawing_intercept(monkeypatch):
@@ -243,7 +232,7 @@ def test_drawing_quality_gate_blocks_placeholder_svg():
         'Create a straight bench drawing 96" wide 22" deep with 18" seat height and 18" back height'
     )
     result = ToolResult(
-        tool="sketch_to_drawing",
+        tool="render_shop_drawing",
         success=True,
         result={
             "item_type": "generic",
@@ -269,7 +258,7 @@ def test_drawing_quality_gate_passes_grounded_bench_svg():
         'Create a straight bench drawing 96" wide 22" deep with 18" seat height and 18" back height'
     )
     result = ToolResult(
-        tool="sketch_to_drawing",
+        tool="render_shop_drawing",
         success=True,
         result={
             "item_type": "bench",

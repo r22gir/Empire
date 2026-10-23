@@ -30,7 +30,6 @@ from app.config.fabric_cut_allowance import (
     fabric_dimension_in,
     lookup_fabric_allowance,
 )
-from app.services.drawing.inches import format_inches
 from app.services.drawing.shop_date import shop_today
 from app.services.vision.bench_cut_list import WOOD_LABEL, FOAM_LABEL, FABRIC_LABEL, format_cut_inches
 from app.services.max.job_drawing_intent import (
@@ -77,8 +76,9 @@ def _parse_inches(raw: Any) -> Optional[float]:
     if isinstance(raw, (int, float)):
         value = float(raw)
         return value if value > 0 else None
-    text = str(raw).strip().replace('"', "").replace("in", "").strip()
-    mixed = re.match(r"^(\d+)\s+(\d+)\s*/\s*(\d+)$", text)
+    text = str(raw).strip().replace('"', "")
+    text = re.sub(r"\s*(?:in(?:ch(?:es)?)?)\s*$", "", text, flags=re.I).strip()
+    mixed = re.match(r"^(\d+)[-\s]+(\d+)\s*/\s*(\d+)$", text)
     if mixed:
         try:
             return float(mixed.group(1)) + float(mixed.group(2)) / float(mixed.group(3))
@@ -125,8 +125,8 @@ def _requested_vs_applied(
         try:
             if abs(float(channel_in) - float(req_ch)) > 0.05:
                 misses.append(
-                    f"channel width {format_inches(req_ch)} was not applied "
-                    f"(drawing has {format_inches(channel_in)})"
+                    f"channel width {format_cut_inches(req_ch)} was not applied "
+                    f"(drawing has {format_cut_inches(channel_in)})"
                 )
         except (TypeError, ValueError):
             misses.append(f"channel width {req_ch} was not applied")
@@ -386,7 +386,11 @@ def _estimate_channel_width(quote: dict[str, Any] | None) -> Optional[float]:
             if parsed is not None:
                 return parsed
         blob = " ".join(str(item.get(k) or "") for k in ("description", "name", "notes"))
-        match = re.search(r"(\d+(?:\.\d+)?)\s*(?:\"|in)?\s*channel", blob, re.I)
+        match = re.search(
+            r"(\d+[-\s]+\d+\s*/\s*\d+|\d+\s*/\s*\d+|\d+(?:\.\d+)?)\s*(?:\"|in)?\s*channel",
+            blob,
+            re.I,
+        )
         if match:
             return _parse_inches(match.group(1))
     return None
@@ -489,21 +493,66 @@ def build_cut_list(
     }
 
 
-def _conflicts(layout: dict[str, Any], spec_changes: dict[str, Any], quote: dict[str, Any] | None) -> list[str]:
+def _unknown_fabric_warnings(fabrics: dict[str, Any]) -> list[str]:
+    """Unknown V###-Color tokens must not be drawn as if they were registered."""
     flags: list[str] = []
+    for role in ("seat", "back"):
+        row = fabrics.get(role) or {}
+        token = row.get("unknown_code")
+        if not token and not row.get("code"):
+            maybe = row.get("color") or row.get("label")
+            if maybe and re.match(r"^V\d{3}-", str(maybe), re.I):
+                token = maybe
+        if token:
+            flags.append(
+                f"UNKNOWN FABRIC CODE {token} ({role}) — not in the "
+                "registry (format V###-Color, see FABRIC_CODES.csv). Do not cut until confirmed."
+            )
+    return flags
+
+
+def _conflicts(
+    layout: dict[str, Any],
+    spec_changes: dict[str, Any],
+    quote: dict[str, Any] | None,
+    *,
+    prior_layout: dict[str, Any] | None = None,
+    fabrics: dict[str, Any] | None = None,
+) -> list[str]:
+    """Flag estimate mismatches and spec changes between revisions.
+
+    `layout` / `prior_layout` must be the pre-revision sizes. Callers that
+    already wrote the new channel width into `layout` must pass the original
+    as `prior_layout` or the conflicts page prints “None”.
+    """
+    flags: list[str] = []
+    baseline = prior_layout if prior_layout is not None else layout
     requested = spec_changes.get("channel_width_in")
     estimate_ch = _estimate_channel_width(quote)
     if requested is not None and estimate_ch is not None and abs(float(requested) - float(estimate_ch)) > 0.01:
         flags.append(
-            f"Channel width {format_inches(requested)} conflicts with estimate "
-            f"{format_inches(estimate_ch)} — flagged, prices not changed."
+            f"Channel width {format_cut_inches(requested)} conflicts with estimate "
+            f"{format_cut_inches(estimate_ch)} — flagged, prices not changed."
         )
-    prior_ch = layout.get("channel_width_in")
+    prior_ch = baseline.get("channel_width_in")
     if requested is not None and prior_ch is not None and abs(float(requested) - float(prior_ch)) > 0.01:
         flags.append(
-            f"Channel width revised from {format_inches(prior_ch)} to {format_inches(requested)} "
-            "(layout only; estimate prices unchanged)."
+            f"Channel width revised from {format_cut_inches(prior_ch)} to {format_cut_inches(requested)} "
+            "(spec change between revisions; estimate prices unchanged)."
         )
+    fabrics = fabrics or {}
+    for role, key in (("seat", "seat_fabric"), ("back", "back_fabric")):
+        token = spec_changes.get(key)
+        applied = fabrics.get(role) or {}
+        if not token:
+            continue
+        shown = applied.get("code") or applied.get("label") or applied.get("color")
+        if shown and str(token).strip().lower() not in str(shown).lower() and not _fabric_token_matches(str(token), applied):
+            flags.append(
+                f"{role.title()} fabric revised to {token} "
+                f"(drawing shows {shown}; estimate prices unchanged)."
+            )
+    flags.extend(_unknown_fabric_warnings(fabrics))
     return flags
 
 
@@ -688,7 +737,7 @@ def _write_shop_pdf(
     for label, value in dim_lines:
         if value in (None, ""):
             continue
-        c.drawString(32, y, f"{label}: {format_inches(float(value))}")
+        c.drawString(32, y, f"{label}: {format_cut_inches(float(value))}")
         y -= 13
     y -= 8
     c.setFont("Helvetica-Bold", 10)
@@ -820,6 +869,7 @@ def generate_job_drawing(
         layout_data=layout_data,
         takeoff=takeoff,
     )
+    prior_layout = dict(layout)
     if changes.get("channel_width_in") is not None:
         layout = dict(layout)
         layout["channel_width_in"] = changes["channel_width_in"]
@@ -890,7 +940,22 @@ def generate_job_drawing(
         channel_width_in=channel,
         foam_thickness_in=foam,
     )
-    conflicts = _conflicts(layout, changes, quote)
+    conflicts = _conflicts(
+        layout,
+        changes,
+        quote,
+        prior_layout=prior_layout,
+        fabrics=fabrics,
+    )
+    try:
+        from app.services.drawing.templates.banquette_fixtures import known_job_spec
+        known = known_job_spec(hint)
+        if known:
+            for item in known.conflicts:
+                if item and item not in conflicts:
+                    conflicts.append(item)
+    except Exception:
+        pass
     client = (quote or {}).get("customer_name") or layout.get("client_name") or hint or "Client"
     project = (quote or {}).get("project_name") or layout.get("project_name") or f"{client} drawing"
     out_dir = Path(output_dir) if output_dir else _drawings_dir()
@@ -939,6 +1004,7 @@ def generate_job_drawing(
             revision=revision,
             drawn_date=today,
             job_hint=hint,
+            extra_open_items=_unknown_fabric_warnings(fabrics),
         )
         cuts = result_cut_list(standard_job)
     except Exception:
@@ -999,17 +1065,17 @@ def generate_job_drawing(
     mismatches = _requested_vs_applied(requested, channel, fabrics)
     allow_row = lookup_fabric_allowance(foam)
     allow_in = allow_row.get("allowance_in")
-    foam_txt = format_inches(foam) if foam else "TBC"
+    foam_txt = format_cut_inches(foam) if foam else "TBC"
     applied_bits = [
-        f"channels {format_inches(channel)}",
+        f"channels {format_cut_inches(channel)}",
         f"seat {fabrics['seat'].get('label') or 'TBC'}",
         f"back {fabrics['back'].get('label') or 'TBC'}",
         f"foam {foam_txt}",
     ]
     if allow_in is not None:
         applied_bits.append(
-            f"allowance {format_inches(allow_in)} each side "
-            f"(fabric = wood + 2 × {format_inches(allow_in)})"
+            f"allowance {format_cut_inches(allow_in)} each side "
+            f"(fabric = wood + 2 × {format_cut_inches(allow_in)})"
         )
     else:
         applied_bits.append(allow_row.get("label") or NEEDS_FOAM_THICKNESS)
@@ -1039,10 +1105,10 @@ def generate_job_drawing(
         "revision": revision,
         "drawn_date": today,
         "dimensions": {
-            "width": format_inches(width),
-            "depth": format_inches(depth),
-            "back_height": format_inches(back_h),
-            "channel_width": format_inches(channel),
+            "width": format_cut_inches(width),
+            "depth": format_cut_inches(depth),
+            "back_height": format_cut_inches(back_h),
+            "channel_width": format_cut_inches(channel),
         },
         "fabrics": fabrics,
         "cut_list": cuts,
