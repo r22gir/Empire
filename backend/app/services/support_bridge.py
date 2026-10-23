@@ -66,7 +66,7 @@ def build_webhook_payload(ticket: dict) -> dict[str, Any]:
     return {
         "ticket_id": ticket.get("id") or "",
         "edition": edition,
-        "brother": (ticket.get("sender") or webhook_brother(ticket.get("edition"))).strip(),
+        "brother": webhook_brother(ticket.get("edition")).strip(),
         "question": (ticket.get("message") or ticket.get("transcript") or "").strip(),
         "current_screen": (ticket.get("current_screen") or "").strip(),
         "last_error": (ticket.get("last_error") or "").strip(),
