@@ -16,7 +16,7 @@ import base64
 import httpx
 import logging
 
-from app.services.max.response_quality_engine import quality_engine, Channel
+from app.services.max.response_quality_engine import quality_engine, Channel  # noqa: F401 — tests patch quotes.quality_engine
 from app.services.business_routing import route_to_for_item_type
 from app.services.pricing.dimensions import format_inches
 from app.services.data_paths import quote_pdf_dir, quotes_data_dir
@@ -686,11 +686,8 @@ async def create_quote(payload: QuoteCreate):
     quote = _compute_financials(quote)
 
     # Quality gate: validate quote before saving
-    qr = quality_engine.validate(
-        json.dumps(quote, default=str),
-        channel=Channel.QUOTE,
-        context={"quote_data": quote},
-    )
+    from app.services.quote_engine.like_for_like_quality import run_quote_quality_gate
+    qr = run_quote_quality_gate(quote)
     if qr.blocked:
         # Log to accuracy monitor
         try:
@@ -1503,11 +1500,8 @@ async def send_quote(quote_id: str, body: Optional[SendQuoteRequest] = None):
     quote = _load_quote(quote_id)
 
     # Quality gate: final check before marking as sent
-    qr = quality_engine.validate(
-        json.dumps(quote, default=str),
-        channel=Channel.QUOTE,
-        context={"quote_data": quote},
-    )
+    from app.services.quote_engine.like_for_like_quality import run_quote_quality_gate
+    qr = run_quote_quality_gate(quote)
     if qr.blocked:
         raise HTTPException(422, detail={
             "message": "Quote blocked by quality engine — cannot send",
