@@ -51,6 +51,34 @@ def _edition() -> str:
     return os.getenv("EMPIRE_EDITION", "").strip().lower()
 
 
+def _webhook_loopback_ports() -> set[int]:
+    """Allow SUPPORT_WEBHOOK_URL when it is loopback (local mock / Dell).
+
+    Public Chief e URLs are already allowed (addr_denied skips non-private
+    IPs). Only the configured webhook port is opened on 127.0.0.1 — never
+    Workroom :8000 or other owner services.
+    """
+    raw = (os.getenv("SUPPORT_WEBHOOK_URL") or "").strip()
+    if not raw:
+        return set()
+    try:
+        from urllib.parse import urlparse
+
+        parsed = urlparse(raw)
+    except Exception:
+        return set()
+    host = (parsed.hostname or "").lower()
+    if host not in {"127.0.0.1", "localhost", "::1"}:
+        return set()
+    if parsed.port:
+        return {int(parsed.port)}
+    if parsed.scheme == "https":
+        return {443}
+    if parsed.scheme == "http":
+        return {80}
+    return set()
+
+
 class _Policy:
     def __init__(self) -> None:
         ed = _edition()
@@ -93,6 +121,7 @@ class _Policy:
         prof = {"amp": (8011, 3011), "maxine": (8012, 3012)}.get(ed, ())
         ports.update(prof)
         ports.add(11434)  # local model runtime, holds no owner data
+        ports.update(_webhook_loopback_ports())
         ports.discard(0)
         self.local_ports = ports
         self._cache: dict = {}

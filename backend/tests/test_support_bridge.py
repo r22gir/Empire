@@ -51,6 +51,17 @@ def _start_webhook():
     return server, f"http://{host}:{port}/hook"
 
 
+def test_family_guard_allows_configured_webhook_loopback(monkeypatch):
+    from app.security.family_fs_guard import _webhook_loopback_ports
+
+    monkeypatch.delenv("SUPPORT_WEBHOOK_URL", raising=False)
+    assert _webhook_loopback_ports() == set()
+    monkeypatch.setenv("SUPPORT_WEBHOOK_URL", "http://127.0.0.1:8099/hook")
+    assert _webhook_loopback_ports() == {8099}
+    monkeypatch.setenv("SUPPORT_WEBHOOK_URL", "https://example.invalid/support/webhook")
+    assert _webhook_loopback_ports() == set()
+
+
 def test_webhook_auth_header_default_and_custom(monkeypatch):
     from app.services.support_bridge import webhook_auth_header
 
