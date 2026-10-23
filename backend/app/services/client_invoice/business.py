@@ -28,6 +28,7 @@ class InvoiceBusiness:
     outlook_mailbox: str = ""
     outlook_token_env: str = "OUTLOOK_TOKEN_PATH"
     accent: str = "#b8912f"
+    square_due_days: int = 0  # 0 = due on receipt; override per business
 
     def public_dict(self) -> dict:
         """Safe for tool results and logs — no tokens, no env values."""
@@ -50,6 +51,13 @@ class InvoiceBusiness:
 
     def square_location(self) -> str:
         return (self.square_location_id or os.getenv(self.square_location_env) or "").strip()
+
+
+def _int_or_zero(raw) -> int:
+    try:
+        return int(raw)
+    except (TypeError, ValueError):
+        return 0
 
 
 def _slug(raw: str) -> str:
@@ -97,6 +105,11 @@ def _from_brand(brand: dict, contact: dict | None = None, payments: dict | None 
         ),
         outlook_token_env=str(brand.get("outlook_token_env") or f"OUTLOOK_TOKEN_PATH_{env_key}"),
         accent=str((brand.get("branding") or {}).get("primary") or brand.get("accent") or "#b8912f"),
+        square_due_days=_int_or_zero(
+            brand.get("square_due_days")
+            or (payments.get("square") or {}).get("due_days")
+            or payments.get("square_due_days")
+        ),
     )
 
 
@@ -180,6 +193,7 @@ def resolve_invoice_business(
             outlook_mailbox=str(invoice.get("outlook_mailbox") or biz.outlook_mailbox),
             outlook_token_env=biz.outlook_token_env,
             accent=biz.accent,
+            square_due_days=biz.square_due_days,
         )
 
     # Last resort: billing helper (already config-driven) — still not a Workroom constant.

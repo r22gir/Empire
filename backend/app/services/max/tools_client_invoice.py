@@ -63,17 +63,29 @@ def _square_client(biz, log):
 
 
 def _outlook_client(biz, log):
-    from app.services.client_invoice.outlook_draft import OutlookDraftClient
+    from app.services.client_invoice.outlook_draft import OutlookDraftClient, OutlookDraftError
     from app.services.max import outlook_reader as orx
 
-    token_file = os.getenv(biz.outlook_token_env) or None
+    env_name = (getattr(biz, "outlook_token_env", None) or "").strip()
+    if not env_name:
+        raise OutlookDraftError(
+            f"{biz.name} has no Outlook token env configured. Set this business's "
+            "own Outlook token path; Max will not use another mailbox's token."
+        )
+    token_file = (os.getenv(env_name) or "").strip() or None
+    if not token_file:
+        raise OutlookDraftError(
+            f"{biz.name} has no Outlook token ({env_name} is unset). "
+            "Sign in that business mailbox; Max will not fall back to the default token."
+        )
     tok = orx.load_token(token_file)
     if not tok or not tok.get("access_token"):
-        # Fall back to the default Outlook token file (same mailbox /me).
-        tok = orx.load_token()
-    access = (tok or {}).get("access_token") or ""
+        raise OutlookDraftError(
+            f"{biz.name} Outlook token is missing or unreadable ({env_name}). "
+            "Sign in that business mailbox; Max will not fall back to the default token."
+        )
     return OutlookDraftClient(
-        access_token=access,
+        access_token=tok["access_token"],
         mailbox=biz.outlook_mailbox,
         log=log,
     )

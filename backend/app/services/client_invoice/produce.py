@@ -11,7 +11,11 @@ from app.services.client_invoice.business import InvoiceBusiness, resolve_invoic
 from app.services.client_invoice.client_copy import money, sanitize_line_items
 from app.services.client_invoice.cover_email import cover_email_html, cover_email_text
 from app.services.client_invoice.outlook_draft import OutlookDraftClient, OutlookDraftError
-from app.services.client_invoice.square import SquareInvoiceClient, SquareInvoiceError
+from app.services.client_invoice.square import (
+    SquareInvoiceClient,
+    SquareInvoiceError,
+    resolve_square_due_date,
+)
 
 logger = logging.getLogger("max.client_invoice")
 
@@ -23,13 +27,6 @@ def _first_name(invoice: dict, customer: dict | None) -> str:
 
 def _client_email(invoice: dict, customer: dict | None) -> str:
     return str(invoice.get("client_email") or (customer or {}).get("email") or "").strip()
-
-
-def _due(invoice: dict) -> str | None:
-    raw = invoice.get("due_date")
-    if not raw:
-        return None
-    return str(raw)[:10]
 
 
 def preview_client_invoice(
@@ -120,7 +117,7 @@ def produce_client_invoice(
         client_email=email,
         line_items=lines,
         total=total,
-        due_date=_due(invoice),
+        due_date=resolve_square_due_date(invoice, biz),
         idempotency_key=str(invoice.get("id") or invoice.get("invoice_number") or ""),
     )
     pay_url = square["public_url"]

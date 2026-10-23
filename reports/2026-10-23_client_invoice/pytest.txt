@@ -1,4 +1,4 @@
-...................                                                      [100%][live-data firewall] module constants redirected to temp: 17
+.......................                                                  [100%][live-data firewall] module constants redirected to temp: 17
 
 =============================== warnings summary ===============================
 backend/app/core/config.py:5
@@ -6,4 +6,4 @@ backend/app/core/config.py:5
     class Settings(BaseSettings):
 
 -- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
-19 passed, 1 warning in 2.18s
+23 passed, 1 warning in 2.00s

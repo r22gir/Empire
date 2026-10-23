@@ -14,14 +14,23 @@ import pytest
 from app.services.client_invoice.business import InvoiceBusiness, resolve_invoice_business
 from app.services.client_invoice.client_copy import client_line_text, sanitize_line_items
 from app.services.client_invoice.cover_email import cover_email_text
-from app.services.client_invoice.outlook_draft import OutlookDraftClient, OutlookSendForbidden
+from app.services.client_invoice.outlook_draft import (
+    OutlookDraftClient,
+    OutlookDraftError,
+    OutlookSendForbidden,
+)
 from app.services.client_invoice.produce import produce_client_invoice
 from app.services.client_invoice.square import (
     DELIVERY_SHARE_LINK,
     SquareInvoiceClient,
     SquareSendForbidden,
+    resolve_square_due_date,
 )
-from app.services.invoice_pdf_service import invoice_pay_link
+from app.services.invoice_pdf_service import (
+    _is_square_pay_url,
+    invoice_pay_link,
+    render_client_invoice_html,
+)
 
 PROOF_DIR = Path(__file__).resolve().parents[2] / "reports" / "2026-10-23_client_invoice"
 ARTIFACT_DIR = Path("/opt/cursor/artifacts/screenshots")
@@ -32,12 +41,13 @@ ATELIER = InvoiceBusiness(
     tagline="Test drapery",
     phone="(555) 010-0001",
     email="hello@mockatelier.test",
-    address="100 Test Lane",
+    address="100 Test Lane, Northside, VA 00000",
     website="atelier.example.test",
     billed_by="mock_atelier",
     square_location_id="LOC_ATELIER",
     square_token_env="SQUARE_ACCESS_TOKEN_MOCK_ATELIER",
     outlook_mailbox="hello@mockatelier.test",
+    outlook_token_env="OUTLOOK_TOKEN_PATH_MOCK_ATELIER",
 )
 MILLWORK = InvoiceBusiness(
     id="mock_millwork",
@@ -217,6 +227,58 @@ def test_client_copy_fractions_and_fabric_codes():
     assert "V012-Celestine" in cleaned[0]["description"]
 
 
+def test_woodcraft_html_omits_pay_card():
+    inv = {
+        "invoice_number": "W-1", "total": 10, "subtotal": 10, "tax_rate": 0, "tax_amount": 0,
+        "invoice_stage": "final", "status": "draft", "payment_status": "link_ready",
+        "balance_due": 10, "stripe_checkout_url": "https://buy.stripe.com/test_x",
+        "line_items": [{"description": "Item", "quantity": 1, "unit_price": 10, "total": 10}],
+    }
+    wood = render_client_invoice_html(inv, is_woodcraft=True)
+    assert "PAY HERE" not in wood and "buy.stripe.com" not in wood
+    workroom = render_client_invoice_html(inv, is_woodcraft=False)
+    assert "PAY HERE · $10.00" in workroom and "buy.stripe.com" in workroom
+
+
+def test_square_pay_url_requires_https_square_host():
+    assert _is_square_pay_url("https://app.squareup.com/pay-invoice/x") is True
+    assert _is_square_pay_url("https://squareup.com/pay-invoice/x") is True
+    assert _is_square_pay_url("https://square.link/u/abc") is True
+    assert _is_square_pay_url("http://app.squareup.com/pay-invoice/x") is False
+    assert _is_square_pay_url("https://evil.com/?next=https://squareup.com/x") is False
+    assert _is_square_pay_url("https://squareup.com.evil.test/pay") is False
+    assert _is_square_pay_url("https://notsquareup.com/pay-invoice/x") is False
+    assert invoice_pay_link({
+        "square_pay_url": "https://evil.com/?q=squareup.com", "balance_due": 10,
+        "status": "draft", "payment_status": "link_ready",
+    }) is None
+
+
+def test_outlook_client_refuses_default_token_fallback(monkeypatch, tmp_path):
+    import app.services.max.tools_client_invoice as tools
+    default = tmp_path / "default-outlook.json"
+    default.write_text('{"access_token": "AT-default", "refresh_token": "RT"}')
+    monkeypatch.setenv("OUTLOOK_TOKEN_PATH", str(default))
+    monkeypatch.delenv("OUTLOOK_TOKEN_PATH_MOCK_ATELIER", raising=False)
+    with pytest.raises(OutlookDraftError, match="will not fall back"):
+        tools._outlook_client(ATELIER, [])
+    own = tmp_path / "atelier-outlook.json"
+    own.write_text('{"access_token": "AT-atelier", "refresh_token": "RT"}')
+    monkeypatch.setenv("OUTLOOK_TOKEN_PATH_MOCK_ATELIER", str(own))
+    client = tools._outlook_client(ATELIER, [])
+    assert client._token == "AT-atelier"
+
+
+def test_square_due_on_receipt_is_configurable():
+    assert resolve_square_due_date({"invoice_date": "2026-10-23"}) == "2026-10-23"
+    assert resolve_square_due_date({"invoice_date": "2026-10-23"}, ATELIER) == "2026-10-23"
+    net = InvoiceBusiness(id="n", name="N", square_due_days=14)
+    assert resolve_square_due_date({"invoice_date": "2026-10-23"}, net) == "2026-11-06"
+    assert resolve_square_due_date(
+        {"invoice_date": "2026-10-23", "square_due_date": "2026-12-01"}, net
+    ) == "2026-12-01"
+
+
 def test_invoice_pay_link_accepts_square_url():
     link = invoice_pay_link({
         "square_pay_url": PAY_URL, "balance_due": 250, "status": "draft",
@@ -318,6 +380,8 @@ def test_produce_through_real_pdf_path_square_and_outlook_draft():
     assert "INVOICE" in text
     assert "2.0\"" not in text
     assert "Kravet" not in text and "V639" not in text
+    assert "HYATTSVILLE" not in text
+    assert "NORTHSIDE VA" in text
     assert b"/URI" in pdf and b"squareup.com" in pdf
     assert all("/send" not in str(c.url) for c in sq.calls + ol.calls)
     assert any(c.method == "POST" and "/invoices" in str(c.url) for c in sq.calls)
@@ -446,7 +510,7 @@ def test_proof_png_via_real_invoice_path(tmp_path):
     art = ARTIFACT_DIR / "mock-client-invoice.png"
     pix.save(str(art))
     (PROOF_DIR / "mock_invoice.pdf").write_bytes(pdf)
-    log_path = PROOF_DIR / "square_outlook_calls.log"
+    log_path = PROOF_DIR / "square_outlook_calls.txt"
     lines = [
         "Max produce_client_invoice proof — mocked Square + Outlook, mock client data",
         f"business={result['business']['name']}",
@@ -471,6 +535,7 @@ def test_proof_png_via_real_invoice_path(tmp_path):
         lines.append(f"OUTLOOK {c.method} {c.url.path} draft_only")
     log_path.write_text("\n".join(lines) + "\n")
     assert png_path.exists() and png_path.stat().st_size > 1000
+    assert "HYATTSVILLE" not in _pdf_text(pdf)
     text = log_path.read_text()
     assert "SHARE_MANUALLY" in text
     assert "createReply" in text

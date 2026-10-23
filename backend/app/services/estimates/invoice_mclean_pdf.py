@@ -177,6 +177,7 @@ def render_invoice_bytes(invoice: dict, customer: Optional[dict] = None, *, dry_
         render_chrome_bands(c, sheet_no=page, total=pages, right_title="INVOICE",
                             letterhead=bill.letterhead_upper,
                             powered_by=bill.chrome_subheader_upper,
+                            locale=bill.chrome_locale,
                             client=client, project=num, rev="A", date=E._fmt_date(created),
                             status=_DRY_TEXT if dry else "INVOICE")
         y = E.CONTENT_TOP

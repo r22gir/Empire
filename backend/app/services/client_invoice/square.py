@@ -27,6 +27,31 @@ class SquareInvoiceError(RuntimeError):
     pass
 
 
+def resolve_square_due_date(invoice: dict | None = None, business=None) -> str:
+    """Square payment_requests.due_date. Default is due-on-receipt (invoice date).
+
+    Configurable via invoice['square_due_date'] (YYYY-MM-DD) or
+    invoice/business square_due_days (0 = due on receipt).
+    """
+    invoice = invoice or {}
+    explicit = invoice.get("square_due_date") or getattr(business, "square_due_date", None)
+    if explicit and re.fullmatch(r"\d{4}-\d{2}-\d{2}", str(explicit)[:10]):
+        return str(explicit)[:10]
+    days = invoice.get("square_due_days")
+    if days is None:
+        days = getattr(business, "square_due_days", 0)
+    try:
+        days = int(days if days is not None else 0)
+    except (TypeError, ValueError):
+        days = 0
+    raw = str(invoice.get("invoice_date") or invoice.get("created_at") or date.today().isoformat())[:10]
+    try:
+        base = date.fromisoformat(raw)
+    except ValueError:
+        base = date.today()
+    return (base + timedelta(days=days)).isoformat()
+
+
 def _redact(value: Any) -> Any:
     if isinstance(value, str):
         return _REDACT.sub(r"\1: [redacted]", value)
@@ -142,7 +167,7 @@ class SquareInvoiceClient:
         idempotency_key: str | None = None,
     ) -> dict:
         """Create + publish a Square invoice that can only be shared by link."""
-        due = due_date or (date.today() + timedelta(days=0)).isoformat()
+        due = due_date or resolve_square_due_date()
         key = idempotency_key or f"inv-{invoice_number}-{uuid.uuid4().hex[:8]}"
 
         customer = self.request("POST", "/customers", {

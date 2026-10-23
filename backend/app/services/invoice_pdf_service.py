@@ -252,7 +252,6 @@ def _settlement_rows(invoice: dict, accent: str) -> str:
 
 
 _OPEN_LINK_STATUSES = {"link_ready", "awaiting_confirmation", "unpaid", ""}
-_SQUARE_HOSTS = ("squareup.com", "square.link")
 
 
 def _is_stripe_pay_url(url: str) -> bool:
@@ -260,9 +259,16 @@ def _is_stripe_pay_url(url: str) -> bool:
 
 
 def _is_square_pay_url(url: str) -> bool:
-    if not url.startswith("https://"):
+    """True only for https Square hosts: squareup.com, *.squareup.com, square.link."""
+    from urllib.parse import urlparse
+    try:
+        parsed = urlparse((url or "").strip())
+    except Exception:
         return False
-    return any(host in url.lower() for host in _SQUARE_HOSTS)
+    if parsed.scheme != "https" or parsed.username or parsed.password:
+        return False
+    host = (parsed.hostname or "").lower().rstrip(".")
+    return host == "squareup.com" or host.endswith(".squareup.com") or host == "square.link"
 
 
 def _pick_pay_url(invoice: dict) -> str:
@@ -533,7 +539,7 @@ def render_client_invoice_html(
     if co.get("number"):
         co_title = f'<div class="invoice-number" style="font-weight:700">Change Order {escape(str(co.get("number")), quote=False)}</div>'
 
-    pay_html = _pay_link_html(invoice, accent)
+    pay_html = _pay_link_html(invoice, accent) if not is_woodcraft else ""
     page_margin = "0.55in" if sqft_mode else "0.75in"
 
     contact_bits = [b for b in (brand["phone"], brand["email"], brand["address"]) if b]
