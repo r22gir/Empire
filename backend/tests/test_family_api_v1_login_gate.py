@@ -104,8 +104,12 @@ API_V1_MOUNTS = (
 )
 
 # Paths that used to answer without an owner session on family.
+# /api/v1/edition stays gated on both editions. Public ventas is
+# edition-scoped (gated on amp, public on maxine) and tested separately.
 PREVIOUSLY_OPEN = (
     "/api/v1/edition",
+)
+PUBLIC_VENTAS_GET = (
     "/api/v1/public/ventas/projects",
     "/api/v1/public/ventas/projects/demo/sitemap",
 )
@@ -205,14 +209,38 @@ def test_family_exempt_list_is_only_health_login_and_webhook():
     assert api_exempt == set(KEEP_OPEN) - {("GET", "/health")}
     for method, path in KEEP_OPEN:
         assert access_exempt(method, path) is True, (method, path)
-    for path in PREVIOUSLY_OPEN + SAMPLE_ALREADY_GATED:
+    for path in PREVIOUSLY_OPEN + SAMPLE_ALREADY_GATED + PUBLIC_VENTAS_GET:
         assert access_exempt("GET", path) is False, path
         assert access_exempt("POST", path) is False, path
-    # Helper still describes Maxine ventas, but family access no longer uses it.
+    # Helper describes Maxine ventas. Shared allowlist never includes it.
     assert public_sales_exempt("GET", "/api/v1/public/ventas/projects") is True
+    assert public_sales_exempt("POST", "/api/v1/public/ventas/projects/demo/lead") is True
+    assert ("GET", "/api/v1/public/ventas/projects") not in _ALLOWLIST_EXEMPT
+    assert ("GET", "/api/v1/edition") not in _ALLOWLIST_EXEMPT
+    # Without EMPIRE_EDITION=maxine, access_exempt stays closed.
     assert access_exempt("GET", "/api/v1/public/ventas/projects") is False
     assert access_exempt("POST", "/api/v1/public/ventas/projects/demo/lead") is False
-    assert ("GET", "/api/v1/edition") not in _ALLOWLIST_EXEMPT
+
+
+def test_public_ventas_exemption_is_maxine_only(monkeypatch, tmp_path):
+    from app.edition import _ALLOWLIST_EXEMPT, access_exempt
+
+    assert not any(str(p).startswith("/api/v1/public/ventas") for _, p in _ALLOWLIST_EXEMPT)
+
+    amp_root = tmp_path / "amp-exempt"
+    amp_root.mkdir()
+    _family_env(monkeypatch, amp_root, "amp")
+    assert access_exempt("GET", "/api/v1/public/ventas/projects") is False
+    assert access_exempt("POST", "/api/v1/public/ventas/projects/demo/lead") is False
+    assert access_exempt("GET", "/api/v1/edition") is False
+
+    max_root = tmp_path / "maxine-exempt"
+    max_root.mkdir()
+    _family_env(monkeypatch, max_root, "maxine")
+    assert access_exempt("GET", "/api/v1/public/ventas/projects") is True
+    assert access_exempt("HEAD", "/api/v1/public/ventas/projects") is True
+    assert access_exempt("POST", "/api/v1/public/ventas/projects/demo/lead") is True
+    assert access_exempt("GET", "/api/v1/edition") is False
 
 
 def test_anonymous_family_api_v1_is_denied_including_previous_holes(monkeypatch, tmp_path):
@@ -230,6 +258,61 @@ def test_anonymous_family_api_v1_is_denied_including_previous_holes(monkeypatch,
         assert health.status_code == 200
         logout = client.post("/api/v1/amp/auth/logout")
         assert logout.status_code == 200
+
+
+def test_amp_anonymous_public_ventas_is_sin_acceso(monkeypatch, tmp_path):
+    root = tmp_path / "amp-ventas"
+    root.mkdir()
+    client = _client(monkeypatch, root, "amp")
+    for path in PUBLIC_VENTAS_GET:
+        denied = client.get(path)
+        assert denied.status_code == 403, (path, denied.status_code, denied.text)
+        assert denied.json().get("code") == "sin_acceso"
+    posted = client.post(
+        "/api/v1/public/ventas/projects/portal/lead",
+        json={"name": "Ana Perez", "phone": "573001112233", "consent": True, "website": ""},
+    )
+    assert posted.status_code == 403, posted.text
+    assert posted.json().get("code") == "sin_acceso"
+    edition = client.get("/api/v1/edition")
+    assert edition.status_code == 403
+    assert edition.json().get("code") == "sin_acceso"
+
+
+def test_maxine_anonymous_public_ventas_stays_reachable_including_lead(monkeypatch, tmp_path):
+    root = tmp_path / "maxine-ventas"
+    root.mkdir()
+    client = _client(monkeypatch, root, "maxine")
+    from app.routers.construction import get_db
+
+    conn = get_db()
+    conn.execute(
+        "INSERT INTO cf_projects (id, name, slug, status, currency) VALUES (?, ?, ?, ?, ?)",
+        ("p-portal", "Portal del Valle", "portal", "active", "COP"),
+    )
+    conn.commit()
+    conn.close()
+
+    listed = client.get("/api/v1/public/ventas/projects")
+    assert listed.status_code == 200, listed.text
+    assert listed.json().get("code") != "sin_acceso"
+    assert any(p.get("slug") == "portal" for p in listed.json().get("projects") or [])
+
+    sitemap = client.get("/api/v1/public/ventas/projects/portal/sitemap")
+    assert sitemap.status_code == 200, sitemap.text
+    assert sitemap.json().get("code") != "sin_acceso"
+
+    posted = client.post(
+        "/api/v1/public/ventas/projects/portal/lead",
+        json={"name": "Ana Perez", "phone": "573001112233", "consent": True, "website": ""},
+    )
+    assert posted.status_code == 201, posted.text
+    assert posted.json().get("ok") is True
+    assert posted.json().get("code") != "sin_acceso"
+
+    edition = client.get("/api/v1/edition")
+    assert edition.status_code == 403
+    assert edition.json().get("code") == "sin_acceso"
 
 
 def test_owner_session_opens_previous_holes_and_samples(monkeypatch, tmp_path):

@@ -79,6 +79,8 @@ def test_chats_and_admin_are_not_allowlist_exempt():
     assert access_exempt("GET", "/api/v1/whatsapp/chats") is False
     assert access_exempt("GET", "/api/v1/whatsapp/status") is False
     assert access_exempt("GET", "/api/v1/edition") is False
+    # Ventas is edition-scoped (Maxine-only). Shared allowlist never lists it.
+    assert ("GET", "/api/v1/public/ventas/projects") not in exempt
     assert access_exempt("GET", "/api/v1/public/ventas/projects") is False
 
 
