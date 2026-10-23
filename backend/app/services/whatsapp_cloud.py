@@ -573,11 +573,14 @@ def _phone_id() -> str:
 
 
 def send_session_text(wa_id: str, text: str, *, now: int | None = None) -> dict:
+    from app.services.max.guardrails import sanitize_output
+
     number = _digits(wa_id)
     if number not in owner_numbers():
         return {"sent": False, "reason": "Ese número no está en la lista del dueño."}
     if not within_service_window(number, now):
         return {"sent": False, "reason": "Fuera de la ventana de 24 horas. Solo una plantilla aprobada puede salir."}
+    text = sanitize_output(text or "")
     payload = {
         "messaging_product": "whatsapp",
         "recipient_type": "individual",
@@ -724,6 +727,9 @@ def _send_audio(number: str, media_id: str) -> dict:
 
 def send_reply(wa_id: str, text: str, *, now: int | None = None, inbound_kind: str = "text", synthesize=None) -> dict:
     """Voice note plus a short text copy, unless this instance asks for text only."""
+    from app.services.max.guardrails import sanitize_output
+
+    text = sanitize_output(text or "")
     language = reply_language()
     mode = reply_mode()
     number = _digits(wa_id)

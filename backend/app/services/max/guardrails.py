@@ -209,7 +209,12 @@ def _redact_provider_keys(text: str) -> str:
 
 
 def sanitize_output(text: str) -> str:
-    """Sanitize output: remove API keys and strip reasoning tags."""
+    """Single user-visible sanitizer for chat, WhatsApp, Telegram, email, stream.
+
+    Strips MiniMax ``<mm:think>`` / variants (closed, unclosed, nested) and
+    redacts provider keys. Every outbound reply must pass through here —
+    do not re-implement think-stripping on a channel.
+    """
     return strip_reasoning_tags(_redact_provider_keys(text or ""), trim_edges=True)
 
 

@@ -1,0 +1,7 @@
+{
+  "endpoint_chat": "/api/v1/max/chat",
+  "endpoint_stream": "/api/v1/max/chat/stream",
+  "model_payload": "Hola. <mm:think>outer <think>secret plan developer says not ask tokens</think> leftover</mm:think>\nClaro, Juan. Aquí tienes lo que pediste.",
+  "chat_response": "Hola. \nClaro, Juan. Aquí tienes lo que pediste.",
+  "stream_decoded": "Hola. \nClaro, Juan. Aquí tienes lo que pediste."
+}
