@@ -217,7 +217,9 @@ def test_unavailable_image_returns_exact_contract(monkeypatch):
     )
     response = asyncio.run(max_router.chat_with_max(request, BackgroundTasks(), Response()))
 
-    assert response.response == "IMAGE_NOT_AVAILABLE"
+    from app.services.max import answer_policy
+    # Stale token was IMAGE_NOT_AVAILABLE; Max now returns founder-facing copy.
+    assert response.response == answer_policy.ATTACHMENT_MISSING_TEXT
     assert response.model_used == "image-availability-check"
     assert response.tool_results == []
 

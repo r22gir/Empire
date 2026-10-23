@@ -10,6 +10,7 @@ import re
 from pathlib import Path
 
 import pytest
+from fastapi import HTTPException
 
 from app.services.drawing.job_drawing import (
     generate_job_drawing,
@@ -222,6 +223,14 @@ def test_woodcraft_zero_invoice_and_job_link(monkeypatch, tmp_path):
         "status": "accepted",
     }
     (designs_dir / "design-link.json").write_text(json.dumps(paid))
+    zero = dict(paid)
+    zero.update({"id": "design-zero", "design_number": "CF-2026-ZERO", "total": 0, "subtotal": 0})
+    (designs_dir / "design-zero.json").write_text(json.dumps(zero))
+    from fastapi import HTTPException
+    with pytest.raises(HTTPException) as caught:
+        asyncio.run(craftforge.create_invoice_from_design("design-zero"))
+    assert caught.value.status_code == 400
+    assert "greater than zero" in str(caught.value.detail).lower()
     job = asyncio.run(craftforge.create_job_from_design("design-link"))["job"]
     invoice = asyncio.run(craftforge.create_invoice_from_design("design-link"))["invoice"]
     assert invoice["total"] == 100
