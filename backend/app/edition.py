@@ -749,14 +749,6 @@ def greeting(locale: Optional[str] = None, *, include_owner: bool = True) -> str
             return f"¡Quiubo manito! Hola, soy {name}."
         if is_amp():
             if include_owner:
-                try:
-                    from app.services.maxe_guides import pending_whatsapp_guide
-
-                    guide = pending_whatsapp_guide(persist=True)
-                    if guide and guide.get("question"):
-                        return f"¡Quiubo manito! {guide.get('message') or guide['question']}"
-                except Exception:
-                    pass
                 phrase = _amp_company_phrase("es")
                 return (
                     f"¡Quiubo manito! Hola, soy {name}. Juan Diego Giraldo tiene "

@@ -1,7 +1,8 @@
-"""Max-e resumes a pending WhatsApp guide on greeting / first new-session turn.
+"""Max-e resumes a pending WhatsApp guide only on explicit setup intent.
 
 Temp EMPIRE_DATA_DIR only. No live Meta sends, no real contacts, no keys in chat.
 Juan's facts stay under this instance root — never Rafael / Workroom.
+Greetings and first-turn questions must not hijack the reply.
 """
 from __future__ import annotations
 
@@ -90,7 +91,7 @@ def _fact_step(tmp_path) -> str:
     return str(rows[0].get("value") or "")
 
 
-def test_new_session_first_reply_is_saved_step_and_persists(monkeypatch, tmp_path):
+def test_explicit_setup_intent_resumes_saved_step_and_persists(monkeypatch, tmp_path):
     _env(monkeypatch, tmp_path)
     _seed_pending(tmp_path, step="webhook")
     sent = []
@@ -103,7 +104,7 @@ def test_new_session_first_reply_is_saved_step_and_persists(monkeypatch, tmp_pat
     client = _client(monkeypatch)
 
     payload = {
-        "message": "hola",
+        "message": "cómo activo WhatsApp",
         "history": [],
         "conversation_id": "new-session-1",
         "channel": "dashboard",
@@ -127,20 +128,16 @@ def test_new_session_first_reply_is_saved_step_and_persists(monkeypatch, tmp_pat
     assert _fact_step(tmp_path) == "webhook"
     assert sent == []
 
-    again = client.post(
-        "/api/v1/max/chat",
-        json={
-            "message": "Nueva sesión",
-            "history": [],
-            "conversation_id": "new-session-2",
-            "channel": "dashboard",
-            "usage_source": "web",
-        },
+    from app.routers.max.router import ChatRequest, _maybe_resume_whatsapp_guide
+
+    skipped = _maybe_resume_whatsapp_guide(
+        ChatRequest(
+            message="Nueva sesión. ¿Cómo se llama mi empresa?",
+            history=[],
+            conversation_id="new-session-2",
+        )
     )
-    assert again.status_code == 200, again.text
-    second = again.json()
-    assert WEBHOOK_QUESTION in second["response"]
-    assert OWN_ACCOUNT_QUESTION not in second["response"]
+    assert skipped is None
     assert _fact_step(tmp_path) == "webhook"
 
 
@@ -151,7 +148,7 @@ def test_stream_new_session_same_spanish_step(monkeypatch, tmp_path):
     stream = client.post(
         "/api/v1/max/chat/stream",
         json={
-            "message": "hola",
+            "message": "configurar WhatsApp",
             "history": [],
             "conversation_id": "new-session-stream",
             "channel": "dashboard",
@@ -168,11 +165,25 @@ def test_stream_new_session_same_spanish_step(monkeypatch, tmp_path):
     assert _fact_step(tmp_path) == "secure_screen"
 
 
-def test_frontend_style_first_turn_history_still_resumes(monkeypatch, tmp_path):
+def test_frontend_style_history_resumes_only_on_explicit_intent(monkeypatch, tmp_path):
     _env(monkeypatch, tmp_path)
     _seed_pending(tmp_path, step="developers")
     client = _client(monkeypatch)
-    message = "empezamos"
+    from app.routers.max.router import ChatRequest, _maybe_resume_whatsapp_guide
+
+    skipped = _maybe_resume_whatsapp_guide(
+        ChatRequest(
+            message="empezamos",
+            history=[
+                {"role": "assistant", "content": "¡Hola! Soy **Max-e**, tu asistente de EmpireBox."},
+                {"role": "user", "content": "empezamos"},
+            ],
+            conversation_id="ui-new-chat",
+        )
+    )
+    assert skipped is None
+
+    message = "conectar mi número de WhatsApp"
     chat = client.post(
         "/api/v1/max/chat",
         json={
@@ -181,7 +192,7 @@ def test_frontend_style_first_turn_history_still_resumes(monkeypatch, tmp_path):
                 {"role": "assistant", "content": "¡Hola! Soy **Max-e**, tu asistente de EmpireBox."},
                 {"role": "user", "content": message},
             ],
-            "conversation_id": "ui-new-chat",
+            "conversation_id": "ui-whatsapp-intent",
             "channel": "dashboard",
             "usage_source": "web",
         },
@@ -210,7 +221,7 @@ def test_enabled_whatsapp_does_not_hijack_greeting(monkeypatch, tmp_path):
     assert _fact_step(tmp_path) == "webhook"
 
 
-def test_owner_greeting_is_the_step_question(monkeypatch, tmp_path):
+def test_owner_greeting_is_not_the_whatsapp_guide(monkeypatch, tmp_path):
     _env(monkeypatch, tmp_path)
     _seed_pending(tmp_path, step="meta_business")
     from app.edition import greeting
@@ -219,8 +230,9 @@ def test_owner_greeting_is_the_step_question(monkeypatch, tmp_path):
     assert "business.facebook.com" not in public
     owner = greeting("es", include_owner=True)
     assert owner.startswith("¡Quiubo manito!")
-    assert "business.facebook.com" in owner
-    assert "/amp/whatsapp" in owner
+    assert "business.facebook.com" not in owner
+    assert "/amp/whatsapp" not in owner
+    assert OWN_ACCOUNT_QUESTION not in owner
     assert _fact_step(tmp_path) == "meta_business"
 
 
@@ -242,10 +254,9 @@ def test_tool_persists_step_and_refuses_keys(monkeypatch, tmp_path):
     assert "empire-data" not in facts
 
 
-def test_use_chat_opens_new_session_on_edition_guide():
+def test_use_chat_does_not_open_new_session_on_edition_guide():
     hook = Path(__file__).resolve().parents[2].joinpath(
         "empire-command-center/app/hooks/useChat.ts"
     ).read_text(encoding="utf-8")
-    assert "whatsapp_guide" in hook
-    assert "API + '/edition'" in hook
-    assert "credentials: 'include'" in hook
+    assert "whatsapp_guide" not in hook
+    assert "guideWelcomeRef" not in hook

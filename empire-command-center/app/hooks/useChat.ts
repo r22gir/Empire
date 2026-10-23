@@ -4,7 +4,7 @@ import { Message, PinPrompt, ToolResult } from '../lib/types';
 import { API } from '../lib/api';
 import { useAssistantName } from '../lib/assistant';
 import { editionFromEnv } from '../lib/edition';
-import { chatWelcome, isFamilyEdition } from '../lib/familyChrome';
+import { chatWelcome } from '../lib/familyChrome';
 import { asksForFounderPin, redactSecret, toolResultPreview } from '../lib/founderPin';
 
 function welcomeMessage(assistantName: string): Message {
@@ -46,51 +46,16 @@ export function useChat() {
   const streamingRef = useRef(false);
   const messagesRef = useRef<Message[]>(welcomeRef.current ? [welcomeRef.current] : []);
   const contextPackRef = useRef<string>('');
-  const guideWelcomeRef = useRef<string>('');
 
   // Edition name can arrive after the first paint. Replace only the greeting.
   useEffect(() => {
     const next = welcomeMessage(assistantName);
-    if (guideWelcomeRef.current) next.content = guideWelcomeRef.current;
     const ts = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     next.timestamp = ts;
     welcomeRef.current = next;
     const apply = (prev: Message[]) => prev.map(m => m.id === 'welcome' ? { ...next, timestamp: m.timestamp || ts } : m);
     setMessages(apply);
     messagesRef.current = apply(messagesRef.current);
-  }, [assistantName]);
-
-  // Max-e: a new session opens on the saved WhatsApp setup step, not a restart.
-  useEffect(() => {
-    if (!isFamilyEdition(editionFromEnv())) return;
-    let cancelled = false;
-    fetch(API + '/edition', { credentials: 'include', cache: 'no-store' })
-      .then(r => (r.ok ? r.json() : null))
-      .then(data => {
-        if (cancelled) return;
-        const text = String(data?.whatsapp_guide?.message || data?.whatsapp_guide?.question || '').trim();
-        if (!text) return;
-        guideWelcomeRef.current = text;
-        const ts = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-        const next: Message = {
-          id: 'welcome',
-          role: 'assistant',
-          content: text,
-          timestamp: ts,
-        };
-        welcomeRef.current = next;
-        const apply = (prev: Message[]) => {
-          const onlyWelcome = prev.length === 1 && prev[0].id === 'welcome';
-          if (!onlyWelcome) return prev;
-          return [{ ...next, timestamp: prev[0].timestamp || ts }];
-        };
-        setMessages(apply);
-        messagesRef.current = apply(messagesRef.current);
-      })
-      .catch(() => {});
-    return () => {
-      cancelled = true;
-    };
   }, [assistantName]);
 
   useEffect(() => {

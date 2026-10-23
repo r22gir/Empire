@@ -2360,14 +2360,14 @@ def _provider_identity_response(request: ChatRequest) -> ChatResponse:
 
 
 def _maybe_resume_whatsapp_guide(request: ChatRequest) -> ChatResponse | None:
-    """Family greeting / first turn of a new Max-e chat: resume pending WhatsApp setup."""
+    """WhatsApp setup guide: only when the owner explicitly asks to set it up."""
     if request.desk:
         return None
     try:
-        from app.edition import is_amp
+        from app.edition import is_family_edition
         from app.services.maxe_guides import maybe_resume_whatsapp_guide
 
-        if not is_amp():
+        if not is_family_edition():
             return None
         guide = maybe_resume_whatsapp_guide(
             request.message or "",
