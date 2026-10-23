@@ -4,10 +4,10 @@ Geometry and pricing keep floats. Quote sheets, idea sheets, and Max
 drawing callouts print whole inches or fractions. Two-decimal strings
 such as ``72.00"`` and ``14.50"`` are not shop language.
 
-This is the same 1/16" contract already used on B1/B2 sheets
-(``72"``, ``14-1/2"``, ``6-1/4"``). Hyphen fractions stay in ASCII so
-Helvetica title blocks and SVG callouts match, including eighths and
-sixteenths that standard PDF fonts do not carry as glyphs.
+Banquette / job-drawing chat uses ``format_cut_inches`` (``249 3/4"``).
+This helper stays the B1/B2 ASCII hyphen contract (``14-1/2"``) so
+Helvetica title blocks keep eighths and sixteenths that standard PDF
+fonts do not carry as glyphs.
 """
 from __future__ import annotations
 
@@ -15,7 +15,7 @@ from math import gcd
 
 
 def format_inches(value: float) -> str:
-    """Format one inch measurement for a client or shop sheet.
+    """Format one inch measurement for a B1/B2 client or shop sheet.
 
     Examples:
       72     → 72"

@@ -419,11 +419,10 @@ def _client_project(quote: Dict[str, Any]) -> Tuple[str, str]:
     client_safe = _client_safe(quote)
     if client_safe:
         project = re.sub(r"\s+v\d+\s*$", "", project, flags=re.IGNORECASE)
-    client = _fit_label(client, 48)
-    project_limit = 60 if client_safe else 40
-    # header line is CLIENT · PROJECT in one 6pt mono run: keep the pair readable
-    project_limit = max(16, min(project_limit, 92 - len(client)))
-    project = _fit_label(project, project_limit)
+    # Chrome wraps/shrinks CLIENT · PROJECT against the sheet stamp, so keep
+    # the real project name. Only clip pathological strings.
+    client = _fit_label(client, 80)
+    project = _fit_label(project, 160)
     return client, project
 
 

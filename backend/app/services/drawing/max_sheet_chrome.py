@@ -122,6 +122,15 @@ def _ensure_fonts() -> Tuple[str, str, str, str]:
     )
 
 
+def _ls_width(c: canvas.Canvas, text: str, font: str, size: float, tracking: float = 0.0) -> float:
+    text = text or ""
+    if not text:
+        return 0.0
+    widths = [c.stringWidth(ch, font, size) + tracking for ch in text]
+    widths[-1] -= tracking
+    return sum(widths)
+
+
 def _ls_draw(c: canvas.Canvas, x: float, y: float, text: str,
              font: str, size: float, color: Color,
              tracking: float = 0.0, align: str = "left") -> float:
@@ -143,6 +152,65 @@ def _ls_draw(c: canvas.Canvas, x: float, y: float, text: str,
         c.drawString(cursor, y, ch)
         cursor += w
     return total
+
+
+def _ellipsize_to_width(
+    text: str,
+    c: canvas.Canvas,
+    font: str,
+    size: float,
+    tracking: float,
+    max_width: float,
+) -> str:
+    """Word-aware ellipsis so a long CLIENT · PROJECT stays on one header line."""
+    text = (text or "").strip()
+    if not text or _ls_width(c, text, font, size, tracking) <= max_width:
+        return text
+    words = text.split()
+    while words:
+        trial = (" ".join(words) + "…").strip()
+        if _ls_width(c, trial, font, size, tracking) <= max_width:
+            return trial
+        words.pop()
+    trimmed = text
+    while trimmed and _ls_width(c, trimmed + "…", font, size, tracking) > max_width:
+        trimmed = trimmed[:-1]
+    return (trimmed + "…") if trimmed else "…"
+
+
+def _draw_fitted_project_line(
+    c: canvas.Canvas,
+    x: float,
+    y: float,
+    text: str,
+    font: str,
+    size: float,
+    color: Color,
+    tracking: float,
+    max_width: float,
+    min_size: float = 4.4,
+) -> list[tuple[str, float, float]]:
+    """Shrink, then ellipsize, so CLIENT · PROJECT stays on one line.
+
+    A second wrapped line lands on the gold tagline (CUSTOM UPHOLSTERY &
+    FABRICATION) and the ESTIMATE / SHEET stamp. Keep one baseline.
+    Returns the drawn (line, x, y) runs for tests.
+    """
+    text = (text or "").strip()
+    if max_width <= 8:
+        max_width = 8
+    chosen = size
+    for trial in (size, size - 0.6, size - 1.2, min_size):
+        if trial < min_size:
+            continue
+        if _ls_width(c, text, font, trial, tracking) <= max_width:
+            chosen = trial
+            _ls_draw(c, x, y, text, font, chosen, color, tracking=tracking)
+            return [(text, x, y)]
+        chosen = trial
+    fitted = _ellipsize_to_width(text, c, font, chosen, tracking, max_width)
+    _ls_draw(c, x, y, fitted, font, chosen, color, tracking=tracking)
+    return [(fitted, x, y)]
 
 
 def render_chrome_bands(
@@ -182,21 +250,29 @@ def render_chrome_bands(
     c.line(dv, hy + 11, dv, hy + 33)
 
     _ls_draw(c, dv + 12, hy + 20.5 - 6.2, powered_by, mono_b, 6.2, GOLD, tracking=1.5)
-    _ls_draw(
-        c, dv + 12, hy + 31.5 - 6.0,
-        project_line(client, project), mono, 6.0, MUTE_BAND, tracking=0.8,
+    title = right_title.upper()
+    stamp = sheet_stamp(sheet_no, total, rev, date)
+    title_w = _ls_width(c, title, mono_b, 8.4, 1.2)
+    stamp_w = _ls_width(c, stamp, mono, 6.2, 0.9)
+    right_block = max(title_w, stamp_w)
+    project_x = dv + 12
+    max_project_w = max(48.0, (PW - 30 - right_block - 14) - project_x)
+    _draw_fitted_project_line(
+        c, project_x, hy + 31.5 - 6.0,
+        project_line(client, project),
+        mono, 6.0, MUTE_BAND, 0.8, max_project_w,
     )
 
     _ls_draw(
         c, PW - 30, hy + 20.5 - 8.4,
-        right_title.upper(), mono_b, 8.4, CREAM_TEXT, tracking=1.2, align="right",
+        title, mono_b, 8.4, CREAM_TEXT, tracking=1.2, align="right",
     )
     # McLean places SHEET stamp on the UPPER right line (y≈32.5 in SVG TL coords)
     # SVG y is top-down; reportlab is bottom-up. SVG y=32.5 → from top → PH-32.5
     # but baseline sits near that. Mirror reference: stamp near top of band.
     _ls_draw(
         c, PW - 30, hy + 32.5 - 6.2,
-        sheet_stamp(sheet_no, total, rev, date),
+        stamp,
         mono, 6.2, MUTE_BAND, tracking=0.9, align="right",
     )
 

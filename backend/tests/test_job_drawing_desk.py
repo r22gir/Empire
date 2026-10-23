@@ -393,7 +393,9 @@ def test_change_it_turn_keeps_job_and_spec(monkeypatch, tmp_path):
     assert result["success"]
     assert (result.get("job_hint") or "").lower().startswith("marley")
     assert result["dimensions"]["channel_width"] == '12"'
+    assert result["fabrics"]["back"]["code"] == "V003-Cognac"
     assert result["fabrics"]["back"]["color"].lower() == "cognac"
+    assert result["fabrics"]["seat"]["code"] == "V001-Raven"
     assert result["fabrics"]["seat"]["color"].lower() == "black"
 
 

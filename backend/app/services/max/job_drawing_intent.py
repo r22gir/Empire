@@ -58,7 +58,9 @@ _JOB_HINT = re.compile(
     re.I,
 )
 
-_INCH_NUM = r"(\d+(?:\s+\d+/\d+)?(?:\.\d+)?)"
+# Mixed numbers, bare fractions, then whole/decimal. Bare "3/4" must
+# win over the trailing "4" in "3/4 inch channels".
+_INCH_NUM = r"(\d+[-\s]+\d+\s*/\s*\d+|\d+\s*/\s*\d+|\d+(?:\.\d+)?)"
 _CHANNEL_WIDTH = re.compile(
     r"\bchannel(?:s)?(?:\s+backs?)?(?:\s+width)?(?:\s+(?:at|to|of))?\s+"
     + _INCH_NUM
@@ -70,7 +72,7 @@ _CHANNEL_WIDTH_PREFIX = re.compile(
     re.I,
 )
 _CHANNEL_WIDTH_WIDE = re.compile(
-    r"\b(\d+(?:\s+\d+/\d+)?(?:\.\d+)?)\s*(?:\"|in)?\s*wide\b",
+    r"\b" + _INCH_NUM + r"\s*(?:\"|in)?\s*wide\b",
     re.I,
 )
 _BACK_FABRIC = re.compile(
@@ -178,8 +180,9 @@ def extract_job_hint(text: str | None) -> Optional[str]:
 def _parse_inches(raw: str | None) -> Optional[float]:
     if not raw:
         return None
-    text = str(raw).strip()
-    mixed = re.match(r"^(\d+)\s+(\d+)\s*/\s*(\d+)$", text)
+    text = str(raw).strip().replace('"', "")
+    text = re.sub(r"\s*(?:in(?:ch(?:es)?)?)\s*$", "", text, flags=re.I).strip()
+    mixed = re.match(r"^(\d+)[-\s]+(\d+)\s*/\s*(\d+)$", text)
     if mixed:
         try:
             return float(mixed.group(1)) + float(mixed.group(2)) / float(mixed.group(3))

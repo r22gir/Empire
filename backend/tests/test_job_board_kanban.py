@@ -1,23 +1,14 @@
 """
 Tests for Job Board Kanban and Per-Job Document Folder endpoints and Max tools.
-Ensures tests run isolated on a temp SQLite database without touching live data.
+
+Uses the session isolated_empire_db (conftest). Do not set EMPIRE_TASK_DB
+at import time — that leaks a second SQLite file and breaks other Jobs
+tests when the suite is collected together.
 """
 
-import os
-import sys
-import tempfile
 import secrets
 import pytest
 from fastapi.testclient import TestClient
-
-# Create an isolated temporary test database before importing app modules
-_TEST_DB = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
-_TEST_DB_PATH = _TEST_DB.name
-_TEST_DB.close()
-
-os.environ["EMPIRE_TASK_DB"] = _TEST_DB_PATH
-os.environ["EMPIRE_DATABASE_URL"] = f"sqlite:///{_TEST_DB_PATH}"
-os.environ["EMPIRE_DB"] = _TEST_DB_PATH
 
 from app.db.init_db import init_database
 from app.main import app
@@ -29,17 +20,11 @@ from app.services.max.tool_executor import (
 )
 
 
-@pytest.fixture(scope="module", autouse=True)
-def setup_test_database():
-    """Initializes schema and tables in the temporary database."""
+@pytest.fixture(autouse=True)
+def setup_test_database(isolated_empire_db):
+    """Schema on the isolated session DB. Data is truncated between tests."""
     init_database()
     yield
-    # Cleanup temporary test db
-    if os.path.exists(_TEST_DB_PATH):
-        try:
-            os.remove(_TEST_DB_PATH)
-        except Exception:
-            pass
 
 
 @pytest.fixture

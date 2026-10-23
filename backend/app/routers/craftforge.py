@@ -1128,10 +1128,24 @@ async def create_invoice_from_design(design_id: str):
     tax_rate = source["tax_rate"]
     tax_amount = source["tax_amount"]
     total = source["total"]
+    try:
+        total_value = float(total or 0)
+    except (TypeError, ValueError):
+        total_value = 0.0
+    if total_value <= 0:
+        raise HTTPException(status_code=400, detail="Invoice total must be greater than zero")
 
     with get_db() as conn:
         _ensure_invoice_snapshot_columns(conn)
         customer_id = _find_or_create_woodcraft_customer(conn, design)
+        job_id = design.get("job_id")
+        if not job_id:
+            job_row = conn.execute(
+                "SELECT id FROM jobs WHERE quote_id = ? ORDER BY created_at DESC LIMIT 1",
+                (design_id,),
+            ).fetchone()
+            if job_row:
+                job_id = dict_row(job_row)["id"]
         customer_name = source.get("customer_name", "")
         customer_email = source.get("customer_email", "")
         customer_phone = source.get("customer_phone", "")
@@ -1156,12 +1170,12 @@ async def create_invoice_from_design(design_id: str):
 
         conn.execute(
             """INSERT INTO invoices
-               (id, invoice_number, customer_id, quote_id, status, subtotal, tax_rate,
+               (id, invoice_number, customer_id, quote_id, job_id, status, subtotal, tax_rate,
                 tax_amount, total, amount_paid, balance_due, line_items, notes, terms, due_date,
                 client_name, client_email, client_phone, client_address, business_unit,
                 discount_amount, discount_type, deposit_required, deposit_received,
                 source_type, source_id, pricing_snapshot_json, tax_policy_json, pricing_engine_version)
-               VALUES (lower(hex(randomblob(8))), ?, ?, ?, 'draft', ?, ?, ?, ?, 0, ?, ?, ?, 'Net 30', ?,
+               VALUES (lower(hex(randomblob(8))), ?, ?, ?, ?, 'draft', ?, ?, ?, ?, 0, ?, ?, ?, 'Net 30', ?,
                        ?, ?, ?, ?, 'woodcraft',
                        ?, ?, ?, 0,
                        ?, ?, ?, ?, ?)""",
@@ -1169,6 +1183,7 @@ async def create_invoice_from_design(design_id: str):
                 inv_number,
                 customer_id,
                 design_id,
+                job_id,
                 subtotal,
                 tax_rate,
                 tax_amount,
@@ -1201,6 +1216,11 @@ async def create_invoice_from_design(design_id: str):
                     invoice[key] = json.loads(invoice[key])
                 except (TypeError, ValueError):
                     pass
+        if job_id and invoice.get("id"):
+            try:
+                conn.execute("UPDATE jobs SET invoice_id = ? WHERE id = ?", (invoice["id"], job_id))
+            except Exception:
+                pass
 
     # Update design status
     design["status"] = "invoiced"
@@ -1255,6 +1275,17 @@ async def create_job_from_design(design_id: str):
 
         job_row = conn.execute("SELECT * FROM jobs WHERE id = ?", (job_id,)).fetchone()
         job = dict_row(job_row) if job_row else {"id": job_id}
+        invoice_id = design.get("invoice_id")
+        if invoice_id:
+            try:
+                conn.execute("UPDATE invoices SET job_id = ? WHERE id = ?", (job_id, invoice_id))
+            except Exception:
+                pass
+            try:
+                conn.execute("UPDATE jobs SET invoice_id = ? WHERE id = ?", (invoice_id, job_id))
+            except Exception:
+                pass
+            job["invoice_id"] = invoice_id
 
     # Update design
     design["job_id"] = job_id

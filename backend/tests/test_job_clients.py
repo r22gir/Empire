@@ -82,10 +82,14 @@ def test_add_second_client_and_shared_membership(monkeypatch, tmp_path):
     conn.close()
 
 
-def test_job_clients_api_lists_and_adds(monkeypatch, tmp_path):
+def test_job_clients_api_lists_and_adds(isolated_empire_db, monkeypatch, tmp_path):
     from fastapi.testclient import TestClient
+    from app.db import database
     from app.db.database import get_db
     from app.main import app
+
+    database.DB_PATH = isolated_empire_db
+    monkeypatch.setenv("EMPIRE_TASK_DB", isolated_empire_db)
 
     with get_db() as conn:
         conn.execute("INSERT OR IGNORE INTO customers (id, name) VALUES ('cust-maggie', \"Maggie O'Neill\")")
