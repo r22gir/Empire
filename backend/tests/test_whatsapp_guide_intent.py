@@ -23,6 +23,10 @@ NORMAL_PROMPTS = (
     "Recuerda que mi empresa se llama Empresa Prueba.",
     "mándame esto por WhatsApp",
     "qué es WhatsApp",
+    "whatsapp está activo?",
+    "whatsapp no está conectado?",
+    "el cliente me escribió por whatsapp, configura la cita",
+    "instala la app y mándame whatsapp",
 )
 
 INTENT_PROMPTS = (
@@ -32,6 +36,24 @@ INTENT_PROMPTS = (
     "cómo configuro WhatsApp",
     "guía de WhatsApp",
     "how do I set up WhatsApp",
+    "connect my WhatsApp",
+    "link WhatsApp",
+    "quiero poner WhatsApp",
+    "registrar mi número de WhatsApp",
+)
+
+STATUS_OR_INCIDENTAL_PROMPTS = (
+    "whatsapp está activo?",
+    "whatsapp no está conectado?",
+    "el cliente me escribió por whatsapp, configura la cita",
+    "instala la app y mándame whatsapp",
+)
+
+NEW_VERB_PROMPTS = (
+    "connect my WhatsApp",
+    "link WhatsApp",
+    "quiero poner WhatsApp",
+    "registrar mi número de WhatsApp",
 )
 
 
@@ -175,6 +197,28 @@ def test_intent_detector_rejects_send_and_what_is():
     assert is_whatsapp_setup_intent("qué es WhatsApp") is False
     assert is_whatsapp_setup_intent("hola manito") is False
     assert is_whatsapp_setup_intent("") is False
+
+
+@pytest.mark.parametrize("prompt", STATUS_OR_INCIDENTAL_PROMPTS)
+def test_status_and_incidental_whatsapp_do_not_trigger_guide(prompt):
+    from app.services.maxe_guides import is_whatsapp_setup_intent, maybe_resume_whatsapp_guide
+
+    assert is_whatsapp_setup_intent(prompt) is False
+    assert maybe_resume_whatsapp_guide(prompt, [], persist=False) is None
+
+
+@pytest.mark.parametrize("edition", ("amp", "maxine"))
+@pytest.mark.parametrize("prompt", NEW_VERB_PROMPTS)
+def test_new_setup_verbs_trigger_guide(monkeypatch, tmp_path, edition, prompt):
+    _env(monkeypatch, tmp_path, edition)
+    _seed_pending(tmp_path, edition=edition, step="webhook")
+    from app.services.maxe_guides import is_whatsapp_setup_intent, maybe_resume_whatsapp_guide, whatsapp_setup_path
+
+    assert is_whatsapp_setup_intent(prompt) is True
+    guide = maybe_resume_whatsapp_guide(prompt, [], persist=False)
+    assert guide is not None
+    assert WEBHOOK_QUESTION in (guide.get("message") or "")
+    assert whatsapp_setup_path() in (guide.get("message") or "")
 
 
 def test_system_prompt_restricts_whatsapp_tool_to_explicit_intent(monkeypatch, tmp_path):

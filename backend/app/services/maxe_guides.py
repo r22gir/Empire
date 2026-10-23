@@ -13,18 +13,52 @@ from typing import Optional
 DEFAULT_PENDING_WHATSAPP_KEY = "pendiente_whatsapp_famp"
 _PENDING_WHATSAPP_KEY_RE = re.compile(r"(?i)^pendiente_.*whatsapp")
 _WHATSAPP_RE = r"whats?\s*app"
+# Stem + ending, then \b so "conect" does not eat "conectividad" / "conectado".
 _SETUP_VERB_RE = (
-    r"(?:activ(?:ar|o|a|e|ando)|configur(?:ar|o|a|e|ando)|conect(?:ar|o|a|e|ando)"
-    r"|habilit(?:ar|o|a|e|ando)|instal(?:ar|o|a|e|ando)|vincul(?:ar|o|a|e|ando)"
-    r"|setup|set\s*up|enable|enabling|install|create|creating)"
+    r"(?:activ(?:ar|o|a|e|ando)\b"
+    r"|configur(?:ar|o|a|e|ando)\b"
+    r"|conect(?:ar|o|a|e|ando)\b"
+    r"|habilit(?:ar|o|a|e|ando)\b"
+    r"|instal(?:ar|o|a|e|ando)\b"
+    r"|vincul(?:ar|o|a|e|ando)\b"
+    r"|pon(?:er|go|e|ga|iendo)?\b"
+    r"|registr(?:ar|o|a|e|ando)\b"
+    r"|setup\b|set\s*up\b"
+    r"|enable\b|enabling\b"
+    r"|install(?:ing|s)?\b"
+    r"|create\b|creating\b"
+    r"|connect(?:ing|s)?\b"
+    r"|link(?:ing|s)?\b"
+    r"|activate(?:s|ing)?\b)"
 )
 _SEND_RE = re.compile(
     r"\b(?:envia(?:r|me|nos)?|manda(?:r|me|nos)?|send|message|mensaje|escribe|escribir)\b"
+)
+_SEND_WHATSAPP_RE = re.compile(
+    rf"\b(?:envia(?:r|me|nos)?|manda(?:r|me|nos)?|send(?:\s+me)?)\s+{_WHATSAPP_RE}"
 )
 _GUIDE_RE = r"(?:guia|guide|tutorial|pasos|instrucciones)"
 _NUMBER_RE = r"(?:numero|number|linea)"
 _ACCOUNT_RE = r"(?:cuenta|account|app\b)"
 _META_RE = r"(?:meta|facebook)"
+_STATUS_RE = re.compile(
+    r"(?:"
+    r"(?:esta|estan|is|are)\s+(?:ya\s+)?"
+    r"(?:activo|activa|conectado|conectada|configurado|habilitado|"
+    r"active|connected|enabled|configured|setup|set\s+up)"
+    r"|(?:no\s+esta|no\s+estan|isn'?t|is\s+not|are\s+not)\s+"
+    r"(?:activo|activa|conectado|conectada|configurado|habilitado|"
+    r"active|connected|enabled|configured)"
+    r")"
+)
+_CHANNEL_RE = re.compile(
+    rf"\b(?:por|via|en|through|over|on)\s+(?:el\s+|la\s+|my\s+|the\s+)?{_WHATSAPP_RE}"
+)
+# Determiners / number-account words allowed between a setup verb and WhatsApp.
+_LINKER = (
+    r"(?:\s+(?:mi|mis|el|la|los|las|un|una|uno|my|the|a|an|tu|su|your|me|to|"
+    r"para|de|of|con|with|numero|number|cuenta|account|linea|line))*"
+)
 
 COMPANY_STEPS = (
     ("name", "¿Cómo se llama la empresa?"),
@@ -125,25 +159,41 @@ def default_pending_whatsapp_key() -> str:
     return DEFAULT_PENDING_WHATSAPP_KEY
 
 
+def _setup_verb_targets_whatsapp(text: str) -> bool:
+    """Setup verb whose object is WhatsApp (or its number / account), not a later clause."""
+    verb = rf"\b{_SETUP_VERB_RE}"
+    wa = _WHATSAPP_RE
+    if re.search(rf"{verb}{_LINKER}\s+{wa}", text):
+        return True
+    if re.search(rf"{wa}{_LINKER}\s+{verb}", text):
+        return True
+    if re.search(rf"{verb}{_LINKER}\s+{_NUMBER_RE}{_LINKER}\s+{wa}", text):
+        return True
+    return False
+
+
 def is_whatsapp_setup_intent(message: str) -> bool:
     """True only when the owner asks to activate / configure / connect WhatsApp."""
     text = _fold(message)
     if not text:
         return False
-    if _SEND_RE.search(text) and not re.search(_SETUP_VERB_RE, text):
+    if _STATUS_RE.search(text):
         return False
-    if re.search(rf"{_SETUP_VERB_RE}.{{0,48}}{_WHATSAPP_RE}", text):
+    if _setup_verb_targets_whatsapp(text):
         return True
-    if re.search(rf"{_WHATSAPP_RE}.{{0,48}}{_SETUP_VERB_RE}", text):
+    if re.search(rf"\b{_GUIDE_RE}\b{_LINKER}\s+{_WHATSAPP_RE}", text):
         return True
-    if re.search(rf"{_GUIDE_RE}.{{0,24}}{_WHATSAPP_RE}", text):
+    if re.search(rf"{_WHATSAPP_RE}{_LINKER}\s+{_GUIDE_RE}\b", text):
         return True
-    if re.search(rf"{_WHATSAPP_RE}.{{0,24}}{_GUIDE_RE}", text):
+    if re.search(
+        rf"\b(?:crear|create|creating)\b{_LINKER}\s+{_ACCOUNT_RE}{_LINKER}\s+(?:{_META_RE}|{_WHATSAPP_RE})",
+        text,
+    ):
         return True
-    if re.search(rf"(?:conectar|configurar|activar|vincular).{{0,32}}{_NUMBER_RE}.{{0,24}}{_WHATSAPP_RE}", text):
-        return True
-    if re.search(rf"(?:crear|create).{{0,24}}{_ACCOUNT_RE}.{{0,24}}(?:{_META_RE}|{_WHATSAPP_RE})", text):
-        return True
+    if _SEND_WHATSAPP_RE.search(text) or _SEND_RE.search(text):
+        return False
+    if _CHANNEL_RE.search(text) and not _setup_verb_targets_whatsapp(text):
+        return False
     return False
 
 
