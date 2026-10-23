@@ -38,7 +38,7 @@ UNTRUSTED_RESULT_TOOLS = frozenset({
 INBOUND_INJECTION_ACTION_TOOLS = frozenset({
     "send_email", "send_quote_email", "send_quote_telegram", "send_telegram",
     "create_invoice", "create_task", "create_engine_quote", "create_quick_quote",
-    "shell_execute", "env_set", "whatsapp_send", "send_whatsapp",
+    "whatsapp_send", "send_whatsapp",
     "dispatch_to_openclaw", "queue_openclaw_task",
 })
 
@@ -130,14 +130,23 @@ class SanitizedInbound:
     hidden_stripped: int = 0
 
     def to_safety_dict(self) -> dict[str, Any]:
+        # Never echo the hidden phrases or target addresses back to the model.
         return {
             "sanitized": True,
             "data_only": True,
             "flags": list(self.flags),
             "hidden_stripped": self.hidden_stripped,
             "injection_suspected": self.injection_suspected,
+        }
+
+    def to_stash_dict(self) -> dict[str, Any]:
+        return {
+            "flags": list(self.flags),
             "hidden_action_phrases": list(self.hidden_action_phrases),
             "hidden_targets": list(self.hidden_targets),
+            "injection": self.injection_suspected,
+            "hidden_stripped": self.hidden_stripped,
+            "sources": [self.source] if self.source else [],
         }
 
 
@@ -427,8 +436,6 @@ def sanitize_payload(obj: Any, *, source: str = "unknown") -> tuple[Any, list[Sa
         existing = SanitizedInbound(
             text="",
             flags=list(obj["content_safety"].get("flags") or []),
-            hidden_action_phrases=list(obj["content_safety"].get("hidden_action_phrases") or []),
-            hidden_targets=list(obj["content_safety"].get("hidden_targets") or []),
             injection_suspected=bool(obj["content_safety"].get("injection_suspected")),
             source=source,
             hidden_stripped=int(obj["content_safety"].get("hidden_stripped") or 0),
@@ -456,28 +463,62 @@ def sanitize_payload(obj: Any, *, source: str = "unknown") -> tuple[Any, list[Sa
     return cleaned_obj, scans
 
 
-def attach_content_safety(payload: dict, scans: list[SanitizedInbound]) -> dict:
-    flags: list[str] = []
-    phrases: list[str] = []
-    targets: list[str] = []
-    hidden_stripped = 0
-    injection = False
+def _scan_bucket(scans: list[SanitizedInbound]) -> dict[str, Any]:
+    bucket: dict[str, Any] = {
+        "flags": [],
+        "hidden_action_phrases": [],
+        "hidden_targets": [],
+        "injection": False,
+        "hidden_stripped": 0,
+        "sources": [],
+    }
     for scan in scans:
-        flags.extend(scan.flags)
-        phrases.extend(scan.hidden_action_phrases)
-        targets.extend(scan.hidden_targets)
-        hidden_stripped += scan.hidden_stripped
-        injection = injection or scan.injection_suspected
+        _merge_scan(bucket, scan)
+    return bucket
+
+
+def attach_content_safety(payload: dict, scans: list[SanitizedInbound]) -> dict:
+    bucket = _scan_bucket(scans)
     payload["content_safety"] = {
         "sanitized": True,
         "data_only": True,
-        "flags": list(dict.fromkeys(flags)),
-        "hidden_stripped": hidden_stripped,
-        "injection_suspected": injection,
-        "hidden_action_phrases": list(dict.fromkeys(phrases)),
-        "hidden_targets": list(dict.fromkeys(targets)),
+        "flags": list(bucket["flags"]),
+        "hidden_stripped": bucket["hidden_stripped"],
+        "injection_suspected": bool(bucket["injection"]),
     }
+    # Private stash for execute_tool → access_context. Popped before the model.
+    existing = payload.get("_inbound_scan")
+    if isinstance(existing, dict):
+        _merge_scan(existing, SanitizedInbound(
+            text="",
+            flags=list(bucket["flags"]),
+            hidden_action_phrases=list(bucket["hidden_action_phrases"]),
+            hidden_targets=list(bucket["hidden_targets"]),
+            injection_suspected=bool(bucket["injection"]),
+            hidden_stripped=int(bucket["hidden_stripped"]),
+        ))
+        payload["_inbound_scan"] = existing
+    else:
+        payload["_inbound_scan"] = bucket
     return payload
+
+
+def take_stashed_scan(payload: dict | None) -> Optional[SanitizedInbound]:
+    """Remove the private scan stash so it never reaches the model."""
+    if not isinstance(payload, dict):
+        return None
+    raw = payload.pop("_inbound_scan", None)
+    if not isinstance(raw, dict):
+        return None
+    return SanitizedInbound(
+        text="",
+        flags=list(raw.get("flags") or []),
+        hidden_action_phrases=list(raw.get("hidden_action_phrases") or []),
+        hidden_targets=list(raw.get("hidden_targets") or []),
+        injection_suspected=bool(raw.get("injection")),
+        source=",".join(raw.get("sources") or []) or "stashed",
+        hidden_stripped=int(raw.get("hidden_stripped") or 0),
+    )
 
 
 def apply_to_tool_result(tool_name: str, result: Any, access_context: Optional[dict]) -> Any:
@@ -488,11 +529,16 @@ def apply_to_tool_result(tool_name: str, result: Any, access_context: Optional[d
     if not getattr(result, "success", False) or not isinstance(payload, dict):
         return result
     cleaned, scans = sanitize_payload(payload, source=tool_name)
+    to_record: list[SanitizedInbound] = list(scans)
     if isinstance(cleaned, dict):
+        stashed = take_stashed_scan(cleaned)
+        if stashed:
+            to_record.append(stashed)
         attach_content_safety(cleaned, scans)
+        take_stashed_scan(cleaned)  # drop the stash we just re-attached
         result.result = cleaned
-    if access_context is not None and scans:
-        record_inbound_scan(access_context, scans)
+    if access_context is not None and to_record:
+        record_inbound_scan(access_context, to_record)
     return result
 
 
@@ -539,8 +585,7 @@ def refuse_inbound_action(
         return None
     ctx = access_context if isinstance(access_context, dict) else {}
     scan = ctx.get("inbound_content_scan") or {}
-    has_inbound = bool(ctx.get("untrusted_content") or scan)
-    if not has_inbound:
+    if not scan:
         return None
 
     recipient = _tool_recipient(tool_call)

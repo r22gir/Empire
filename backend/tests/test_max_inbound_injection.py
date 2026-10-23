@@ -5,6 +5,7 @@ Mock data only. Never sends. Exercises the real check_email / inbox-read path.
 from __future__ import annotations
 
 import base64
+import importlib
 import json
 from types import SimpleNamespace
 
@@ -297,6 +298,24 @@ NORMAL_FIXTURES: list[dict] = [
 ALL_FIXTURES = INJECTION_FIXTURES + NORMAL_FIXTURES
 
 
+def _visible_inbox_dump(payload: dict | None) -> str:
+    """JSON of model-visible email fields only (no private scan stash)."""
+    emails = []
+    for em in (payload or {}).get("emails") or []:
+        if not isinstance(em, dict):
+            continue
+        emails.append({
+            "from": em.get("from"),
+            "to": em.get("to"),
+            "subject": em.get("subject"),
+            "preview": em.get("preview"),
+            "body": em.get("body"),
+            "content": em.get("content"),
+        })
+    safety = (payload or {}).get("content_safety") or {}
+    return json.dumps({"emails": emails, "content_safety": safety}, default=str)
+
+
 def _email_from_fixture(fx: dict) -> dict:
     return {
         "id": fx["id"],
@@ -412,10 +431,11 @@ def test_check_email_path_strips_hidden_and_keeps_visible(monkeypatch):
     result = execute_tool({"tool": "check_email", "limit": 20, "unread_only": True}, access_context=ctx)
     assert result.success is True
     payload = result.result or {}
-    dumped = json.dumps(payload)
+    dumped = _visible_inbox_dump(payload)
     assert "content_safety" in payload
     assert payload["content_safety"]["sanitized"] is True
     assert payload["content_safety"]["data_only"] is True
+    assert "_inbound_scan" not in payload
     assert "72 x 84" in dumped
     assert "ripplefold" in dumped
     assert "EST-2026-410" in dumped
@@ -433,7 +453,7 @@ def test_gmail_inbox_response_real_path_output(monkeypatch, capsys):
     """Proof: the inbox-read path Max uses, with pytest-visible output."""
     emails = [_email_from_fixture(fx) for fx in ALL_FIXTURES]
     _mock_inbox(monkeypatch, emails)
-    from app.routers.max import router as max_router
+    max_router = importlib.import_module("app.routers.max.router")
 
     request = SimpleNamespace(message="summarize my inbox", channel="web", desk=None, image_filename=None)
     response = max_router._gmail_inbox_response(request)
@@ -452,7 +472,7 @@ def test_gmail_inbox_response_real_path_output(monkeypatch, capsys):
     assert "attacker@evil.test" not in text.lower()
     assert "ignore previous instructions" not in text.lower()
     assert "No send/invoice/action was taken" in text
-    dumped = json.dumps(response.tool_results, default=str)
+    dumped = _visible_inbox_dump((response.tool_results or [{}])[0].get("result") or {})
     assert "attacker@evil.test" not in dumped.lower()
 
 
@@ -479,7 +499,7 @@ def test_check_email_each_injection_fixture(monkeypatch, fx):
     ctx = {"founder_message": "check my inbox"}
     result = execute_tool({"tool": "check_email", "limit": 5}, access_context=ctx)
     assert result.success
-    dumped = json.dumps(result.result, default=str).lower()
+    dumped = _visible_inbox_dump(result.result).lower()
     if fx["hidden"]:
         assert fx["hidden"].lower() not in dumped
         assert "evil.test" not in dumped

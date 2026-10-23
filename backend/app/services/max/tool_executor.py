@@ -5324,6 +5324,7 @@ def _web_read(params: dict, desk: Optional[str] = None) -> ToolResult:
         return ToolResult(tool="web_read", success=True, result={
             "url": url, "content": text, "length": len(text),
             "content_safety": scan.to_safety_dict(),
+            "_inbound_scan": scan.to_stash_dict(),
         })
     except Exception as e:
         return ToolResult(tool="web_read", success=False, error=f"Web read failed: {e}")
@@ -6958,6 +6959,7 @@ def _file_read(params: dict, desk: Optional[str] = None) -> ToolResult:
                 scan = sanitize_inbound(content, source="file_read")
                 result_payload["content"] = scan.text
                 result_payload["content_safety"] = scan.to_safety_dict()
+                result_payload["_inbound_scan"] = scan.to_stash_dict()
         except Exception as _doc_err:
             logger.warning("document inbound sanitizer failed: %s", _doc_err)
         return ToolResult(tool="file_read", success=True, result=result_payload)
