@@ -60,6 +60,21 @@ The suite runs in a **temp data tree**. Outbound keys are cleared. Failures are
 filed as `kind=fix` improvements (`requested_via=nightly`). They are **not**
 auto-approved.
 
+## Studio frozen-suite gate
+
+Night Lab / Atlas / self-heal / maintenance auto-fix must pass
+`tests/test_studio_frozen_gate.py` **twice** before a change is kept.
+One fail → reject (and revert if a change was applied). Clear log line:
+
+```
+STUDIO_FROZEN_GATE: YES  passes=2/2  frozen suite green twice — change may be kept
+STUDIO_FROZEN_GATE: NO   passes=0/2  frozen suite failed on first pass — change rejected
+```
+
+The suite is small, strict, and mock-only: quotes, drawings (fractions;
+wood/foam vs fabric cuts labeled separately; fabric codes not brands),
+and invoices. Nothing is emailed or sent on WhatsApp / SMS / Telegram.
+
 Default backend targets (override with `MAX_IMPROVE_NIGHTLY_PYTEST` or `--full`):
 
 ```
@@ -67,6 +82,7 @@ tests/test_growth.py
 tests/test_improvement_loop.py
 tests/test_minimax_meter.py
 tests/test_live_data_firewall.py
+tests/test_studio_frozen_gate.py
 ```
 
 Frontend: `node --experimental-strip-types --test` over `app/lib` and `app/components`.

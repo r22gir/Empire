@@ -686,18 +686,28 @@ def _git_revert(files: list = None) -> Optional[str]:
 # ── Canary Tests (from self_heal pattern) ────────────────────────────
 
 def _run_canary_tests() -> dict:
-    """Run canary tests — health endpoint check."""
-    tests = []
+    """Studio frozen-suite gate: two green passes required to keep an auto-fix."""
     try:
-        r = subprocess.run(
-            ["curl", "-s", "-o", "/dev/null", "-w", "%{http_code}", "http://localhost:8000/health"],
-            capture_output=True, text=True, timeout=10,
-        )
-        tests.append({"name": "backend_health", "passed": r.stdout.strip() == "200"})
-    except Exception:
-        tests.append({"name": "backend_health", "passed": False})
+        from app.services.max.studio_frozen_gate import evaluate_studio_frozen_gate
 
-    return {"passed": all(t["passed"] for t in tests), "results": tests}
+        gate = evaluate_studio_frozen_gate()
+        return {
+            "passed": bool(gate.get("keep")),
+            "results": [
+                {
+                    "name": "studio_frozen_gate",
+                    "passed": bool(gate.get("keep")),
+                    "log_line": gate.get("log_line"),
+                }
+            ],
+            "log_line": gate.get("log_line"),
+        }
+    except Exception as exc:
+        return {
+            "passed": False,
+            "results": [{"name": "studio_frozen_gate", "passed": False, "error": str(exc)}],
+            "log_line": f"STUDIO_FROZEN_GATE: NO  passes=0/2  {exc}",
+        }
 
 
 # ── Internal Helpers ─────────────────────────────────────────────────

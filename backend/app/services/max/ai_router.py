@@ -197,7 +197,7 @@ PROVIDER_LABELS: dict[str, str] = {
 }
 
 from .system_prompt import get_system_prompt
-from .desk_prompt import get_desk_system_prompt
+from .desk_prompt import get_desk_system_prompt, resolve_desk_cache_pin
 from .token_tracker import token_tracker
 
 # Per-desk model routing — overrides primary model when desk is specified
@@ -1305,6 +1305,12 @@ class AIRouter:
         else:
             use_model = model or self.primary_model
         prompt = system_prompt or (get_desk_system_prompt(desk) if desk else self.system_prompt)
+        _desk_pin = resolve_desk_cache_pin(desk) if desk else None
+        if _desk_pin:
+            logger.info(
+                "[MAX] Desk cache pin desk=%s provider=%s model=%s (routing unchanged)",
+                desk, _desk_pin["provider"], _desk_pin["model"],
+            )
         feature = "vision" if image_filename else ("chat" if not desk else "desk_task")
         business = desk or "general"
 
@@ -1546,6 +1552,12 @@ class AIRouter:
         else:
             use_model = model or self.primary_model
         prompt = system_prompt or (get_desk_system_prompt(desk) if desk else self.system_prompt)
+        _desk_pin = resolve_desk_cache_pin(desk) if desk else None
+        if _desk_pin:
+            logger.info(
+                "[MAX] Desk cache pin desk=%s provider=%s model=%s (routing unchanged)",
+                desk, _desk_pin["provider"], _desk_pin["model"],
+            )
         feature = "vision" if image_filename else ("chat/stream" if not desk else "desk_task")
         business = desk or "general"
 
