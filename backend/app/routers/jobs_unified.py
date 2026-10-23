@@ -24,6 +24,7 @@ from datetime import datetime, date, timedelta
 from app.db.database import get_db, dict_row, dict_rows
 from app.services.business_routing import route_to_for_item_type
 from app.services.chain_guard import require_customer, MissingCustomerLink
+from app.services.install_line_tagging import dumps_line_items
 
 router = APIRouter(tags=["jobs-unified"])
 
@@ -2222,7 +2223,7 @@ def create_invoice(inv: InvoiceCreateSchema):
             (
                 inv_number, customer_id, inv.quote_id, inv.job_id,
                 subtotal, inv.tax_rate, tax_amount, total, total,
-                json.dumps(inv.line_items) if inv.line_items else None,
+                dumps_line_items(inv.line_items),
                 inv.notes, inv.terms, due,
                 inv.client_name, inv.client_email, inv.client_phone,
                 inv.client_address, inv.billing_address,
@@ -2284,7 +2285,7 @@ def update_invoice(invoice_id: str, update: InvoiceUpdateSchema):
             raise HTTPException(status_code=400, detail="No fields to update")
 
         if "line_items" in data and data["line_items"] is not None:
-            data["line_items"] = json.dumps(data["line_items"])
+            data["line_items"] = dumps_line_items(data["line_items"])
 
         # Recalculate totals if subtotal or tax changed
         if "subtotal" in data or "tax_rate" in data or "discount_amount" in data:
@@ -2501,7 +2502,7 @@ def invoice_from_quote(quote_id: str):
             (
                 inv_number, customer_id, quote_id, job_id,
                 subtotal, tax_rate, tax_amount, total, total,
-                json.dumps(line_items),
+                dumps_line_items(line_items),
                 f"Invoice from quote {quote.get('quote_number', quote_id)}",
                 due,
                 customer_name, customer_email, _normalise_business(business),
@@ -2592,7 +2593,7 @@ def invoice_from_job(job_id: str):
             (
                 inv_number, customer_id, job.get("quote_id"), job_id,
                 subtotal, tax_rate, tax_amount, total, total,
-                json.dumps(line_items),
+                dumps_line_items(line_items),
                 f"Invoice for job {job.get('job_number', job_id)}",
                 due,
                 job.get("client_name"), job.get("client_email"),

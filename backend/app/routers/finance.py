@@ -14,6 +14,7 @@ from datetime import datetime, date, timedelta
 
 from app.db.database import DB_PATH, get_db, dict_row, dict_rows
 from app.services.chain_guard import require_customer, MissingCustomerLink
+from app.services.install_line_tagging import dumps_line_items
 from app.middleware.rate_limiter import limiter
 
 logger = logging.getLogger(__name__)
@@ -999,7 +1000,7 @@ def _persist_composed_invoice(conn, source: dict, composed: dict) -> dict:
             composed["tax_amount"],
             composed["total"],
             composed["total"],
-            json.dumps(composed["line_items"]),
+            dumps_line_items(composed["line_items"]),
             composed["notes"],
             composed["terms"],
             composed["due_date"],
@@ -1754,7 +1755,7 @@ def create_invoice(request: Request, invoice: InvoiceCreate):
                 tax_amount,
                 total,
                 total,  # balance_due = total initially
-                json.dumps(invoice.line_items) if invoice.line_items else None,
+                dumps_line_items(invoice.line_items),
                 invoice.notes,
                 invoice.terms,
                 due,
@@ -1865,7 +1866,7 @@ def split_invoice_from_existing(
                     total,
                     amount_paid,
                     balance_due,
-                    json.dumps(line_items),
+                    dumps_line_items(line_items),
                     notes,
                     source.get("terms", "Net 30"),
                     due,
@@ -2110,7 +2111,7 @@ def update_invoice(request: Request, invoice_id: str, update: InvoiceUpdate):
         values = []
         for key, val in data.items():
             if key == "line_items":
-                val = json.dumps(val)
+                val = dumps_line_items(val)
             fields.append(f"{key} = ?")
             values.append(val)
 
@@ -2254,7 +2255,7 @@ def create_invoice_from_quote(request: Request, quote_id: str):
                 tax_amount,
                 total,
                 total,
-                json.dumps(line_items),
+                dumps_line_items(line_items),
                 source.get("notes") or f"Generated from quote {quote.get('quote_number', quote_id)}",
                 source.get("terms") or "Net 30",
                 due,
@@ -2374,7 +2375,7 @@ def create_invoice_from_job(request: Request, job_id: str):
                 tax_amount,
                 total,
                 total,
-                json.dumps(line_items),
+                dumps_line_items(line_items),
                 f"Generated from job {job['title']}",
                 due,
                 deposit_required,

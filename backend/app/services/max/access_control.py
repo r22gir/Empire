@@ -72,6 +72,7 @@ TOOL_LEVELS = {
     "open_final_doc": 1, "find_files": 1, "share_file": 1, "max_status": 1,
     "get_today_agenda": 1, "send_me_this_link": 1, "can_you_do": 1, "list_schedule": 1,
     "open_record": 1, "edit_quote_lines": 1, "convert_quote_to_invoice": 1,
+    "compare_install_prices": 1,
     "find_in_app": 1, "search": 1,
     # Client acquisition (draft-only; docs/MAX_PROSPECTING.md)
     "prospect_search": 1, "prospect_enrich": 1, "prospect_rank": 1, "prospect_add_to_pipeline": 1,
