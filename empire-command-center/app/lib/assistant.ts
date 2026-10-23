@@ -21,7 +21,7 @@ export function useAssistantName(): string {
 
   useEffect(() => {
     let cancelled = false;
-    fetch(`${API_BASE}/api/v1/edition`)
+    fetch(`${API_BASE}/api/v1/edition`, { credentials: 'include', cache: 'no-store' })
       .then((res) => (res.ok ? res.json() : null))
       .then((data) => {
         if (cancelled || !data?.assistant?.name) return;

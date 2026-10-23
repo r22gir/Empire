@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import AmpNav from '../../../components/amp/AmpNav';
 import { API } from '../../../lib/api';
 import { useEdition } from '../../../lib/edition';
+import { FAMILY_LOGIN_PATH, familyAuthFailedStatus } from '../../../lib/familyAuth';
 
 type Conversation = {
   wa_id: string;
@@ -29,16 +30,28 @@ export default function AmpWhatsAppChatsPage() {
   const [error, setError] = useState('');
 
   useEffect(() => {
-    fetch(`${API}/whatsapp/chats`, { credentials: 'include' })
-      .then((res) => (res.ok ? res.json() : Promise.reject(new Error('no se pudieron leer los chats'))))
+    fetch(`${API}/whatsapp/chats`, { credentials: 'include', cache: 'no-store' })
+      .then((res) => {
+        if (familyAuthFailedStatus(res.status)) {
+          window.location.replace(FAMILY_LOGIN_PATH);
+          return Promise.reject(new Error('sin_acceso'));
+        }
+        return res.ok ? res.json() : Promise.reject(new Error('no se pudieron leer los chats'));
+      })
       .then((data) => setRows(data.conversations || []))
       .catch((err) => setError(err.message || 'Error'));
   }, []);
 
   useEffect(() => {
     if (!active) return;
-    fetch(`${API}/whatsapp/chats/${encodeURIComponent(active)}/messages`, { credentials: 'include' })
-      .then((res) => (res.ok ? res.json() : Promise.reject(new Error('no se pudo abrir el hilo'))))
+    fetch(`${API}/whatsapp/chats/${encodeURIComponent(active)}/messages`, { credentials: 'include', cache: 'no-store' })
+      .then((res) => {
+        if (familyAuthFailedStatus(res.status)) {
+          window.location.replace(FAMILY_LOGIN_PATH);
+          return Promise.reject(new Error('sin_acceso'));
+        }
+        return res.ok ? res.json() : Promise.reject(new Error('no se pudo abrir el hilo'));
+      })
       .then((data) => setMessages(data.messages || []))
       .catch((err) => setError(err.message || 'Error'));
   }, [active]);

@@ -153,10 +153,13 @@ AMP_MODULE_LABELS_ES = {
     "max": "Max-e",
 }
 
+# Family /api/v1 is owner-session only. Shared holes: health, AMP
+# login/session, and the Meta WhatsApp webhook. GET /api/v1/edition stays
+# gated. /api/v1/public/ventas/* is not listed here — access_exempt()
+# adds it only when EMPIRE_EDITION=maxine (public lot map + lead form).
 _ALLOWLIST_EXEMPT = (
     ("GET", "/health"),
     ("GET", "/"),
-    ("GET", "/api/v1/edition"),
     # Edition login. These do not trust client identity headers.
     ("POST", "/api/v1/amp/auth/request"),
     ("POST", "/api/v1/amp/auth/verify"),
@@ -1125,12 +1128,18 @@ def public_sales_exempt(method: str, path: str) -> bool:
 
 
 def access_exempt(method: str, path: str) -> bool:
+    """Family middleware bypass. Founder edition never consults this.
+
+    Shared allowlist is health, AMP login/session, and the WhatsApp webhook.
+    Public ventas is edition-scoped: Maxine keeps it public (lot map + lead
+    form). AMP still requires an owner session.
+    """
     clean = path.split("?", 1)[0]
-    if public_sales_exempt(method, clean):
-        return True
     for allowed_method, allowed_path in _ALLOWLIST_EXEMPT:
         if method.upper() == allowed_method and clean == allowed_path:
             return True
+    if is_maxine() and public_sales_exempt(method, clean):
+        return True
     return False
 
 

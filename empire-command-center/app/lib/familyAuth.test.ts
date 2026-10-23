@@ -14,14 +14,22 @@ import {
 test('anonymous AMP root and dashboard redirect to /login', () => {
   assert.equal(familyHomeRedirect('amp', '/', false), '/login');
   assert.equal(familyHomeRedirect('amp', '/amp/dashboard', false), '/login');
+  assert.equal(familyHomeRedirect('amp', '/amp/whatsapp', false), '/login');
+  assert.equal(familyHomeRedirect('amp', '/amp/whatsapp/chats', false), '/login');
+  assert.equal(familyHomeRedirect('maxine', '/amp/whatsapp', false), '/login');
+  assert.equal(familyHomeRedirect('maxine', '/amp/whatsapp/chats', false), '/login');
   assert.equal(familyHomeRedirect('workroom', '/', false, 'amp.empirebox.store'), '/login');
   assert.equal(familyHomeRedirect('amp', '/login', false), null);
   assert.equal(familyHomeRedirect('amp', '/amp/login', false), null);
   assert.equal(familyHomeRedirect('amp', '/amp/signup', false), null);
   assert.equal(familyHomeRedirect('amp', '/', true), null);
+  assert.equal(familyHomeRedirect('amp', '/amp/whatsapp', true), null);
+  assert.equal(familyHomeRedirect('amp', '/amp/whatsapp/chats', true), null);
   assert.equal(familyHomeRedirect('workroom', '/', false), null);
   assert.equal(isFamilyPublicPath('/login'), true);
   assert.equal(isFamilyPublicPath('/amp/login'), true);
+  assert.equal(isFamilyPublicPath('/amp/whatsapp'), false);
+  assert.equal(isFamilyPublicPath('/amp/whatsapp/chats'), false);
   assert.equal(isFamilyPublicPath('/'), false);
 });
 
