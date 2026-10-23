@@ -30,6 +30,12 @@ from app.services.drawing.templates.banquette_job import (
     label_ink_for_fill,
     schedule_rows,
 )
+from app.services.drawing.templates.text_layout import (
+    Frame,
+    draw_caption_block,
+    draw_flow,
+    wrap_text,
+)
 
 TAB = landscape(elevenSeventeen)  # 17" x 11"
 PW, PH = TAB
@@ -128,8 +134,11 @@ def _header(c: canvas.Canvas, job: BanquetteJob, title: str, page: int, total: i
     c.setFillColor(BR)
     c.setFont("Helvetica-Bold", 16)
     c.drawString(36, PH - 40, job.branding)
-    c.setFont("Helvetica", 10)
     client_line = f"{job.client_name} · {job.subtitle} · {title}" if job.subtitle else f"{job.client_name} · {title}"
+    fs = 10.0
+    while fs >= 7.0 and c.stringWidth(client_line, "Helvetica", fs) > PW - 360:
+        fs -= 0.4
+    c.setFont("Helvetica", fs)
     c.drawString(36, PH - 55, client_line)
     c.setFillColor(RED)
     c.setFont("Helvetica-Bold", 18)
@@ -151,7 +160,15 @@ def _header(c: canvas.Canvas, job: BanquetteJob, title: str, page: int, total: i
     c.line(36, PH - 62, PW - 36, PH - 62)
 
 
-def _legend(c: canvas.Canvas, job: BanquetteJob, x: float, y: float, bench: BenchSpec | None = None) -> None:
+def _legend(
+    c: canvas.Canvas,
+    job: BanquetteJob,
+    x: float,
+    y: float,
+    bench: BenchSpec | None = None,
+    width: float = 294,
+) -> float:
+    """Draw the swatch legend. Returns the lowest baseline used."""
     seat = job.seat_fabric
     back = job.back_fabric
     seat_note = f"Seat — {seat.sheet_label}"
@@ -164,9 +181,9 @@ def _legend(c: canvas.Canvas, job: BanquetteJob, x: float, y: float, bench: Benc
         (None, "Base footprint (existing millwork, dashed)"),
         (SHELL, "Outside back shell / wall (existing)"),
     ]
-    c.setFont("Helvetica", 7.5)
-    for i, (col, text) in enumerate(items):
-        yy = y - i * 12
+    text_w = max(40.0, width - 22)
+    yy = y
+    for col, text in items:
         if col is None:
             c.setDash(3, 2)
             c.setStrokeColor(INK)
@@ -177,17 +194,26 @@ def _legend(c: canvas.Canvas, job: BanquetteJob, x: float, y: float, bench: Benc
             c.setStrokeColor(INK)
             c.rect(x, yy, 14, 8, fill=1)
         c.setFillColor(INK)
-        c.drawString(x + 20, yy + 1, text)
-    yy = y - len(items) * 12 - 6
+        wrapped = wrap_text(c, text, "Helvetica", 7.5, text_w) or [""]
+        for i, line in enumerate(wrapped):
+            c.setFont("Helvetica", 7.5)
+            c.drawString(x + 20, yy + 1, line)
+            if i < len(wrapped) - 1:
+                yy -= 10
+        yy -= 12
+    yy -= 6
     c.setFont("Helvetica-Bold", 7.5)
+    c.setFillColor(INK)
     c.drawString(x, yy, "Quoted runs")
     yy -= 11
     c.setFont("Helvetica", 7)
     shown = [bench] if bench is not None else job.benches
     for item in shown:
         for run in item.runs:
-            c.drawString(x, yy, f"{run.name}: {inch_text(run.back_run_in)}")
-            yy -= 10
+            for line in wrap_text(c, f"{run.name}: {inch_text(run.back_run_in)}", "Helvetica", 7, width) or [""]:
+                c.drawString(x, yy, line)
+                yy -= 10
+    return yy
 
 
 def _scalebar(c: canvas.Canvas, p: Plan, x: float, y: float) -> None:
@@ -431,82 +457,41 @@ def _draw_straight_plan(c: canvas.Canvas, job: BanquetteJob, bench: BenchSpec) -
 
 
 def _wrap_line(c: canvas.Canvas, text: str, font: str, size: float, max_w: float) -> list[str]:
-    raw = (text or "").strip()
-    if not raw:
-        return [""]
-    words = raw.split()
-    lines: list[str] = []
-    cur = ""
-    for word in words:
-        trial = (cur + " " + word).strip()
-        if c.stringWidth(trial, font, size) <= max_w:
-            cur = trial
-            continue
-        if cur:
-            lines.append(cur)
-        if c.stringWidth(word, font, size) <= max_w:
-            cur = word
-        else:
-            chunk = word
-            while chunk:
-                lo, hi = 1, len(chunk)
-                fit = 1
-                while lo <= hi:
-                    mid = (lo + hi) // 2
-                    if c.stringWidth(chunk[:mid], font, size) <= max_w:
-                        fit = mid
-                        lo = mid + 1
-                    else:
-                        hi = mid - 1
-                lines.append(chunk[:fit])
-                chunk = chunk[fit:]
-            cur = ""
-    if cur:
-        lines.append(cur)
-    return lines or [""]
+    return wrap_text(c, text, font, size, max_w) or [""]
 
 
 def _notes_block(
     c: canvas.Canvas,
     lines: list[str],
-    x: float,
-    y: float,
+    frames: list[Frame] | None = None,
+    *,
+    x: float | None = None,
+    y: float | None = None,
     size: float = 7.5,
     leading: float = 11,
     width: float | None = None,
     max_y: float = 36,
-) -> None:
-    """Wrap notes inside a bounded box. Never run off the page edge."""
-    max_w = width if width is not None else max(80.0, PW - x - 36)
-    wrapped: list[str] = []
-    for text in lines:
-        wrapped.extend(_wrap_line(c, text, "Helvetica", size, max_w - 8))
-        wrapped.append("")
-    while wrapped and wrapped[-1] == "":
-        wrapped.pop()
-    title_h = 12
-    fit: list[str] = []
-    yy = y - title_h
-    for text in wrapped:
-        if yy < max_y:
-            break
-        fit.append(text)
-        yy -= leading
-    box_h = max(24.0, title_h + len(fit) * leading + 10)
-    c.setStrokeColor(BR)
-    c.setLineWidth(0.6)
-    c.setFillColor(CREAM)
-    c.rect(x - 6, y + 10 - box_h, max_w + 12, box_h, fill=1, stroke=1)
-    c.setFillColor(INK)
-    c.setFont("Helvetica-Bold", size)
-    c.drawString(x, y, "NOTES")
-    c.setFont("Helvetica", size)
-    yy = y - title_h
-    for text in fit:
-        if yy < max_y:
-            break
-        c.drawString(x, yy, text)
-        yy -= leading
+) -> list[str]:
+    """Wrap / shrink / flow notes inside frames. Never clip silently."""
+    if frames is None:
+        if x is None or y is None:
+            raise ValueError("notes need frames or x/y")
+        max_w = width if width is not None else max(80.0, PW - x - 36)
+        frames = [Frame("notes", x - 6, y + 10, max_w + 12, max(24.0, y + 10 - max_y))]
+    leftover = draw_flow(
+        c,
+        list(lines),
+        frames,
+        font="Helvetica",
+        size=size,
+        title="NOTES",
+        fill=CREAM,
+        stroke=BR,
+        min_size=5.5,
+        leading_ratio=max(1.15, leading / max(size, 1)),
+        pad=7.0,
+    )
+    return leftover
 
 
 def _draw_plan_page(c: canvas.Canvas, job: BanquetteJob, bench: BenchSpec, page: int, total: int) -> None:
@@ -516,23 +501,44 @@ def _draw_plan_page(c: canvas.Canvas, job: BanquetteJob, bench: BenchSpec, page:
         "straight": "TOP VIEW PLAN — straight bench (to scale)",
     }.get(bench.shape, "TOP VIEW PLAN (to scale)")
     _header(c, job, title, page, total)
+    col_x, col_w = PW - 330, 294
     if bench.shape == "u_shape":
         p = _draw_u_plan(c, job, bench)
-        _legend(c, job, PW - 330, 170, bench)
-        _notes_block(c, bench.notes, 40, 170, width=PW - 400, max_y=52)
+        _legend(c, job, col_x, 170, bench, width=col_w)
+        _notes_block(
+            c, bench.notes,
+            [
+                Frame("notes-u", 34, 228, PW - 430, 176),
+                Frame("notes-u-flow", col_x - 6, 88, col_w + 12, 36),
+            ],
+        )
         _scalebar(c, p, 40, 40)
     elif bench.shape == "l_shape":
         p = _draw_l_plan(c, job, bench)
-        _legend(c, job, PW - 330, PH - 110, bench)
+        legend_bottom = _legend(c, job, col_x, PH - 110, bench, width=col_w)
+        notes_top = min(legend_bottom - 10, PH - 248)
+        notes_bottom = 96
+        primary_h = max(80.0, notes_top - notes_bottom)
+        # Leftover flows to a strip left of the scale bar — not over the plan.
         _notes_block(
-            c, bench.notes, PW - 330, PH - 250,
-            size=7.5, leading=10, width=294, max_y=78,
+            c, bench.notes,
+            [
+                Frame("notes-l", col_x - 6, notes_top, col_w + 12, primary_h),
+                Frame("notes-l-flow", 36, 88, (PW - 430) - 56, 40),
+            ],
+            size=7.5, leading=10,
         )
         _scalebar(c, p, PW - 430, 60)
     else:
         p = _draw_straight_plan(c, job, bench)
-        _legend(c, job, PW - 330, PH - 110, bench)
-        _notes_block(c, bench.notes, 40, 160)
+        _legend(c, job, col_x, PH - 110, bench, width=col_w)
+        _notes_block(
+            c, bench.notes,
+            [
+                Frame("notes-s", 34, 210, PW - 430, 158),
+                Frame("notes-s-flow", col_x - 6, 88, col_w + 12, 36),
+            ],
+        )
         _scalebar(c, p, 40, 40)
     c.showPage()
 
@@ -546,6 +552,7 @@ def _elevation_run(
     y: float,
     scale: float,
     name: str,
+    caption_width: float | None = None,
 ) -> float:
     s = scale
     w = run.back_run_in * s
@@ -560,10 +567,14 @@ def _elevation_run(
         cw = ch.width_in * s
         c.setFillColor(ODDF if ch.is_odd else colors.HexColor(job.back_fabric.plan_hex))
         c.rect(pos, y + seat_h, cw, back_h, stroke=1, fill=1)
-        if cw > 8:
+        label = ch.label
+        fs = 4.5
+        while fs >= 3.2 and c.stringWidth(label, "Helvetica", fs) > cw - 1.2:
+            fs -= 0.3
+        if cw > 6 and c.stringWidth(label, "Helvetica", fs) <= cw - 1.0:
             c.setFillColor(INK)
-            c.setFont("Helvetica", 4.5)
-            c.drawCentredString(pos + cw / 2, y + seat_h + back_h / 2, ch.label)
+            c.setFont("Helvetica", fs)
+            c.drawCentredString(pos + cw / 2, y + seat_h + back_h / 2 - fs / 3, label)
         pos += cw
     c.setStrokeColor(DIM)
     c.setLineWidth(0.5)
@@ -572,25 +583,29 @@ def _elevation_run(
     c.line(x + w, y + seat_h + back_h + 5, x + w, y + seat_h + back_h + 11)
     c.setFillColor(DIM)
     c.setFont("Helvetica", 7)
-    c.drawCentredString(x + w / 2, y + seat_h + back_h + 10, f"{name}  {inch_text(run.back_run_in)}")
-    c.setFillColor(INK)
-    c.setFont("Helvetica", 6.5)
+    dim_label = f"{name}  {inch_text(run.back_run_in)}"
+    dim_w = max(w, 80)
+    for i, part in enumerate(wrap_text(c, dim_label, "Helvetica", 7, dim_w) or [dim_label]):
+        c.drawCentredString(x + w / 2, y + seat_h + back_h + 10 + i * 8, part)
     n_std = len(run.standard_channels)
     odd = run.odd_channels
     extra = f" + {odd[0].width_text} ODD at {run.odd_at}" if odd else ""
-    cap_w = max(w, 72)
-    captions = _wrap_line(
-        c, f"{n_std} x {inch_text(bench.channel_width_in)} channels{extra}",
-        "Helvetica", 6.5, cap_w,
-    ) + _wrap_line(
-        c, f"seat {job.seat_fabric.sheet_label}  back {job.back_fabric.sheet_label}",
-        "Helvetica", 6.5, cap_w,
+    cap_w = max(w, caption_width or 110)
+    c.setFillColor(INK)
+    return draw_caption_block(
+        c,
+        [
+            f"{n_std} x {inch_text(bench.channel_width_in)} channels{extra}",
+            f"seat {job.seat_fabric.sheet_label}  back {job.back_fabric.sheet_label}",
+        ],
+        x,
+        y - 12,
+        cap_w,
+        size=6.5,
+        min_size=5.0,
+        max_height=48.0,
+        color=INK,
     )
-    yy = y - 10
-    for part in captions:
-        c.drawString(x, yy, part)
-        yy -= 9
-    return yy
 
 
 def _side_section(c: canvas.Canvas, job: BanquetteJob, bench: BenchSpec, x: float, y: float, scale: float) -> None:
@@ -615,75 +630,98 @@ def _side_section(c: canvas.Canvas, job: BanquetteJob, bench: BenchSpec, x: floa
     # back
     c.setFillColor(colors.HexColor(job.back_fabric.plan_hex))
     c.rect(x, y + sh, bk, bh, fill=1, stroke=1)
-    label_w = max(80.0, PW - 36 - x)
+    label_w = min(200.0, max(80.0, PW - 36 - x))
+    title = "SIDE SECTION (typical)"
     c.setFillColor(INK)
     c.setFont("Helvetica-Bold", 7)
-    c.drawString(x, y + sh + bh + 8, "SIDE SECTION (typical)")
+    for i, part in enumerate(wrap_text(c, title, "Helvetica-Bold", 7, label_w) or [title]):
+        c.drawString(x, y + sh + bh + 8 + i * 9, part)
     c.setFillColor(DIM)
-    c.setFont("Helvetica", 6.5)
-    yy = y - 12
-    for part in _wrap_line(
+    draw_caption_block(
         c,
-        f"seat {inch_text(bench.seat_depth_in)}  back {inch_text(bench.back_stack_in)}  "
-        f"height {inch_text(bench.channel_height_in)}  "
-        f"front overhang {inch_text(bench.front_overhang_in)}  "
-        f"foam {inch_text(bench.foam_thickness_in) if bench.foam_thickness_in else 'TBC'}",
-        "Helvetica",
-        6.5,
+        [
+            f"seat {inch_text(bench.seat_depth_in)}  back {inch_text(bench.back_stack_in)}  "
+            f"height {inch_text(bench.channel_height_in)}",
+            f"front overhang {inch_text(bench.front_overhang_in)}  "
+            f"foam {inch_text(bench.foam_thickness_in) if bench.foam_thickness_in else 'TBC'}",
+        ],
+        x,
+        y - 12,
         label_w,
-    ):
-        if yy < 28:
-            break
-        c.drawString(x, yy, part)
-        yy -= 9
+        size=6.5,
+        min_size=5.0,
+        max_height=36.0,
+        color=DIM,
+    )
 
 
 def _draw_elevations_page(c: canvas.Canvas, job: BanquetteJob, page: int, total: int) -> None:
     _header(c, job, "FRONT ELEVATIONS · SIDE SECTION", page, total)
     c.setFont("Helvetica", 8)
-    c.drawString(
-        36, PH - 76,
+    intro = (
         f"Channel divisions are Option A (full {inch_text(job.benches[0].channel_width_in)} + odd remainder). "
-        f"Seat and back are separate parts / fabrics.",
+        f"Seat and back are separate parts / fabrics."
     )
-    y = PH - 220
+    cursor_top = PH - 76
+    for part in wrap_text(c, intro, "Helvetica", 8, PW - 280) or [intro]:
+        c.drawString(36, cursor_top, part)
+        cursor_top -= 10
+    section_col = 232
+    usable_right = PW - 36 - section_col
     x = 50
-    lowest = y
+    cursor_top -= 16
+    lowest = cursor_top
     for bench in job.benches:
         runs = list(bench.runs)
         max_run = max(r.back_run_in for r in runs)
-        scale = min(1.8, 640.0 / max_run)
+        scale = min(1.55, (usable_right - x) / max(max_run, 1))
         elev_h = bench.channel_height_in * scale + 4.0 * scale
         c.setFont("Helvetica-Bold", 10)
         c.setFillColor(INK)
-        c.drawString(x, y + elev_h + 28, bench.name.upper())
+        c.drawString(x, cursor_top, bench.name.upper())
+        # Elevation sits below the title; dim line needs ~14pt above the back.
+        y = cursor_top - 16 - elev_h - 14
+        if y < 56:
+            y = 56
         long_runs = [r for r in runs if r.back_run_in * scale > 280]
         short_runs = [r for r in runs if r not in long_runs]
+        block_bottom = y
         for run in long_runs:
-            cap_bottom = _elevation_run(c, job, bench, run, x, y, scale, run.name.upper())
-            y = min(cap_bottom, y - elev_h) - 36
+            cap_w = min(usable_right - x, max(run.back_run_in * scale, 160))
+            cap_bottom = _elevation_run(
+                c, job, bench, run, x, y, scale, run.name.upper(), caption_width=cap_w,
+            )
+            block_bottom = min(block_bottom, cap_bottom)
+            y = cap_bottom - 20 - elev_h - 14
         cursor = x
-        row_y = y
-        row_bottom = y
+        row_y = y if long_runs else y
+        if long_runs:
+            row_y = block_bottom - 20 - elev_h - 14
+        row_bottom = row_y
         for run in short_runs:
             w = run.back_run_in * scale
-            # Keep arm captions from colliding: wrap to run width and
-            # start a new row when the next run would overlap.
-            if cursor > x and cursor + max(w, 90) > PW - 260:
-                y = row_bottom - elev_h - 36
+            slot = max(w, 118)
+            if cursor > x and cursor + slot > usable_right:
+                row_y = row_bottom - 20 - elev_h - 14
                 cursor = x
-                row_y = y
-            cap_bottom = _elevation_run(c, job, bench, run, cursor, row_y, scale, run.name.upper())
+            cap_bottom = _elevation_run(
+                c, job, bench, run, cursor, row_y, scale, run.name.upper(),
+                caption_width=slot,
+            )
             row_bottom = min(row_bottom, cap_bottom)
-            cursor += max(w, 90) + 36
-        y = row_bottom - elev_h - 40
-        lowest = min(lowest, y)
+            cursor += slot + 28
+        if short_runs:
+            block_bottom = min(block_bottom, row_bottom)
+        cursor_top = block_bottom - 20
+        lowest = min(lowest, cursor_top)
     typical = job.benches[0]
-    section_y = max(48.0, min(lowest + 20, 120.0))
-    _side_section(
-        c, job, typical, PW - 210, section_y,
-        min(2.4, 110.0 / max(typical.seat_depth_in, 1)),
+    section_scale = min(2.2, 100.0 / max(typical.seat_depth_in, 1))
+    section_h = (
+        (typical.seat_height_in or 18.0) * section_scale
+        + typical.channel_height_in * section_scale + 28
     )
+    section_y = max(52.0, min(lowest + 8, PH - 200 - section_h))
+    _side_section(c, job, typical, PW - 214, section_y, section_scale)
     c.showPage()
 
 
