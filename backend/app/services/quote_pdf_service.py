@@ -147,16 +147,18 @@ def generate_quote_pdf(quote_id: str, *, variant: str | None = None) -> bytes:
 
     Drapery / Willard-format quotes (Rafael 2026-10-23) render the Willard
     landscape layout. Upholstery keeps the McLean grouped sq-ft sheet.
-    ``variant`` is client (default) or internal.
+    ``variant`` is client_simple (default), client (detailed), or internal.
     """
     from app.services.estimates.mclean_estimate_pdf import render_and_save_mclean_pdf
-    from app.services.estimates.rafael_format import VARIANT_CLIENT, uses_willard_layout
+    from app.services.estimates.rafael_format import VARIANT_DEFAULT, normalize_variant, uses_willard_layout
     from app.services.quote_service import resolve_quote
 
     quote = get_quote(quote_id) or resolve_quote(quote_id)
     if not quote:
         raise FileNotFoundError(f"Quote {quote_id} not found")
-    chosen = (variant or (quote.get("metadata") or {}).get("estimate_variant") or VARIANT_CLIENT)
+    chosen = normalize_variant(
+        variant or (quote.get("metadata") or {}).get("estimate_variant") or VARIANT_DEFAULT
+    )
     if uses_willard_layout(quote):
         from app.services.estimates.willard_estimate import render_willard_estimate
         from app.services.data_paths import quote_pdf_dir as _qdir
@@ -164,7 +166,7 @@ def generate_quote_pdf(quote_id: str, *, variant: str | None = None) -> bytes:
         try:
             out = _qdir()
             out.mkdir(parents=True, exist_ok=True)
-            suffix = "" if chosen == VARIANT_CLIENT else f"-{chosen}"
+            suffix = "" if chosen == VARIANT_DEFAULT else f"-{chosen}"
             (out / f"{quote.get('quote_number') or quote_id}{suffix}.pdf").write_bytes(pdf_bytes)
         except OSError as exc:
             logger.warning("Could not save Willard quote PDF: %s", exc)

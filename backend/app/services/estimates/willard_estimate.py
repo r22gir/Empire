@@ -1,6 +1,7 @@
 """Willard area-layout estimate PDF (Rafael 2026-10-23).
 
-Landscape Empire chrome. Client: ITEM · DESCRIPTION · QTY · TOTAL.
+Default client (client_simple): one short line per area + price.
+Detailed client: ITEM · DESCRIPTION · QTY · TOTAL.
 Internal: ITEM · DESCRIPTION · QTY · RATE · AMOUNT · MARKUP · TOTAL.
 
 Layout knobs live on ``WillardLayout``. Never embed live client jobs here.
@@ -27,6 +28,8 @@ from app.services.estimates.header_b import billing_for, body_fonts
 from app.services.estimates.rafael_format import (
     FORMAT_ID,
     VARIANT_CLIENT,
+    VARIANT_CLIENT_SIMPLE,
+    VARIANT_DEFAULT,
     VARIANT_INTERNAL,
     WillardLayout,
     DEFAULT_LAYOUT,
@@ -38,9 +41,13 @@ from app.services.estimates.rafael_format import (
     markup_label,
     money,
     money_round,
+    normalize_variant,
     packet_to_areas,
     quote_to_areas,
     scrub_brands,
+    simple_area_blurb,
+    simple_com_line,
+    simple_includes_line,
     totals_from_areas,
 )
 from app.services.fabric_codes import client_fabric_line
@@ -121,11 +128,13 @@ def _chrome_meta(doc: dict, variant: str, page: int, pages: int, bill) -> None:
 def render_willard_estimate(
     doc: dict,
     *,
-    variant: str = VARIANT_CLIENT,
+    variant: str = VARIANT_DEFAULT,
     layout: WillardLayout | None = None,
 ) -> bytes:
     layout = layout or DEFAULT_LAYOUT
-    variant = VARIANT_INTERNAL if str(variant).lower() == VARIANT_INTERNAL else VARIANT_CLIENT
+    variant = normalize_variant(variant)
+    if variant == VARIANT_CLIENT_SIMPLE:
+        return render_willard_simple(doc, layout=layout)
     bill = _bill_for(doc)
     areas = _areas(doc)
     totals = totals_from_areas(areas, doc)
@@ -212,7 +221,7 @@ def render_willard_estimate(
         pages[-1].append(("asub", area["name"], area["subtotal"]))
         y -= 16
 
-    room(48)
+    room(64)
     pages[-1].append(("rollup", areas, totals))
     if variant == VARIANT_INTERNAL and pending:
         pages[-1].append(("pending", pending))
@@ -411,10 +420,11 @@ def render_willard_estimate(
                     c.drawString(layout.col_desc, y, str(area["name"]).split(" (")[0])
                     draw_money_row(y, float(area["subtotal"]))
                     y -= 12
-                y -= 8
+                y -= 12
                 c.setStrokeColor(INK)
                 c.setLineWidth(0.8)
-                c.line(450, y + 6, layout.content_right, y + 6)
+                c.line(450, y, layout.content_right, y)
+                y -= 18
                 t = op[2]
                 c.setFillColor(GOLD)
                 c.setFont(mono_b, 7.2)
@@ -428,7 +438,7 @@ def render_willard_estimate(
                 else:
                     c.setFont(mono_b, 10.0)
                     c.drawRightString(layout.col_total, y, money(t["client"]))
-                y -= 14
+                y -= 16
                 if variant == VARIANT_INTERNAL:
                     share = doc.get("designer_share_20pct")
                     if share is None:
@@ -441,12 +451,12 @@ def render_willard_estimate(
                     c.setFillColor(INK)
                     c.setFont(mono_b, 8.6)
                     c.drawRightString(layout.col_total, y, money(share))
-                    y -= 14
+                    y -= 16
                 c.setFillColor(INK)
                 c.setFont(mono, 7.2)
                 c.drawString(layout.col_desc, y, f"DEPOSIT ({t['deposit_percent']:.0f}%)")
                 c.drawRightString(layout.col_total, y, money(t["deposit"]))
-                y -= 12
+                y -= 14
                 c.setFont(mono_b, 7.2)
                 c.drawString(layout.col_desc, y, "BALANCE")
                 c.drawRightString(layout.col_total, y, money(t["balance"]))
@@ -478,12 +488,139 @@ def render_willard_estimate(
     return buf.getvalue()
 
 
+def render_willard_simple(doc: dict, *, layout: WillardLayout | None = None) -> bytes:
+    """Easy-read client sheet: one line per area, includes, COM, totals."""
+    layout = layout or DEFAULT_LAYOUT
+    bill = _bill_for(doc)
+    areas = _areas(doc)
+    totals = totals_from_areas(areas, doc)
+    number = doc.get("quote_number") or doc.get("id") or "EST-DRAFT"
+    rev = str(doc.get("rev") or (doc.get("metadata") or {}).get("revision") or "C")
+    date = str(doc.get("date") or str(doc.get("created_at") or "23 OCT 2026"))
+    if re_iso := __import__("re").match(r"(\d{4})-(\d{2})-(\d{2})", date):
+        months = "JAN FEB MAR APR MAY JUN JUL AUG SEP OCT NOV DEC".split()
+        date = f"{int(re_iso.group(3)):02d} {months[int(re_iso.group(2)) - 1]} {re_iso.group(1)}"
+    client = str(
+        (doc.get("prepared_for") or {}).get("company")
+        or doc.get("customer_name")
+        or "CLIENT"
+    )
+    project = str(
+        (doc.get("project") or {}).get("name")
+        or doc.get("project_name")
+        or "PROJECT"
+    )
+    heading = str(
+        (doc.get("project") or {}).get("phase")
+        or doc.get("project_name")
+        or "ESTIMATE"
+    )
+    scope = (doc.get("project") or {}).get("scope") or doc.get("project_description") or ""
+    buf = BytesIO()
+    c = canvas.Canvas(buf, pagesize=(PW, PH))
+    title_right = "ESTIMATE · REV C"
+    c.setTitle(f"{title_right} {number}")
+    c.setAuthor(bill.pdf_author if hasattr(bill, "pdf_author") else bill.name)
+    c.setCreator(bill.name)
+    c.setSubject(f"{title_right} — {FORMAT_ID} — client_simple")
+    serif, sans, sans_b, mono = body_fonts()
+    try:
+        from reportlab.pdfbase.pdfmetrics import getFont
+        getFont("DejaVuSansMono-Bold")
+        mono_b = "DejaVuSansMono-Bold"
+    except Exception:
+        mono_b = sans_b
+    status = (
+        "PRELIMINARY"
+        if (doc.get("status") or "draft").lower() in {"draft", "proposal", ""}
+        else "FOR DISCUSSION"
+    )
+    render_chrome_bands(
+        c,
+        sheet_no=1,
+        total=1,
+        right_title=title_right,
+        letterhead=bill.letterhead_upper,
+        powered_by=bill.chrome_subheader_upper,
+        client=client,
+        project=project,
+        rev=rev,
+        date=date,
+        status=status,
+        locale=bill.chrome_locale,
+    )
+    y = PH - 78
+    c.setFillColor(INK)
+    c.setFont(serif, 16)
+    c.drawString(layout.margin_l, y, heading.upper())
+    y -= 20
+    if scope:
+        c.setFillColor(MUTE)
+        c.setFont(sans, 9)
+        c.drawString(layout.margin_l, y, format_measurement_text(str(scope))[:140])
+        y -= 36
+    else:
+        y -= 28
+
+    for area in areas:
+        blurb = simple_area_blurb(area)
+        wrapped = _wrap(blurb, 118)
+        price = apply_client(float(area.get("subtotal") or 0), doc)
+        c.setFillColor(INK)
+        c.setFont(serif, 11)
+        for i, ln in enumerate(wrapped):
+            c.drawString(layout.margin_l, y - i * 16, ln)
+        c.setFont(mono_b, 12)
+        c.drawRightString(layout.content_right, y, money(price))
+        y -= 16 * len(wrapped) + 22
+
+    y -= 8
+    includes = simple_includes_line(areas)
+    com = simple_com_line(areas)
+    c.setFillColor(MUTE)
+    c.setFont(sans, 9.5)
+    if includes:
+        c.drawString(layout.margin_l, y, includes)
+        y -= 16
+    if com:
+        c.drawString(layout.margin_l, y, com)
+        y -= 28
+    else:
+        y -= 16
+
+    y -= 10
+    c.setStrokeColor(INK)
+    c.setLineWidth(0.9)
+    c.line(450, y, layout.content_right, y)
+    y -= 20
+    c.setFillColor(GOLD)
+    c.setFont(mono_b, 8.2)
+    c.drawString(layout.margin_l, y, "GRAND TOTAL")
+    c.setFillColor(INK)
+    c.setFont(mono_b, 14)
+    c.drawRightString(layout.content_right, y, money(totals["client"]))
+    y -= 24
+    c.setFillColor(INK)
+    c.setFont(sans, 10)
+    c.drawString(layout.margin_l, y, f"Deposit ({totals['deposit_percent']:.0f}%)")
+    c.setFont(mono_b, 11)
+    c.drawRightString(layout.content_right, y, money(totals["deposit"]))
+    y -= 20
+    c.setFont(sans_b, 10)
+    c.drawString(layout.margin_l, y, "Balance")
+    c.setFont(mono_b, 11)
+    c.drawRightString(layout.content_right, y, money(totals["balance"]))
+    c.showPage()
+    c.save()
+    return buf.getvalue()
+
+
 def render_willard_pair(doc: dict, *, layout: WillardLayout | None = None) -> tuple[bytes, bytes]:
     return (
-        render_willard_estimate(doc, variant=VARIANT_CLIENT, layout=layout),
+        render_willard_estimate(doc, variant=VARIANT_CLIENT_SIMPLE, layout=layout),
         render_willard_estimate(doc, variant=VARIANT_INTERNAL, layout=layout),
     )
 
 
-def render_max_estimate_pdf(doc: dict, *, variant: str = VARIANT_CLIENT) -> bytes:
+def render_max_estimate_pdf(doc: dict, *, variant: str = VARIANT_DEFAULT) -> bytes:
     return render_willard_estimate(doc, variant=variant)

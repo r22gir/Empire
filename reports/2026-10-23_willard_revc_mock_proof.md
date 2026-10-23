@@ -20,9 +20,11 @@ Designer name and markup come from job/quote metadata only (no hardcoded names).
 `draft_estimate_and_presentation` → `draft_packet`:
 
 - Re-line → Header-B portrait estimate
-- New-fab → `render_willard_pair` (client + internal)
+- New-fab → `client_simple` (default client) + detailed `client` + `internal`
 
-`generate_quote_pdf` uses the Willard renderer only when the quote is tagged Willard.
+`generate_quote_pdf` defaults to `client_simple` when the quote is tagged Willard.
+
+The simple client sheet is one short line per area plus its client price, an Includes line, “Fabric provided by client”, then grand total / deposit / balance. No qty, rates, widths, yardage, or group subtotals.
 
 Mock opening (invented names, same dimensions as the format fixture):
 
@@ -66,14 +68,16 @@ Half-up cents: `21 × $40.625 = $853.125 → $853.13`, `21 × $30.625 = $643.125
 
 ## Artifacts
 
-- `reports/proof/willard-revc-mock/EST-MOCK-WILLARD-client.pdf`
-- `reports/proof/willard-revc-mock/EST-MOCK-WILLARD-internal.pdf`
+- `reports/proof/willard-revc-mock/EST-MOCK-WILLARD-client-simple.pdf` (default client)
+- `reports/proof/willard-revc-mock/client-simple-1.png`
+- `reports/proof/willard-revc-mock/EST-MOCK-WILLARD-client.pdf` (detailed)
 - `reports/proof/willard-revc-mock/client-1.png`
+- `reports/proof/willard-revc-mock/EST-MOCK-WILLARD-internal.pdf`
 - `reports/proof/willard-revc-mock/internal-1.png`
 
 ## Tests
 
 ```
 PYTHONPATH=backend python3 -m pytest backend/tests/test_rafael_estimate_format.py backend/tests/test_workroom_packet.py -q
-# 22 passed
+# 23 passed
 ```

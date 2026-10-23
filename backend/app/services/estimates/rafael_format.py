@@ -33,8 +33,10 @@ GROUP_INSTALLATION = "Installation"
 GROUP_ORDER = (GROUP_LABOR, GROUP_MATERIALS, GROUP_INSTALLATION)
 
 VARIANT_CLIENT = "client"
+VARIANT_CLIENT_SIMPLE = "client_simple"
 VARIANT_INTERNAL = "internal"
-EstimateVariant = Literal["client", "internal"]
+VARIANT_DEFAULT = VARIANT_CLIENT_SIMPLE
+EstimateVariant = Literal["client", "client_simple", "internal"]
 
 _BRAND_RE = re.compile(
     r"\b("
@@ -95,12 +97,15 @@ MAX_ESTIMATE_RULES = f"""
 == Estimate / invoice format (Rafael {FORMAT_DATE}; Willard area layout) ==
 New fabrication uses the Willard area layout. Re-line keeps Header-B
 and the old $145/window install unless the founder opts that job in.
-- New fabrication: landscape Empire chrome. Group by AREA (e.g. A. MAIN
-  DRAPERY, B. SHEERS). Inside each area: LABOR / MATERIALS /
-  INSTALLATION. Client: ITEM, DESCRIPTION, QTY, TOTAL. Internal adds
-  RATE, AMOUNT (base), MARKUP 20%, TOTAL (client). Then group subtotal,
-  area total, grand total, deposit, balance. Designer name and markup
-  come from job/quote metadata only.
+- New fabrication: landscape Empire chrome. The default client PDF is
+  client_simple: one short line per area plus its client price, an
+  Includes line, COM as "Fabric provided by client", then grand total,
+  deposit, and balance. No qty/rate/widths/yardage, no Labor/Materials/
+  Installation subtotals, no markup. The detailed client variant
+  (variant=client) still groups by AREA → LABOR / MATERIALS /
+  INSTALLATION with ITEM / DESCRIPTION / QTY / TOTAL. Internal adds
+  RATE, AMOUNT (base), MARKUP 20%, TOTAL (client). Designer name and
+  markup come from job/quote metadata only.
 - COM lines print COM, never $0.00. New-fab track prints as $325/8 ft;
   new-fab install as $245/8 ft.
 - New fabrication (lined main drapery + sheers): per-width labor at the
@@ -122,6 +127,104 @@ and the old $145/window install unless the founder opts that job in.
   internal fabric codes (V###-Color).
 - Email / item lists: one item per line (never a comma-joined paragraph).
 """
+
+
+def normalize_variant(variant: str | None = None) -> str:
+    """Map a caller variant to client_simple (default), client, or internal."""
+    raw = str(variant or VARIANT_DEFAULT).strip().lower().replace("-", "_")
+    if raw in {VARIANT_INTERNAL, "office", "shop", "workroom"}:
+        return VARIANT_INTERNAL
+    if raw in {VARIANT_CLIENT, "client_detailed", "detailed", "full"}:
+        return VARIANT_CLIENT
+    return VARIANT_CLIENT_SIMPLE
+
+
+def _join_and(parts: Sequence[str]) -> str:
+    items = [p for p in parts if p]
+    if not items:
+        return ""
+    if len(items) == 1:
+        return items[0]
+    if len(items) == 2:
+        return f"{items[0]} and {items[1]}"
+    return f"{', '.join(items[:-1])} and {items[-1]}"
+
+
+def _area_lines(area: dict) -> list[dict]:
+    rows: list[dict] = []
+    for group in area.get("groups") or []:
+        rows.extend(group.get("lines") or [])
+    return rows
+
+
+def simple_area_blurb(area: dict) -> str:
+    """One short client line: 'A. Main Drapery: lined ripplefold, … — fabrication, track and installation'."""
+    name = format_measurement_text(scrub_brands(str(area.get("name") or "Area").strip()))
+    match = re.match(r"^([A-Za-z])\.\s*(.+?)(?:\s*\(([^)]+)\))?\s*$", name)
+    if match:
+        letter = match.group(1).upper()
+        kind = re.sub(r"\s+", " ", match.group(2)).strip().title()
+        detail = format_measurement_text((match.group(3) or "").strip())
+    else:
+        letter = ""
+        kind = name.title()
+        detail = ""
+    lines = _area_lines(area)
+    blob = " ".join(
+        f"{ln.get('item') or ''} {ln.get('description') or ''} {ln.get('group') or ''}"
+        for ln in lines
+    ).lower()
+    if "sheer" in kind.lower():
+        work = "ripplefold"
+    elif "lined" in blob or "lining" in blob:
+        work = "lined ripplefold"
+    else:
+        work = "ripplefold"
+    scope: list[str] = []
+    if any(
+        str(ln.get("group") or "") == GROUP_LABOR
+        or str(ln.get("item") or "") in {"Drapes", "Sheers"}
+        for ln in lines
+    ):
+        scope.append("fabrication")
+    if any(
+        str(ln.get("item") or "").lower() == "track" or "track" in str(ln.get("description") or "").lower()
+        for ln in lines
+    ):
+        scope.append("track")
+    if any(
+        str(ln.get("item") or "").lower() == "install"
+        or str(ln.get("group") or "") == GROUP_INSTALLATION
+        for ln in lines
+    ):
+        scope.append("installation")
+    head = f"{letter}. {kind}".strip() if letter else kind
+    mid = f"{work}, {detail}" if detail else work
+    joined = _join_and(scope)
+    text = f"{head}: {mid} — {joined}" if joined else f"{head}: {mid}"
+    return format_measurement_text(scrub_brands(text))
+
+
+def simple_includes_line(areas: Sequence[dict]) -> str:
+    lines = [ln for area in areas for ln in _area_lines(area)]
+    blob = " ".join(str(ln.get("description") or "") + " " + str(ln.get("item") or "") for ln in lines).lower()
+    bits: list[str] = []
+    if "track" in blob:
+        bits.append("track")
+    if "install" in blob:
+        bits.append("installation")
+    if "removal" in blob or "remove" in blob:
+        bits.append("removal")
+    if not bits:
+        return ""
+    return f"Includes {_join_and(bits)}."
+
+
+def simple_com_line(areas: Sequence[dict]) -> str:
+    lines = [ln for area in areas for ln in _area_lines(area)]
+    if any(is_com_line(ln) for ln in lines):
+        return "Fabric provided by client"
+    return ""
 
 
 def client_factor(quote: dict | None = None) -> float:

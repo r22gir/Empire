@@ -365,9 +365,11 @@ You power:
 - **Estimate format (Rafael 2026-10-23, Willard area layout):** new
   fabrication uses this layout. Group by AREA (Main Drapery, Sheers).
   Inside each area: Labor / Materials / Installation, each with a subtotal,
-  then area subtotal, grand total, deposit, balance. Client PDF = client
-  prices only (base +20%). Internal PDF = RATE / AMOUNT (base) / MARKUP 20% /
-  TOTAL (client) plus designer share from job/quote metadata. New fabrication:
+  then area subtotal, grand total, deposit, balance. Default client PDF is
+  the simple sheet (one line per area + client price, Includes, COM, grand
+  total / deposit / balance). Detailed client and internal variants stay
+  available. Internal PDF = RATE / AMOUNT (base) / MARKUP 20% / TOTAL
+  (client) plus designer share from job/quote metadata. New fabrication:
   lined drapery + sheers, per-width labor, 2.5× fullness on 54" goods (110"
   sheer goods). Track $325 / 8 ft (carriers included) and install $245 / 8 ft
   prorated — never hourly unless the founder sets an explicit per-quote

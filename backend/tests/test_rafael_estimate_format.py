@@ -21,7 +21,11 @@ from app.services.estimates.rafael_format import (
     is_com_line,
     mock_drapery_spec,
     money_round,
+    normalize_variant,
     scrub_brands,
+    simple_area_blurb,
+    simple_com_line,
+    simple_includes_line,
     totals_from_areas,
     uses_willard_layout,
 )
@@ -97,25 +101,51 @@ def test_new_fab_opening_reproduces_fixture_totals():
 
 def test_willard_client_and_internal_pdf_columns():
     reset_rules()
-    from app.services.estimates.willard_estimate import render_willard_pair
+    from app.services.estimates.willard_estimate import (
+        render_willard_estimate,
+        render_willard_pair,
+    )
+    from pypdf import PdfReader
+
     packet = build_packet(mock_drapery_spec())
-    client_pdf, internal_pdf = render_willard_pair(packet)
-    client = _pdf_text(client_pdf)
+    simple_pdf, internal_pdf = render_willard_pair(packet)
+    detailed_pdf = render_willard_estimate(packet, variant="client")
+    simple = _pdf_text(simple_pdf)
+    detailed = _pdf_text(detailed_pdf)
     internal = _pdf_text(internal_pdf)
-    assert "ITEM" in client and "DESCRIPTION" in client and "QTY" in client
-    assert "TOTAL" in client
-    assert "MARKUP 20%" not in client
-    assert "MARKUP20%(DESIGNER)" not in client.replace(" ", "")
+    assert "ITEM" in detailed and "DESCRIPTION" in detailed and "QTY" in detailed
+    assert "TOTAL" in detailed
+    assert "MARKUP 20%" not in detailed
+    assert "MARKUP20%(DESIGNER)" not in detailed.replace(" ", "")
     assert "MARKUP" in internal and "AMOUNT" in internal and "RATE" in internal
     assert "$245/8 ft" in internal and "$325/8 ft" in internal
-    assert "COM" in client and "COM" in internal
+    assert "COM" in detailed and "COM" in internal
     assert "MARKUP 20% (DESIGNER)" in internal
-    assert f"${MOCK_CLIENT_TOTAL:,.2f}" in client
+    assert f"${MOCK_CLIENT_TOTAL:,.2f}" in detailed
+    assert f"${MOCK_CLIENT_TOTAL:,.2f}" in simple
     assert f"${MOCK_BASE_TOTAL:,.2f}" in internal
     assert f"${MOCK_CLIENT_TOTAL:,.2f}" in internal
-    assert "track re-center" not in client.lower()
-    assert "Rafael" not in client and "Rafael" not in internal
-    assert "Maggie O" not in client and "Le Midi" not in client
+    assert "track re-center" not in detailed.lower()
+    assert "Rafael" not in detailed and "Rafael" not in internal
+    assert "Maggie O" not in detailed and "Le Midi" not in detailed
+    assert len(PdfReader(io.BytesIO(simple_pdf)).pages) == 1
+    assert "A. Main Drapery" in simple
+    assert "lined ripplefold" in simple
+    assert "249 5/16" in simple
+    assert "fabrication, track and installation" in simple
+    assert "Includes" in simple
+    assert "Fabric provided by client" in simple
+    assert "GRAND TOTAL" in simple
+    assert "Deposit (50%)" in simple or "DEPOSIT" in simple.upper()
+    assert "BALANCE" in simple.upper()
+    assert "QTY" not in simple
+    assert "RATE" not in simple
+    assert "MARKUP" not in simple
+    assert "LABOR" not in simple
+    assert "widths" not in simple.lower()
+    assert " yd" not in simple.lower()
+    assert normalize_variant(None) == "client_simple"
+    assert normalize_variant("client") == "client"
 
 
 def test_draft_estimate_tool_is_the_max_path(isolated_empire_db):
@@ -147,14 +177,19 @@ def test_draft_estimate_tool_is_the_max_path(isolated_empire_db):
     quote = get_quote(result.result["quote_id"])
     assert uses_willard_layout(quote)
     assert (quote.get("metadata") or {}).get("estimate_format") == FORMAT_ID
+    default = _pdf_text(generate_quote_pdf(quote["id"]))
     client = _pdf_text(generate_quote_pdf(quote["id"], variant="client"))
     internal = _pdf_text(generate_quote_pdf(quote["id"], variant="internal"))
+    assert "Fabric provided by client" in default
+    assert "QTY" not in default
     assert "LABOR" in client and "MATERIALS" in client and "INSTALLATION" in client
     assert "COM" in client
     assert f"${MOCK_CLIENT_TOTAL:,.2f}" in client
+    assert f"${MOCK_CLIENT_TOTAL:,.2f}" in default
     assert "MARKUP 20% (DESIGNER)" in internal
     assert "$245/8 ft" in internal
     assert "Rafael" not in client
+    assert "Rafael" not in default
 
 
 def test_upholstery_stays_mclean():
@@ -279,3 +314,30 @@ def test_default_tool_output_has_no_hourly_line(isolated_empire_db):
     lines = _all_lines(packet)
     assert not any((ln.get("unit") or "") in {"hr", "hour", "hours"} for ln in lines)
     assert not any("hr @" in str(ln.get("description") or "").lower() for ln in lines)
+
+
+def test_client_simple_blurbs_and_default_variant():
+    reset_rules()
+    from app.services.estimates.willard_estimate import render_willard_estimate
+    from pypdf import PdfReader
+
+    packet = build_packet(mock_drapery_spec())
+    areas = packet["areas"]
+    main = simple_area_blurb(areas[0])
+    sheers = simple_area_blurb(areas[1])
+    assert main.startswith("A. Main Drapery: lined ripplefold")
+    assert '249 5/16"' in main
+    assert main.endswith("fabrication, track and installation")
+    assert sheers.startswith("B. Sheers: ripplefold")
+    assert '189 3/8"' in sheers
+    assert "Includes track, installation and removal." == simple_includes_line(areas)
+    assert simple_com_line(areas) == "Fabric provided by client"
+    default_pdf = render_willard_estimate(packet)
+    named = render_willard_estimate(packet, variant="client_simple")
+    assert _pdf_text(default_pdf) == _pdf_text(named)
+    assert len(PdfReader(io.BytesIO(default_pdf)).pages) == 1
+    text = _pdf_text(default_pdf)
+    assert "Labor" not in text
+    assert "Materials" not in text
+    assert "Installation subtotal" not in text
+    assert "MARKUP" not in text

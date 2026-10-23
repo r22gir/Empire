@@ -3370,7 +3370,7 @@ async def _generate_pdf_for_quote(quote_id: str) -> str:
 
     from app.services.quote_service import resolve_quote
     from app.services.estimates.mclean_estimate_pdf import render_and_save_mclean_pdf
-    from app.services.estimates.rafael_format import VARIANT_CLIENT, uses_willard_layout
+    from app.services.estimates.rafael_format import VARIANT_DEFAULT, uses_willard_layout
     from app.services.quote_pdf_service import generate_quote_pdf as _unity_quote_pdf
 
     quote = resolve_quote(quote_id)
@@ -3383,7 +3383,7 @@ async def _generate_pdf_for_quote(quote_id: str) -> str:
 
     if items:
         if uses_willard_layout(quote):
-            pdf_bytes = _unity_quote_pdf(quote_id, variant=VARIANT_CLIENT)
+            pdf_bytes = _unity_quote_pdf(quote_id, variant=VARIANT_DEFAULT)
             qn = quote.get("quote_number") or quote_id
             pdf_path = os.path.join(pdf_dir, f"{qn}.pdf")
             with open(pdf_path, "wb") as fh:
@@ -6619,7 +6619,7 @@ If a tool call fails with "Unknown tool", check the name against this list.
 - **deposit_pay_link** — Workroom or WoodCraft quote only. Creates (or reuses) a deposit invoice on the finance router and a Stripe Checkout link on the payments router. Client name/email/phone/address are copied from the quote. A second call returns the same invoice and the same open link. payment_status stays `link_ready` until Stripe reports paid — do not tell the founder the deposit is collected when status is not `paid`.
   `{"tool": "deposit_pay_link", "quote_id": "abc123"}`
 - **create_quick_quote** — DEPRECATED. Legacy JSON store (`/home/rg/empire-data/quotes/*.json`). Does NOT use the pricing engine. Returns `store: "json_legacy"`, `engine: "qis"`, `deprecation_notice`. Will be retired in sprint 1d. **Do NOT pick this tool for new quotes — use `create_engine_quote` instead.**
-- **draft_estimate_and_presentation** — Draft only. Two job types: (1) **new fabrication** — `"fabrication": "new"` or `"reline": false`. Willard area layout (Labor / Materials / Installation), per-width labor, 2.5× fullness on 54" goods (110" sheers), complete track $325/8 ft and install $245/8 ft prorated. Never pass hourly install/track. (2) **re-line** — default. Header-B groups, $145/window install through 8 ft then $20/ft over; `track_hours` only when the founder sets that per-quote override. Designer name and markup come from job/quote metadata. COM prints as COM. Client +20% on new-fab Willard PDFs. Saves a draft quote. Never emails, never creates a Square link.
+- **draft_estimate_and_presentation** — Draft only. Two job types: (1) **new fabrication** — `"fabrication": "new"` or `"reline": false`. Willard area layout (Labor / Materials / Installation), per-width labor, 2.5× fullness on 54" goods (110" sheers), complete track $325/8 ft and install $245/8 ft prorated. Never pass hourly install/track. Default client PDF is client_simple (one line per area + price). Detailed client (`variant=client`) and internal stay available. (2) **re-line** — default. Header-B groups, $145/window install through 8 ft then $20/ft over; `track_hours` only when the founder sets that per-quote override. Designer name and markup come from job/quote metadata. COM prints as COM. Client +20% on new-fab Willard PDFs. Saves a draft quote. Never emails, never creates a Square link.
   `{"tool": "draft_estimate_and_presentation", "billed_by": "empire_workroom", "openings": [{"room": "Office", "fabrication": "new", "width": 249.3125, "finished_length": 93.3125, "panels": 2, "sheers": {"coverage": 189.375}}]}`
 - **create_engine_quote** — CANONICAL. Creates a quote in `quotes_v2` (SQL) via `quote_service.create_quote`. Catalog categories route through the pricing engine (proposed_price + computed_json returned). Multi-line: pass `line_items[]`. Accepts `business_unit` (default "workroom"). Returns `store: "quotes_v2"`, `engine: "pricing_engine_v1"`, per-line `proposed_price` + `final_price`, plus `quote_number`. **Use this for all new quotes.** For drawn pieces (bench, banquette, cushion, back, headboard, panel, pillow) put the real inch dimensions on each line (`width`, `height`, `depth`, or `inputs`) so its idea diagram renders; a line without dimensions simply gets no diagram.
   Upholstery estimates (Rafael 10/8): group lines by area with `room` ("U banquette", "L banquette", "Material"); for pieces priced by area pass `sq_ft` (per item) and `price_per_sqft` (category "manual_line"; the total is computed); description = piece name, then a second line with the measurements in fractions (e.g. "Seat back — main\n249 3/4\" run · back 26 3/4\" · 12\" channels"). The PDF shows Description | Qty | Unit | Sq ft | Price/sq ft | Total, a subtotal per area, then grand total, deposit and balance.
