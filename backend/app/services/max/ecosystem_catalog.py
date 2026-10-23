@@ -449,6 +449,7 @@ EMPIRE_CATALOG = {
         "open_record": {"description": "Open a quote or invoice in the document workspace (WYSIWYG page that matches the client PDF; Document / Actual PDF / Docs tabs)", "access_level": 1, "category": "data"},
         "edit_quote_lines": {"description": "Edit a draft quote's line items by room (move / update / add / remove; remove needs confirm). Locked after send.", "access_level": 1, "category": "action"},
         "convert_quote_to_invoice": {"description": "Preview, then (confirm=true) create a DRAFT invoice from a sent/accepted quote via /quotes-v2/{id}/to-invoice. Carries lines with rooms, client, deposit. Never sends.", "access_level": 1, "category": "action"},
+        "produce_client_invoice": {"description": "Square Share-link invoice (never email/SMS) + existing client PDF with gold PAY HERE + QR + Outlook DRAFT reply in the client thread. Business-config branded. Never sends.", "access_level": 1, "category": "action"},
         "open_final_doc": {"description": "Find a saved job document (final estimate, presentation, invoice, drawing, photos) and return an in-app viewer link", "access_level": 1, "category": "data"},
         "prospect_search": {"description": "Run a LeadForge prospect search (Brave/Google Places/Yelp) and return the top new prospects", "access_level": 1, "category": "action"},
         "prospect_enrich": {"description": "Free contact lookup on prospect websites (owner/principal, email, phone, Instagram); robots.txt respected, rate limited", "access_level": 1, "category": "action"},

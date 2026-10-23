@@ -154,7 +154,7 @@ def test_final_invoice_pdf_has_payments_section_and_balance_link(monkeypatch, tm
     assert "Payments &amp; credits applied" in html
     assert "Deposit received" in html and "INV-2026-123" in html and "-$4,576.31" in html
     assert "$6,752.34" in html
-    assert "Pay balance online: $6,752.34" in html
+    assert "PAY HERE · $6,752.34" in html
     assert "Empire Workroom" in html
     assert invoice_pay_link(inv)["amount"] == 6752.34
 

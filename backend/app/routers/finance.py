@@ -546,6 +546,9 @@ def _ensure_finance_extensions(conn):
         "stripe_checkout_session_id": "TEXT",
         "stripe_checkout_url": "TEXT",
         "stripe_checkout_attempt": "INTEGER DEFAULT 0",
+        "square_invoice_id": "TEXT",
+        "square_pay_url": "TEXT",
+        "square_delivery_method": "TEXT",
         "client_job_deposit_schedule": "INTEGER DEFAULT 0",
     }
     for col, ctype in inv_cols.items():

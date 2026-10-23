@@ -661,6 +661,10 @@ def execute_tool(tool_call: dict, desk: Optional[str] = None, access_context: Op
             "edit_quote_line": "edit_quote_lines",
             "move_quote_line": "edit_quote_lines",
             "quote_to_invoice": "convert_quote_to_invoice",
+            "produce_client_invoice": "produce_client_invoice",
+            "issue_client_invoice": "produce_client_invoice",
+            "square_invoice": "produce_client_invoice",
+            "client_invoice": "produce_client_invoice",
             "find_quotes": "search_quotes",
             "list_quotes": "search_quotes",
             "search_quote": "search_quotes",
@@ -6610,6 +6614,8 @@ State machine: `draft → founder_review → sent → accepted → in_production
   `{"tool": "open_record", "type": "quote", "quote_number": "EST-2026-297"}` or `{"tool": "open_record", "type": "invoice", "invoice_number": "INV-2026-123"}` or `{"tool": "open_record", "type": "quote", "query": "Dahlia Nehal"}`
 - **edit_quote_lines** — Edit a DRAFT quote's lines by room (move / update / add / remove). Sent or accepted quotes are locked. remove needs confirm=true after the founder agrees. Returns new total and room subtotals.
   `{"tool": "edit_quote_lines", "quote_number": "EST-2026-297", "operations": [{"op": "move", "line": 15, "room": "living room"}, {"op": "update", "line": 3, "quantity": 2}, {"op": "add", "room": "OFFICE", "description": "Install", "quantity": 1, "unit_price": 150}]}`
+- **produce_client_invoice** — When Rafael asks to invoice a client: Square invoice with Share link ONLY (never email/SMS), existing invoice PDF with a gold PAY HERE button + QR, Outlook DRAFT reply in the client's thread with the PDF attached. Preview first; confirm=true to run. Never sends.
+  `{"tool": "produce_client_invoice", "invoice_number": "INV-2026-100"}`
 - **convert_quote_to_invoice** — Make a DRAFT invoice from a sent/accepted quote (lines with rooms, client, deposit carried over). First call WITHOUT confirm to get the preview, tell the founder, and only call with confirm=true after they say yes. Never sends anything.
   `{"tool": "convert_quote_to_invoice", "quote_number": "EST-2026-297"}` then `{"tool": "convert_quote_to_invoice", "quote_number": "EST-2026-297", "confirm": true}`
 - **open_quote_builder** — Open the QuoteBuilder right here in the dashboard (ALWAYS use this instead of linking to WorkroomForge). Pre-fills customer info AND rooms/windows from the conversation.
@@ -8887,6 +8893,15 @@ try:
     _can_do.register_tools(tool, ToolResult)
 except Exception as _can_do_err:
     logger.error(f"voice_can_do not loaded: {_can_do_err}")
+
+# Client invoice: Square Share-link + existing PDF + Outlook DRAFT. Never sends.
+try:
+    _cinv_name = "app.services.max.tools_client_invoice"
+    _tools_cinv = (_importlib.reload(_sys.modules[_cinv_name]) if _cinv_name in _sys.modules
+                   else _importlib.import_module(_cinv_name))
+    TOOLS_DOC = TOOLS_DOC + _tools_cinv.CLIENT_INVOICE_TOOLS_DOC
+except Exception as _cinv_err:
+    logger.error(f"tools_client_invoice not loaded: {_cinv_err}")
 
 # QuoteIQ job-request chain (intake → CRM → dims → Pricing Studio → DRAFT).
 try:

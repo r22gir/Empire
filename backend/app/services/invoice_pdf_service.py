@@ -252,10 +252,29 @@ def _settlement_rows(invoice: dict, accent: str) -> str:
 
 
 _OPEN_LINK_STATUSES = {"link_ready", "awaiting_confirmation", "unpaid", ""}
+_SQUARE_HOSTS = ("squareup.com", "square.link")
+
+
+def _is_stripe_pay_url(url: str) -> bool:
+    return url.startswith("https://buy.stripe.com/")
+
+
+def _is_square_pay_url(url: str) -> bool:
+    if not url.startswith("https://"):
+        return False
+    return any(host in url.lower() for host in _SQUARE_HOSTS)
+
+
+def _pick_pay_url(invoice: dict) -> str:
+    for key in ("square_pay_url", "pay_url", "square_public_url", "stripe_checkout_url"):
+        url = str(invoice.get(key) or "").strip()
+        if _is_square_pay_url(url) or _is_stripe_pay_url(url):
+            return url
+    return ""
 
 
 def deposit_pay_link(invoice: dict) -> Optional[dict]:
-    """Deposit-stage invoice with an open Stripe Checkout URL -> {url, amount}; else None."""
+    """Deposit-stage invoice with an open pay URL -> {url, amount}; else None."""
     if str(invoice.get("invoice_stage") or "").strip().lower() != "deposit":
         return None
     link = invoice_pay_link(invoice)
@@ -263,14 +282,17 @@ def deposit_pay_link(invoice: dict) -> Optional[dict]:
 
 
 def invoice_pay_link(invoice: dict) -> Optional[dict]:
-    """Deposit or final invoice with an open Stripe Checkout URL -> {url, amount, label}.
+    """Open pay URL (Square share-link or Stripe Payment Link) -> {url, amount, label}.
     The amount is always the balance due now (never the gross total)."""
-    url = str(invoice.get("stripe_checkout_url") or "").strip()
-    if not url.startswith("https://buy.stripe.com/"):
-        return None  # only non-expiring Payment Links; 24-hour Checkout Session URLs never go on a PDF
-    stage = str(invoice.get("invoice_stage") or "").strip().lower()
-    if stage not in ("deposit", "final", "progress"):
+    url = _pick_pay_url(invoice)
+    if not url:
         return None
+    square = _is_square_pay_url(url)
+    if not square and not _is_stripe_pay_url(url):
+        return None
+    stage = str(invoice.get("invoice_stage") or "").strip().lower()
+    if not square and stage not in ("deposit", "final", "progress"):
+        return None  # Stripe-only: keep the existing stage gate
     if str(invoice.get("status") or "").lower() in ("paid", "cancelled"):
         return None
     if str(invoice.get("payment_status") or "").strip().lower() not in _OPEN_LINK_STATUSES:
@@ -282,7 +304,7 @@ def invoice_pay_link(invoice: dict) -> Optional[dict]:
     if amount <= 0:
         return None
     label = "Pay deposit online" if stage == "deposit" else "Pay balance online"
-    return {"url": url, "amount": round(amount, 2), "label": label}
+    return {"url": url, "amount": round(amount, 2), "label": label, "provider": "square" if square else "stripe"}
 
 
 def _qr_data_uri(url: str) -> str:
@@ -308,14 +330,17 @@ def _pay_link_html(invoice: dict, accent: str) -> str:
         return ""
     url = escape(link["url"], quote=True)
     qr = _qr_data_uri(link["url"])
-    qr_html = (f'<img src="{qr}" alt="Pay online QR code" style="width:140px;height:140px;display:block">'
+    qr_html = (f'<img src="{qr}" alt="Pay online QR code" style="width:72px;height:72px;display:block">'
                if qr else "")
-    return f"""<div style="margin:14px 0;padding:10px 14px;border:2px solid {accent};page-break-inside:avoid;border-radius:8px;display:flex;align-items:center;gap:16px">
-  {qr_html}
+    amount = f"${link['amount']:,.2f}"
+    gold = "#C9A227"
+    return f"""<div style="margin:14px 0;padding:12px 16px;border:1.5px solid {gold};background:#FBF6E6;page-break-inside:avoid;border-radius:8px;display:flex;align-items:center;justify-content:space-between;gap:16px">
   <div style="font-size:10.5pt">
-    <a href="{url}" style="color:{accent};font-weight:700;font-size:13pt;text-decoration:underline">{link['label']}: ${link['amount']:,.2f}</a><br>
-    <span style="font-size:8.5pt;color:#666">Click the link or scan the code to pay securely by card (Stripe).</span>
+    <div style="font-weight:700;font-size:11pt;color:#1a1a2e">Pay online by card — secure checkout</div>
+    <div style="font-size:8.5pt;color:#666;margin:4px 0 10px">Click the button or scan the QR code.</div>
+    <a href="{url}" style="display:inline-block;background:{gold};color:#fff;font-weight:700;font-size:12pt;text-decoration:none;padding:8px 22px;border-radius:6px">PAY HERE · {amount}</a>
   </div>
+  {qr_html}
 </div>"""
 
 
@@ -508,7 +533,7 @@ def render_client_invoice_html(
     if co.get("number"):
         co_title = f'<div class="invoice-number" style="font-weight:700">Change Order {escape(str(co.get("number")), quote=False)}</div>'
 
-    pay_html = _pay_link_html(invoice, accent) if not is_woodcraft else ""
+    pay_html = _pay_link_html(invoice, accent)
     page_margin = "0.55in" if sqft_mode else "0.75in"
 
     contact_bits = [b for b in (brand["phone"], brand["email"], brand["address"]) if b]

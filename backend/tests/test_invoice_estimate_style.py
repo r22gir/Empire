@@ -49,7 +49,7 @@ def test_invoice_uses_estimate_design_and_balance_only_link(tmp_path):
     assert "SUBTOTAL — U banquette" in t and "SUBTOTAL — Material" in t
     assert "PAYMENTS & CREDITS APPLIED" in t and "-$100.00" in t
     assert "Balance due" in t and "$200.00" in t
-    assert "Pay balance online: $200.00" in t
+    assert "PAY HERE · $200.00" in t
     assert b"/URI" in pdf and b"buy.stripe.com/test_x" in pdf
     assert "DRY RUN" not in t and "Nelma" not in t and "Bladensburg" not in t
 

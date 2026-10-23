@@ -49,7 +49,7 @@ def test_deposit_pay_link_and_qr():
                 "balance_due": 200.0, "stripe_checkout_url": "https://buy.stripe.com/test_x"})
     assert deposit_pay_link(inv) == {"url": "https://buy.stripe.com/test_x", "amount": 200.0}
     html = render_client_invoice_html(inv)
-    assert "Pay deposit online: $200.00" in html and 'href="https://buy.stripe.com/test_x"' in html
+    assert "PAY HERE · $200.00" in html and 'href="https://buy.stripe.com/test_x"' in html
     assert "data:image/png;base64," in html
 
 
@@ -62,4 +62,4 @@ def test_no_pay_link_when_paid_expired_or_not_deposit():
     assert deposit_pay_link(dict(base, invoice_stage="final")) is None
     assert deposit_pay_link(dict(base, stripe_checkout_url="")) is None
     assert deposit_pay_link(dict(base, balance_due=0)) is None
-    assert "Pay deposit online" not in render_client_invoice_html(_inv())
+    assert "PAY HERE" not in render_client_invoice_html(_inv())
