@@ -2733,6 +2733,7 @@ async def _maybe_job_drawing_desk_response(request: ChatRequest) -> ChatResponse
             request.message or "",
             history=request.history,
             job_hint=request.job_id,
+            job_id=request.job_id,
         )
     except Exception as exc:
         return ChatResponse(

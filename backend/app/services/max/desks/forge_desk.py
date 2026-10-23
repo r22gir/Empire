@@ -128,7 +128,7 @@ class ForgeDesk(BaseDesk):
         except Exception as exc:
             logger.error("ForgeDesk drawing failed: %s", exc)
             return await self.fail_task(task, f"Drawing Studio failed: {exc}")
-        if not result.get("success"):
+        if not result.get("success") or result.get("specs_honored") is False:
             return await self.fail_task(task, founder_drawing_reply(result))
         task.actions.append(DeskAction(
             action="drawing_pdf",

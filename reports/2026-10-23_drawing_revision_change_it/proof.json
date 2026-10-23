@@ -1,0 +1,48 @@
+{
+  "before": {
+    "revision": "A",
+    "channel": "10\"",
+    "seat": {
+      "code": "V008-Bittersweet",
+      "color": "Bittersweet",
+      "label": "V008-Bittersweet Bittersweet"
+    },
+    "back": {
+      "code": "V003-Cognac",
+      "color": "Cognac",
+      "label": "V003-Cognac Cognac"
+    },
+    "pdf": "job_set_Marley_s_REVA_20261022_c650a696c6.pdf",
+    "specs_honored": true,
+    "response": "New drawing for Marley's (REV A, 2026-10-22): [job_set_Marley_s_REVA_20261022_c650a696c6.pdf](https://studio.empirebox.store/api/v1/files/found?t=MTc5MjgwNTM4NzovdG1wL2RyYXdpbmctcmV2LXByb29mL2pvYl9zZXRfTWFybGV5X3NfUkVWQV8yMDI2MTAyMl9jNjUwYTY5NmM2LnBkZg.60151eb41de210c2c00c71685a0157b1). channels 10\"; seat V008-Bittersweet Bittersweet; back V003-Cognac Cognac; foam 2\"; allowance 5\" each side (fabric = wood + 2 \u00d7 5\"). INTERNAL ONLY \u2014 never send to clients"
+  },
+  "after": {
+    "revision": "B",
+    "channel": "12\"",
+    "seat": {
+      "code": "V001-Raven",
+      "color": "Black",
+      "label": "V001-Raven Black"
+    },
+    "back": {
+      "code": "V003-Cognac",
+      "color": "Cognac",
+      "label": "V003-Cognac Cognac"
+    },
+    "pdf": "job_set_Marley_s_REVB_20261022_065520c0aa.pdf",
+    "specs_honored": true,
+    "response": "New drawing for Marley's (REV B, 2026-10-22): [job_set_Marley_s_REVB_20261022_065520c0aa.pdf](https://studio.empirebox.store/api/v1/files/found?t=MTc5MjgwNTM4ODovdG1wL2RyYXdpbmctcmV2LXByb29mL2pvYl9zZXRfTWFybGV5X3NfUkVWQl8yMDI2MTAyMl8wNjU1MjBjMGFhLnBkZg.945d5d5134076cc3754eb7d4d1dc5969). channels 12\"; seat V001-Raven Black; back V003-Cognac Cognac; foam 2\"; allowance 5\" each side (fabric = wood + 2 \u00d7 5\"). INTERNAL ONLY \u2014 never send to clients"
+  },
+  "before_text_has_v008": true,
+  "after_text_has_v001": true,
+  "after_text_has_v003": true,
+  "after_text_has_v008": false,
+  "pngs": [
+    "before-1.png",
+    "before-2.png",
+    "before-3.png",
+    "after-1.png",
+    "after-2.png",
+    "after-3.png"
+  ]
+}

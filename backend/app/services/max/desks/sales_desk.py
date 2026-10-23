@@ -67,7 +67,7 @@ class SalesDesk(BaseDesk):
                         message=task.description or task.title,
                         job_hint=task.customer_name,
                     )
-                    if drawn.get("success"):
+                    if drawn.get("success") and drawn.get("specs_honored") is not False:
                         return await self.complete_task(task, founder_drawing_reply(drawn))
                     return await self.fail_task(task, founder_drawing_reply(drawn))
             except Exception:

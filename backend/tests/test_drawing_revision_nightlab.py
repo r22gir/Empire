@@ -271,7 +271,7 @@ def test_unapplied_spec_is_not_announced_as_new(drawings_dir, monkeypatch):
         job_hint="marleys",
         quote=MOCK_QUOTE,
     )
-    assert result["success"]
+    assert result["success"] is False
     assert result["specs_honored"] is False
     assert "New drawing" not in result["message"]
     assert "was not applied" in result["message"]
