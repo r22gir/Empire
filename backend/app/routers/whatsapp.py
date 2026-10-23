@@ -2,15 +2,19 @@
 
 Draft-only toward clients. Secrets are stored under EMPIRE_DATA_DIR and
 never echoed. Family editions refuse without EMPIRE_DATA_DIR.
+
+Family admin and chat-log routes require an authenticated owner session
+(middleware 403 plus this dependency). The Meta webhook stays exempt.
 """
 from __future__ import annotations
 
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel, Field
 
+from app.edition import is_family_edition, sin_acceso_body
 from app.services.whatsapp_cloud import (
     channel_status,
     get_credentials_safe,
@@ -36,8 +40,26 @@ class WhatsAppTestBody(BaseModel):
     access_token: Optional[str] = None
 
 
+def require_family_whatsapp_login(request: Request) -> None:
+    """401/403 when a family edition has no owner/admin session.
+
+    Webhook routes must not use this. Workroom is unchanged.
+    """
+    if not is_family_edition():
+        return
+    email = getattr(request.state, "amp_email", None)
+    if not email:
+        raise HTTPException(status_code=401, detail=sin_acceso_body()["detail"])
+    from app.services import amp_allowlist
+
+    role = amp_allowlist.entry_role(email=email, username=None)
+    if role not in {"owner", "admin"}:
+        raise HTTPException(status_code=403, detail="Sin acceso. Se requiere una cuenta administrador.")
+
+
 def _require_admin(request: Request) -> None:
     """Same owner/admin gate as edition.py."""
+    require_family_whatsapp_login(request)
     from app.services import amp_allowlist
 
     email = getattr(request.state, "amp_email", None)
@@ -47,13 +69,13 @@ def _require_admin(request: Request) -> None:
 
 
 @router.get("/whatsapp/status")
-def whatsapp_status():
+def whatsapp_status(_auth: None = Depends(require_family_whatsapp_login)):
     return channel_status()
 
 
 @router.get("/whatsapp/setup")
-def whatsapp_setup_meta():
-    """Public metadata for the in-site Spanish guide. No secrets."""
+def whatsapp_setup_meta(_auth: None = Depends(require_family_whatsapp_login)):
+    """Owner-session metadata for the in-site Spanish guide. No secrets."""
     status = channel_status()
     return {
         "edition": status.get("edition"),
@@ -136,7 +158,7 @@ async def whatsapp_inbound(request: Request):
 
 
 @router.get("/whatsapp/chats")
-def whatsapp_list_chats():
+def whatsapp_list_chats(_auth: None = Depends(require_family_whatsapp_login)):
     """Read-only conversation list for this edition."""
     from app.services.whatsapp_store import list_conversations
 
@@ -144,14 +166,19 @@ def whatsapp_list_chats():
 
 
 @router.get("/whatsapp/chats/search")
-def whatsapp_search_chats(q: str = ""):
+def whatsapp_search_chats(q: str = "", _auth: None = Depends(require_family_whatsapp_login)):
     from app.services.whatsapp_store import search_messages
 
     return {"matches": search_messages(q), "readonly": True}
 
 
 @router.get("/whatsapp/chats/{wa_id}/messages")
-def whatsapp_conversation_messages(wa_id: str, limit: int = 100, before: int | None = None):
+def whatsapp_conversation_messages(
+    wa_id: str,
+    limit: int = 100,
+    before: int | None = None,
+    _auth: None = Depends(require_family_whatsapp_login),
+):
     from app.services.whatsapp_store import list_messages
 
     return {

@@ -19,7 +19,7 @@ export default function WhatsAppStatus() {
   const [status, setStatus] = useState<Status | null>(null);
 
   useEffect(() => {
-    fetch(`${API}/whatsapp/status`)
+    fetch(`${API}/whatsapp/status`, { credentials: 'include', cache: 'no-store' })
       .then((res) => (res.ok ? res.json() : null))
       .then((data) => setStatus(data))
       .catch(() => setStatus(null));
