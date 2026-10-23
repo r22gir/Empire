@@ -3,8 +3,8 @@ from __future__ import annotations
 
 import re
 from datetime import datetime, timedelta
-from decimal import Decimal, ROUND_HALF_UP
 
+from app.services.drawing.inches import format_inches
 from app.services.drawing.templates.ripplefold_spec import resolve_ripplefold
 from app.services.estimates.rafael_format import (
     AREA_MAIN_DRAPERY,
@@ -15,12 +15,14 @@ from app.services.estimates.rafael_format import (
     GROUP_MATERIALS,
     GROUP_ORDER,
     apply_client,
+    money_round,
     willard_metadata,
 )
 from app.services.pricing.dimensions import format_inches_plain
 from app.services.pricing.workroom_rules import (
     ceil_yards,
     cut_length,
+    install_price,
     lining_yards,
     new_fab_widths,
     panel_widths,
@@ -43,11 +45,11 @@ def wants_packet(message: str | None) -> bool:
 
 def _money(value: float) -> float:
     """Half-up cents (853.125 → 853.13). Avoids banker's 1-cent drift."""
-    return float(Decimal(str(value)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP))
+    return money_round(value)
 
 
 def _widths_label(value: float) -> str:
-    text = format_inches_plain(value)
+    text = format_inches(value)
     return text[:-1] if text.endswith('"') else text
 
 
@@ -198,7 +200,7 @@ def _groups_for(area_lines: list[dict]) -> list[dict]:
         groups.append({
             "name": name,
             "lines": grouped,
-            "subtotal": round(sum(float(row.get("amount") or 0) for row in grouped), 2),
+            "subtotal": _money(sum(float(row.get("amount") or 0) for row in grouped)),
         })
     return groups
 
@@ -230,7 +232,7 @@ def _finish_opening(opening: dict, lines: list[dict], *, cloth: dict, cut: float
             "name": main_area,
             "room": room,
             "groups": groups,
-            "subtotal": round(sum(g["subtotal"] for g in groups), 2),
+            "subtotal": _money(sum(g["subtotal"] for g in groups)),
         })
     if sheer_lines:
         groups = _groups_for(sheer_lines)
@@ -238,7 +240,7 @@ def _finish_opening(opening: dict, lines: list[dict], *, cloth: dict, cut: float
             "name": sheer_area,
             "room": room,
             "groups": groups,
-            "subtotal": round(sum(g["subtotal"] for g in groups), 2),
+            "subtotal": _money(sum(g["subtotal"] for g in groups)),
         })
     groups = _groups_for(lines)
     return {
@@ -254,7 +256,7 @@ def _finish_opening(opening: dict, lines: list[dict], *, cloth: dict, cut: float
         "sheer": sheer_job,
         "areas": areas,
         "groups": groups,
-        "subtotal": round(sum(a["subtotal"] for a in areas), 2),
+        "subtotal": _money(sum(a["subtotal"] for a in areas)),
         "opening": opening,
         "new_fabrication": is_new_fabrication(opening),
     }
@@ -431,8 +433,20 @@ def _price_new_fabrication(opening: dict) -> dict:
     )
 
 
+def _reline_line(group: str, description: str, qty: float, rate: float, unit: str = "ea") -> dict:
+    amount = _money(float(qty) * float(rate))
+    return {
+        "group": group,
+        "description": _FOUNDER_RE.sub("", description).strip(),
+        "quantity": qty,
+        "unit": unit,
+        "rate": _money(float(rate)),
+        "amount": amount,
+    }
+
+
 def _price_reline(opening: dict) -> dict:
-    """Existing re-line path. Track is a complete per-ft line, never hourly."""
+    """Re-line: $145/window install + overage, Header-B groups, track_hours override."""
     room = str(opening.get("room") or "Room")
     width = _inches(opening["width"])
     height = _inches(opening["height"])
@@ -442,28 +456,46 @@ def _price_reline(opening: dict) -> dict:
     cut = cut_length(finished)
     yards = lining_yards(cloth["total"], finished)
     bump = wants_bump(opening)
-    main_area = str(opening.get("area") or opening.get("room") or AREA_MAIN_DRAPERY).strip()
-    sheer = opening.get("sheers") or None
-    sheer_cov = _inches((sheer or {}).get("coverage") or (sheer or {}).get("coverage_width"), 0) if sheer else 0.0
-    sheer_area = str((sheer or {}).get("area") or "").strip() or AREA_SHEERS
     lines: list[dict] = []
+
+    install = install_price(width, opening.get("install_flat"))
+    if install["method"] == "flat":
+        install_desc = (
+            f"Removal and installation · {format_inches(width)} window · "
+            f"flat ${install['amount']:,.0f} per section"
+        )
+    else:
+        install_desc = (
+            f"Removal and installation · {format_inches(width)} window · "
+            f"${rule('install_per_window'):,.0f} up to {rule('install_included_ft'):.0f} ft"
+            f" + ${rule('install_overage_per_ft'):,.0f}/ft over"
+        )
+    lines.append(_reline_line("Installation", install_desc, 1, install["amount"]))
+    hours = opening.get("track_hours")
+    if hours not in (None, "", False, 0, "0"):
+        rate = rule("track_labor_per_hour")
+        lines.append(_reline_line(
+            "Installation",
+            f"Track re-center and reinstall · {float(hours):g} hr @ ${rate:,.0f}",
+            float(hours),
+            rate,
+            "hr",
+        ))
 
     if opening.get("lining_removal", True):
         rate = rule("lining_removal_per_panel")
-        lines.append(_line(
-            GROUP_LABOR,
+        lines.append(_reline_line(
+            "Preparation",
             f"Drapery lining removal · {panels} panels @ ${rate:,.0f}",
             panels,
             rate,
-            item="Prep",
-            area=main_area,
         ))
 
     if opening.get("reline", True):
         rate = rule("reline_per_width") if bump else rule("reline_no_bump_per_width")
         label = "Re-line with lining and bump" if bump else "Re-line with lining (no bump)"
-        lines.append(_line(
-            GROUP_LABOR,
+        lines.append(_reline_line(
+            "Construction",
             (
                 f"{label} · {panels} panels x "
                 f"{_widths_label(cloth['per_panel'])} widths = "
@@ -472,34 +504,33 @@ def _price_reline(opening: dict) -> dict:
             cloth["total"],
             rate,
             "widths",
-            item="Drapes",
-            area=main_area,
         ))
 
+    sheer = opening.get("sheers") or None
     sheer_job = None
     if sheer:
-        sw = sheer_widths(sheer_cov)
+        coverage = _inches(sheer.get("coverage") or sheer.get("coverage_width"))
+        sw = sheer_widths(coverage)
         rate = rule("sheer_fabrication_per_width")
-        gap = width - sheer_cov
-        lines.append(_line(
-            GROUP_LABOR,
+        gap = width - coverage
+        lines.append(_reline_line(
+            "Construction",
             (
-                f"Ripplefold sheers · {format_inches_plain(sheer_cov)} "
-                f"({format_inches_plain(width)} - {format_inches_plain(gap)}) · "
-                f"{format_inches_plain(sw['fabric_in'])} / {format_inches_plain(rule('fabric_width_in'))} = "
-                f"{_widths_label(sw['full'])} full, "
-                f"halved (double width) = {_widths_label(sw['charged'])} widths @ ${rate:,.0f}"
+                f"Ripplefold sheers · {format_inches(coverage)} "
+                f"({format_inches(width)} - {format_inches(gap)}) · "
+                f"{format_inches(sw['fabric_in'])} / {format_inches(rule('fabric_width_in'))} = "
+                f"{sw['full_raw']:.2f} → {_widths_label(sw['full'])}, "
+                f"halved (double width) = {sw['halved_raw']:.2f} → "
+                f"{_widths_label(sw['charged'])} widths @ ${rate:,.0f}"
             ),
             sw["charged"],
             rate,
             "widths",
-            item="Sheers",
-            area=sheer_area,
         ))
         sheer_job = resolve_ripplefold({
             "width": width,
             "height": height,
-            "coverage_width": sheer_cov,
+            "coverage_width": coverage,
             "fullness_pct": sheer.get("fullness", 100),
             "carrier": sheer.get("carrier") or "92141",
             "masters": sheer.get("masters") or "butt",
@@ -512,102 +543,107 @@ def _price_reline(opening: dict) -> dict:
         })
 
     if opening.get("reline", True):
-        lines.append(_line(
-            GROUP_MATERIALS,
+        lines.append(_reline_line(
+            "Materials",
             (
                 f"Lining · {yards:.1f} yd @ ${rule('lining_per_yard'):,.2f} "
-                f"({_widths_label(cloth['total'])} widths x {format_inches_plain(cut)} cut)"
+                f"({_widths_label(cloth['total'])} widths x {format_inches(cut)} cut)"
             ),
             yards,
             rule("lining_per_yard"),
             "yd",
-            item="Lining",
-            area=main_area,
         ))
         if bump:
-            lines.append(_line(
-                GROUP_MATERIALS,
+            lines.append(_reline_line(
+                "Materials",
                 f"Bump interlining · {yards:.1f} yd @ ${rule('bump_per_yard'):,.2f}",
                 yards,
                 rule("bump_per_yard"),
                 "yd",
-                item="Bump",
-                area=main_area,
             ))
-    if sheer and (sheer or {}).get("com", True):
-        lines.append(_line(
-            GROUP_MATERIALS,
-            "Sheer fabric - COM - customer-owned material, provided by client",
+    if sheer and sheer_job and sheer_job.carrier_count:
+        crate = rule("ripplefold_carrier_each")
+        coverage = _inches(sheer.get("coverage") or sheer.get("coverage_width"))
+        lines.append(_reline_line(
+            "Materials",
+            (
+                f"Ripplefold carriers · Kirsch {sheer_job.carrier} chart, "
+                f"{format_inches(coverage)} at {sheer_job.fullness}% · "
+                f"{sheer_job.carrier_count} @ ${crate:,.2f}"
+            ),
+            sheer_job.carrier_count,
+            crate,
+        ))
+    if sheer and sheer.get("com", True):
+        lines.append(_reline_line(
+            "Materials",
+            "Sheer fabric · COM (customer's own material) · no charge",
             1,
-            None,
-            item="Fabric",
-            com=True,
-            area=sheer_area,
+            0,
         ))
 
     batons = int(opening.get("batons") or 0)
     if batons:
         rate = rule("baton_each")
-        lines.append(_line(
-            GROUP_MATERIALS,
+        lines.append(_reline_line(
+            "Materials",
             f"Batons · {batons} @ ${rate:,.2f}",
             batons,
             rate,
-            item="Batons",
-            area=main_area,
         ))
 
-    # Complete track for main + sheers. track_hours is treated as "include
-    # track", never as an hourly line.
-    track_wanted = opening.get("track") not in (False, "false", 0, "0") and (
-        opening.get("include_track")
-        or opening.get("track")
-        or opening.get("track_hours") not in (None, "", False)
-        or opening.get("track_flat") not in (None, "")
-    )
-    install_wanted = opening.get("install", True) not in (False, "false", 0, "0")
-    lines.extend(_track_install_lines(
-        width_in=width,
-        area=main_area,
-        layer="main",
-        include_track=bool(track_wanted),
-        include_install=install_wanted,
-        install_flat=opening.get("install_flat"),
-    ))
-    if sheer:
-        sheer_track = opening.get("sheer_track", opening.get("include_track", track_wanted))
-        sheer_install = opening.get("sheer_install", sheer_track)
-        lines.extend(_track_install_lines(
-            width_in=sheer_cov or width,
-            area=sheer_area,
-            layer="sheer",
-            include_track=sheer_track not in (False, "false", 0, "0") and bool(sheer_track),
-            include_install=sheer_install not in (False, "false", 0, "0") and bool(sheer_install),
-        ))
-
-    return _finish_opening(
-        opening, lines,
-        cloth=cloth, cut=cut, yards=yards, bump=bump, sheer_job=sheer_job,
-        width=width, height=height, panels=panels,
-        main_area=main_area, sheer_area=sheer_area, room=room,
-    )
+    reline_groups = ("Installation", "Preparation", "Construction", "Materials")
+    groups = []
+    for name in reline_groups:
+        grouped = [row for row in lines if row["group"] == name]
+        if not grouped:
+            continue
+        groups.append({
+            "name": name,
+            "lines": grouped,
+            "subtotal": _money(sum(row["amount"] for row in grouped)),
+        })
+    return {
+        "room": room,
+        "mark": opening.get("mark") or "",
+        "width": width,
+        "height": height,
+        "panels": panels,
+        "widths": cloth,
+        "cut_length": cut,
+        "yards": yards,
+        "bump": bump,
+        "sheer": sheer_job,
+        "groups": groups,
+        "subtotal": _money(sum(g["subtotal"] for g in groups)),
+        "opening": opening,
+        "new_fabrication": False,
+    }
 
 
 def price_opening(opening: dict) -> dict:
-    """Price one opening. New fabrication or re-line. Never emits hourly track."""
+    """Price one opening. New fabrication or re-line."""
     if is_new_fabrication(opening):
         return _price_new_fabrication(opening)
     return _price_reline(opening)
 
 
+def _packet_is_willard(openings: list[dict], spec: dict | None = None) -> bool:
+    if spec and str(spec.get("estimate_format") or "").lower() in {
+        FORMAT_ID, "willard", "rafael", "rafael_willard",
+    }:
+        return True
+    return any(op.get("new_fabrication") for op in openings)
+
+
 def build_packet(spec: dict) -> dict:
     openings = [price_opening(op) for op in spec.get("openings") or []]
-    subtotal = round(sum(op["subtotal"] for op in openings), 2)
+    subtotal = _money(sum(op["subtotal"] for op in openings))
     tax_rate = float(spec.get("tax_rate") or 0)
-    tax = round(subtotal * tax_rate, 2)
-    total = round(subtotal + tax, 2)
+    tax = _money(subtotal * tax_rate)
+    total = _money(subtotal + tax)
     deposit_pct = float(spec.get("deposit_percent") or rule("deposit_percent"))
-    deposit = round(total * deposit_pct / 100.0, 2)
+    deposit = _money(total * deposit_pct / 100.0)
     created = spec.get("date") or datetime.now().date().isoformat()
     valid_days = int(spec.get("valid_days") or 30)
     try:
@@ -616,6 +652,33 @@ def build_packet(spec: dict) -> dict:
         start = datetime.now()
     valid = (start + timedelta(days=valid_days)).date().isoformat()
     notes = _FOUNDER_RE.sub("", str(spec.get("notes") or "")).strip()
+    packet = {
+        "quote_number": spec.get("quote_number") or "EST-DRAFT",
+        "date": str(created)[:10],
+        "valid_until": valid,
+        "valid_days": valid_days,
+        "billed_by": spec.get("billed_by"),
+        "prepared_for": dict(spec.get("prepared_for") or {}),
+        "project": dict(spec.get("project") or {}),
+        "notes": notes,
+        "rooms": openings,
+        "subtotal": subtotal,
+        "tax_rate": tax_rate,
+        "tax": tax,
+        "total": total,
+        "deposit_percent": deposit_pct,
+        "deposit": deposit,
+        "payment_line": "Pay deposit online: [Square payment link]",
+        "terms": spec.get("terms") or (
+            "50% deposit to begin · balance due on completion. "
+            f"Estimate valid {valid_days} days."
+        ),
+        "status": "draft",
+        "sent": False,
+    }
+    if not _packet_is_willard(openings, spec):
+        return packet
+
     areas: list[dict] = []
     area_index: dict[str, int] = {}
     for opening in openings:
@@ -628,8 +691,8 @@ def build_packet(spec: dict) -> dict:
                     existing = dest_groups.get(group["name"])
                     if existing:
                         existing["lines"].extend(group["lines"])
-                        existing["subtotal"] = round(
-                            existing["subtotal"] + group["subtotal"], 2
+                        existing["subtotal"] = _money(
+                            existing["subtotal"] + group["subtotal"]
                         )
                     else:
                         dest["groups"].append({
@@ -639,7 +702,7 @@ def build_packet(spec: dict) -> dict:
                         })
                         dest_groups[group["name"]] = dest["groups"][-1]
                 dest["groups"].sort(key=lambda g: GROUP_ORDER.index(g["name"]))
-                dest["subtotal"] = round(sum(g["subtotal"] for g in dest["groups"]), 2)
+                dest["subtotal"] = _money(sum(g["subtotal"] for g in dest["groups"]))
             else:
                 area_index[key] = len(areas)
                 areas.append({
@@ -655,39 +718,22 @@ def build_packet(spec: dict) -> dict:
                     ],
                     "subtotal": area["subtotal"],
                 })
-    packet = {
-        "quote_number": spec.get("quote_number") or "EST-DRAFT",
-        "date": str(created)[:10],
-        "valid_until": valid,
-        "valid_days": valid_days,
-        "billed_by": spec.get("billed_by"),
-        "prepared_for": dict(spec.get("prepared_for") or {}),
-        "project": dict(spec.get("project") or {}),
-        "notes": notes,
-        "rooms": openings,
+    packet.update({
         "areas": areas,
         "estimate_format": FORMAT_ID,
         "client_factor": spec.get("client_factor"),
         "designer_name": spec.get("designer_name"),
         "designer_markup_factor": spec.get("designer_markup_factor"),
-        "subtotal": subtotal,
         "base_total": subtotal,
         "client_total": apply_client(total, spec),
-        "designer_share_20pct": round(apply_client(total, spec) - total, 2),
-        "tax_rate": tax_rate,
-        "tax": tax,
-        "total": total,
-        "deposit_percent": deposit_pct,
-        "deposit": deposit,
-        "payment_line": "Pay deposit online: [Square payment link]",
-        "terms": spec.get("terms") or (
-            "50% deposit to begin · balance due on completion. "
-            f"Estimate valid {valid_days} days."
+        "designer_share_20pct": _money(apply_client(total, spec) - total),
+        "metadata": willard_metadata(
+            {**packet, "areas": areas, "client_factor": spec.get("client_factor"),
+             "designer_name": spec.get("designer_name"),
+             "designer_markup_factor": spec.get("designer_markup_factor")},
+            designer=spec.get("designer_name"),
         ),
-        "status": "draft",
-        "sent": False,
-    }
-    packet["metadata"] = willard_metadata(packet, designer=spec.get("designer_name"))
+    })
     return packet
 
 
@@ -805,13 +851,17 @@ def render_packet_pdfs(packet: dict) -> tuple[bytes, bytes]:
     from pypdf import PdfReader, PdfWriter
 
     from app.services.drawing.templates.ripplefold_render import render_ripplefold_pdf
-    from app.services.estimates.willard_estimate import render_willard_pair
+    from app.services.estimates.header_b_estimate import render_header_b_estimate
     from app.services.estimates.workroom_presentation import (
         render_opening_sheet,
         render_schedule_sheet,
     )
 
-    estimate, internal_estimate = render_willard_pair(packet)
+    if _packet_is_willard(packet.get("rooms") or [], packet):
+        from app.services.estimates.willard_estimate import render_willard_pair
+        estimate, _internal = render_willard_pair(packet)
+    else:
+        estimate = render_header_b_estimate(packet)
     plan: list[tuple[str, dict | None]] = []
     for opening in packet.get("rooms") or []:
         plan.append(("opening", opening))
@@ -837,9 +887,12 @@ def draft_packet(spec: dict, *, save_quote: bool = True) -> dict:
     """Create the two PDFs and, when asked, a draft quote. Never sends."""
     packet = build_packet(spec)
     estimate_pdf, presentation_pdf = render_packet_pdfs(packet)
-    from app.services.estimates.willard_estimate import render_willard_estimate
-    from app.services.estimates.rafael_format import VARIANT_INTERNAL
-    internal_pdf = render_willard_estimate(packet, variant=VARIANT_INTERNAL)
+    willard = _packet_is_willard(packet.get("rooms") or [], packet)
+    internal_pdf = b""
+    if willard:
+        from app.services.estimates.willard_estimate import render_willard_estimate
+        from app.services.estimates.rafael_format import VARIANT_INTERNAL
+        internal_pdf = render_willard_estimate(packet, variant=VARIANT_INTERNAL)
     result = {
         "packet": packet,
         "estimate_pdf": estimate_pdf,
@@ -847,8 +900,9 @@ def draft_packet(spec: dict, *, save_quote: bool = True) -> dict:
         "presentation_pdf": presentation_pdf,
         "status": "draft",
         "sent": False,
-        "estimate_format": FORMAT_ID,
     }
+    if willard:
+        result["estimate_format"] = FORMAT_ID
     if not save_quote:
         return result
     from app.services.quote_service import create_quote
@@ -856,32 +910,49 @@ def draft_packet(spec: dict, *, save_quote: bool = True) -> dict:
     project = packet.get("project") or {}
     party = packet.get("prepared_for") or {}
     items = []
-    for opening in packet["rooms"]:
-        area_rows = opening.get("areas") or [{
-            "name": opening.get("room") or AREA_MAIN_DRAPERY,
-            "groups": opening.get("groups") or [],
-        }]
-        for area in area_rows:
-            for group in area.get("groups") or []:
-                for line in group.get("lines") or []:
+    if willard:
+        for opening in packet["rooms"]:
+            area_rows = opening.get("areas") or [{
+                "name": opening.get("room") or AREA_MAIN_DRAPERY,
+                "groups": opening.get("groups") or [],
+            }]
+            for area in area_rows:
+                for group in area.get("groups") or []:
+                    for line in group.get("lines") or []:
+                        items.append({
+                            "description": f"{opening['room']}: {line['description']}",
+                            "quantity": line["quantity"],
+                            "unit": line["unit"],
+                            "unit_price": line["rate"] if line.get("rate") is not None else 0,
+                            "category": "willard_line",
+                            "room": area["name"],
+                            "area": area["name"],
+                            "group": group["name"],
+                            "pricing_snapshot": {
+                                "base_rate": line.get("rate"),
+                                "base_amount": line.get("amount"),
+                                "area": area["name"],
+                                "group": group["name"],
+                                "estimate_format": FORMAT_ID,
+                                "com": bool(line.get("com")),
+                            },
+                        })
+        quote_kwargs = {
+            "metadata": packet.get("metadata") or willard_metadata(packet),
+        }
+    else:
+        for opening in packet["rooms"]:
+            for group in opening["groups"]:
+                for line in group["lines"]:
                     items.append({
                         "description": f"{opening['room']}: {line['description']}",
                         "quantity": line["quantity"],
                         "unit": line["unit"],
-                        "unit_price": line["rate"] if line.get("rate") is not None else 0,
-                        "category": "willard_line",
-                        "room": area["name"],
-                        "area": area["name"],
-                        "group": group["name"],
-                        "pricing_snapshot": {
-                            "base_rate": line.get("rate"),
-                            "base_amount": line.get("amount"),
-                            "area": area["name"],
-                            "group": group["name"],
-                            "estimate_format": FORMAT_ID,
-                            "com": bool(line.get("com")),
-                        },
+                        "unit_price": line["rate"],
+                        "category": "job_line",
+                        "room": opening["room"],
                     })
+        quote_kwargs = {}
     quote = create_quote({
         "customer_name": party.get("company") or party.get("attn") or "Client",
         "customer_email": party.get("email") or "",
@@ -897,7 +968,7 @@ def draft_packet(spec: dict, *, save_quote: bool = True) -> dict:
         "line_items": items,
         "pricing_mode": "flat",
         "business_unit": "workroom",
-        "metadata": packet.get("metadata") or willard_metadata(packet),
+        **quote_kwargs,
     })
     result["quote"] = {
         "id": quote.get("id"),

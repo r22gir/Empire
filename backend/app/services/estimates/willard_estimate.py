@@ -1,10 +1,9 @@
-"""Willard / Le Midi REV C estimate PDF (Rafael 2026-10-23).
+"""Willard area-layout estimate PDF (Rafael 2026-10-23).
 
 Landscape Empire chrome. Client: ITEM · DESCRIPTION · QTY · TOTAL.
 Internal: ITEM · DESCRIPTION · QTY · RATE · AMOUNT · MARKUP · TOTAL.
 
-Le Midi REV C is a format reference only (not approved). Layout knobs
-live on ``WillardLayout``. Never embed live client jobs here.
+Layout knobs live on ``WillardLayout``. Never embed live client jobs here.
 """
 from __future__ import annotations
 
@@ -38,6 +37,7 @@ from app.services.estimates.rafael_format import (
     item_label,
     markup_label,
     money,
+    money_round,
     packet_to_areas,
     quote_to_areas,
     scrub_brands,
@@ -87,7 +87,7 @@ def _line_base(line: dict) -> float | None:
         rate = line.get("base_rate", line.get("rate", line.get("unit_price")))
         if rate is None:
             return None
-        return round(qty * float(rate), 2)
+        return money_round(qty * float(rate))
     except (TypeError, ValueError):
         return None
 
@@ -212,7 +212,7 @@ def render_willard_estimate(
         pages[-1].append(("asub", area["name"], area["subtotal"]))
         y -= 16
 
-    room(52)
+    room(72)
     pages[-1].append(("rollup", areas, totals))
     if variant == VARIANT_INTERNAL and pending:
         pages[-1].append(("pending", pending))
@@ -222,9 +222,9 @@ def render_willard_estimate(
     total_pages = len(pages)
     for index, ops in enumerate(pages, start=1):
         status = (
-            "PRELIMINARY - FOR DISCUSSION - NOT FOR CONSTRUCTION"
+            "PRELIMINARY"
             if (doc.get("status") or "draft").lower() in {"draft", "proposal", ""}
-            else "FOR DISCUSSION - NOT FOR CONSTRUCTION"
+            else "FOR DISCUSSION"
         )
         render_chrome_bands(
             c,
@@ -410,19 +410,19 @@ def render_willard_estimate(
                     c.setFont(mono, 7.0)
                     c.drawString(layout.col_desc, y, str(area["name"]).split(" (")[0])
                     draw_money_row(y, float(area["subtotal"]))
-                    y -= 11
-                y += 4
+                    y -= 12
+                y -= 8
                 c.setStrokeColor(INK)
                 c.setLineWidth(0.8)
-                c.line(450, y - 7, layout.content_right, y - 7)
+                c.line(450, y + 6, layout.content_right, y + 6)
                 t = op[2]
                 c.setFillColor(GOLD)
                 c.setFont(mono_b, 7.2)
-                c.drawRightString(560, y, "GRAND TOTAL")
+                c.drawString(layout.col_desc, y, "GRAND TOTAL")
                 c.setFillColor(INK)
                 if variant == VARIANT_INTERNAL:
                     c.setFont(mono_b, 8.6)
-                    c.drawRightString(680, y, money(t["base"]))
+                    c.drawRightString(layout.col_amount, y, money(t["base"]))
                     c.setFont(mono_b, 10.0)
                     c.drawRightString(layout.col_total, y, money(t["client"]))
                 else:
@@ -432,21 +432,23 @@ def render_willard_estimate(
                 if variant == VARIANT_INTERNAL:
                     share = doc.get("designer_share_20pct")
                     if share is None:
-                        share = round(t["client"] - t["base"], 2)
+                        share = money_round(t["client"] - t["base"])
+                    else:
+                        share = money_round(float(share))
                     c.setFillColor(GOLD)
                     c.setFont(mono_b, 7.2)
-                    c.drawRightString(560, y, "MARKUP 20% (DESIGNER)")
+                    c.drawString(layout.col_desc, y, "MARKUP 20% (DESIGNER)")
                     c.setFillColor(INK)
                     c.setFont(mono_b, 8.6)
                     c.drawRightString(layout.col_total, y, money(share))
                     y -= 14
                 c.setFillColor(INK)
                 c.setFont(mono, 7.2)
-                c.drawRightString(560, y, f"DEPOSIT ({t['deposit_percent']:.0f}%)")
+                c.drawString(layout.col_desc, y, f"DEPOSIT ({t['deposit_percent']:.0f}%)")
                 c.drawRightString(layout.col_total, y, money(t["deposit"]))
                 y -= 12
                 c.setFont(mono_b, 7.2)
-                c.drawRightString(560, y, "BALANCE")
+                c.drawString(layout.col_desc, y, "BALANCE")
                 c.drawRightString(layout.col_total, y, money(t["balance"]))
                 y -= 16
             elif kind == "notes":

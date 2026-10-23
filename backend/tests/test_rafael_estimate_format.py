@@ -12,12 +12,17 @@ from app.services.estimates.rafael_format import (
     MOCK_FINISHED_LENGTH_IN,
     MOCK_MAIN_WIDTH_IN,
     MOCK_SHEER_COVERAGE_IN,
+    apply_designer,
+    designer_name,
     format_item_list,
     format_rate_label,
     group_willard_areas,
+    install_section_price,
     is_com_line,
     mock_drapery_spec,
+    money_round,
     scrub_brands,
+    totals_from_areas,
     uses_willard_layout,
 )
 from app.services.estimates.workroom_packet import (
@@ -189,3 +194,88 @@ def test_group_willard_areas_orders_labor_materials_installation():
     ])
     assert [a["name"] for a in areas] == ["Main Drapery", "Sheers"]
     assert [g["name"] for g in areas[0]["groups"]] == ["Labor", "Installation"]
+
+
+def test_money_round_is_half_up_everywhere():
+    reset_rules()
+    assert money_round(853.125) == 853.13
+    assert money_round(643.125) == 643.13
+    assert money_round(1.225) == 1.23
+    assert apply_designer(4740.36) == 5688.43
+    qty_rate = money_round(21 * 40.625)
+    assert qty_rate == 853.13
+    areas = group_willard_areas([
+        {"area": "Main Drapery", "group": "Labor", "description": "Drapes",
+         "quantity": 21, "rate": 40.625},
+        {"area": "Main Drapery", "group": "Installation", "description": "Install",
+         "quantity": 21, "rate": 30.625},
+    ])
+    assert areas[0]["groups"][0]["subtotal"] == 853.13
+    assert areas[0]["groups"][1]["subtotal"] == 643.13
+    assert areas[0]["subtotal"] == 1496.26
+    totals = totals_from_areas(areas, {"deposit_percent": 50})
+    assert totals["base"] == 1496.26
+    assert totals["client"] == money_round(1496.26 * CLIENT_FACTOR)
+    assert totals["deposit"] == money_round(totals["client"] * 0.5)
+    assert totals["balance"] == money_round(totals["client"] - totals["deposit"])
+    assert totals["designer"] == apply_designer(1496.26)
+    flat = install_section_price(96, flat=245.125)
+    assert flat["amount"] == 245.13
+    hourly = install_section_price(96, hourly=1, override=True)
+    assert hourly["method"] == "hourly_override"
+    ignored = install_section_price(96, hourly=1, override=False)
+    assert ignored["method"] == "section_prorate"
+    packet = build_packet(mock_drapery_spec())
+    assert packet["designer_share_20pct"] == MOCK_DESIGNER_SHARE
+    from app.services.estimates.willard_estimate import render_willard_estimate
+    from app.services.estimates.rafael_format import VARIANT_INTERNAL
+    internal = _pdf_text(render_willard_estimate(packet, variant=VARIANT_INTERNAL))
+    assert f"${MOCK_DESIGNER_SHARE:,.2f}" in internal
+
+
+def test_designer_name_comes_from_metadata_only():
+    assert designer_name({
+        "customer_name": "Maggie O'Neil",
+        "prepared_for": {"company": "Maggie O'Neil Interiors"},
+    }) == "Designer"
+    assert designer_name({
+        "metadata": {"designer_name": "Ada"},
+        "customer_name": "Maggie O'Neil",
+    }) == "Ada"
+    assert designer_name({
+        "designer_name": "Ada",
+        "designer_markup_factor": 1.1,
+    }) == "Ada"
+
+
+def test_default_tool_output_has_no_hourly_line(isolated_empire_db):
+    reset_rules()
+    from app.services.max.tool_executor import _draft_estimate_and_presentation
+
+    spec = mock_drapery_spec()
+    poisoned = dict(spec["openings"][0])
+    poisoned["track_hours"] = 3
+    poisoned["install_hours"] = 2
+    result = _draft_estimate_and_presentation({
+        "billed_by": spec["billed_by"],
+        "prepared_for": spec["prepared_for"],
+        "project": spec["project"],
+        "notes": spec["notes"],
+        "date": spec["date"],
+        "quote_number": spec["quote_number"],
+        "openings": [poisoned],
+        "save_quote": True,
+    })
+    assert result.success, result.error
+    from app.services.quote_service import get_quote
+    quote = get_quote(result.result["quote_id"])
+    blob = " ".join(
+        str(it.get("description") or "") for it in (quote.get("line_items") or [])
+    ).lower()
+    assert "hr @" not in blob
+    assert "hourly" not in blob
+    assert "track re-center" not in blob
+    packet = build_packet(mock_drapery_spec())
+    lines = _all_lines(packet)
+    assert not any((ln.get("unit") or "") in {"hr", "hour", "hours"} for ln in lines)
+    assert not any("hr @" in str(ln.get("description") or "").lower() for ln in lines)

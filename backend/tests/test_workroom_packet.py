@@ -24,8 +24,7 @@ from app.services.pricing.workroom_rules import (
 
 def _text(pdf: bytes) -> str:
     from pypdf import PdfReader
-    raw = "\n".join((page.extract_text() or "") for page in PdfReader(io.BytesIO(pdf)).pages)
-    return raw.replace("\n", "")
+    return "\n".join((page.extract_text() or "") for page in PdfReader(io.BytesIO(pdf)).pages)
 
 
 def test_width_math_matches_the_phase1_reference():
@@ -39,9 +38,8 @@ def test_width_math_matches_the_phase1_reference():
     sheer = sheer_widths(96)
     assert sheer["full"] == 4.5
     assert sheer["charged"] == 2.5
-    # $245 per 8 ft, whole feet rounded up: 8 ft = $245; 160" → 14 ft.
-    assert install_price(96)["amount"] == 245.0
-    assert install_price(160)["amount"] == 428.75
+    assert install_price(96)["amount"] == 145
+    assert install_price(160)["amount"] == 251.67
     assert install_price(160, flat=245)["amount"] == 245
 
 
@@ -49,11 +47,10 @@ def test_rules_are_editable_and_reset():
     reset_rules()
     try:
         set_rule("install_per_window", 160)
-        # alias sets the 8 ft section rate; 72" = 6 ft = 6/8 × 160
-        assert install_price(72)["amount"] == 120.0
+        assert install_price(72)["amount"] == 160
     finally:
         reset_rules()
-    assert install_price(72)["amount"] == 183.75
+    assert install_price(72)["amount"] == 145
 
 
 def test_workroom_rules_persist_to_sqlite(isolated_empire_db):
@@ -66,7 +63,7 @@ def test_workroom_rules_persist_to_sqlite(isolated_empire_db):
         reloaded = reload_rules()
         assert reloaded["install_per_window"] == 200.0
         assert reloaded["baton_each"] == 40.0
-        assert install_price(72)["amount"] == 150.0
+        assert install_price(72)["amount"] == 200.0
 
         conn = sqlite3.connect(isolated_empire_db)
         rows = {
@@ -85,23 +82,21 @@ def test_workroom_rules_persist_to_sqlite(isolated_empire_db):
 def test_sample_packet_matches_reference_totals():
     reset_rules()
     packet = build_packet(sample_phase1())
+    # Bump (napped interlining) is $12.50/yd since Rafael 10/4/2026 (was $12.95): new drafts only.
+    assert packet["total"] == 4736.20
+    assert packet["deposit"] == 2368.10
     assert packet["payment_line"] == "Pay deposit online: [Square payment link]"
     assert packet["sent"] is False
     assert packet["status"] == "draft"
     living = packet["rooms"][0]
+    assert living["subtotal"] == 2574.10
     assert [group["name"] for group in living["groups"]] == [
-        "Labor", "Materials", "Installation",
+        "Installation", "Preparation", "Construction", "Materials",
     ]
-    all_desc = " ".join(
-        line["description"] for group in living["groups"] for line in group["lines"]
-    )
-    assert "Batons" in all_desc
-    assert "Living Room" not in all_desc
-    assert "track re-center" not in all_desc.lower()
-    assert "hr @" not in all_desc.lower()
-    assert any(
-        line.get("item") == "Track" for group in living["groups"] for line in group["lines"]
-    )
+    materials = " ".join(line["description"] for line in living["groups"][-1]["lines"])
+    assert "carriers" in materials.lower()
+    assert "Batons" in materials
+    assert "Living Room" not in materials
 
 
 def test_estimate_header_b_and_presentation(tmp_path):
@@ -117,15 +112,21 @@ def test_estimate_header_b_and_presentation(tmp_path):
     estimate, presentation = render_packet_pdfs(packet)
     est = _text(estimate)
     pres = _text(presentation)
-    assert "NELMA" in est.upper()
-    assert "ITEM" in est and "DESCRIPTION" in est and "QTY" in est and "TOTAL" in est
-    assert "LABOR" in est and "MATERIALS" in est and "INSTALLATION" in est
-    assert "GRAND TOTAL" in est
-    assert "DEPOSIT" in est and "BALANCE" in est
+    assert "Nelma's Workroom" in est
+    assert "by Empire" in est
+    assert "(703) 623-9203" in est
+    assert "workroom.empirebox.store" in est
+    assert "PREPARED FOR" in est and "PROJECT" in est
+    assert "9408 Old Courthouse Rd" in est
+    assert "LIVING ROOM" in est and "OFFICE" in est
+    assert "1. Installation" in est
+    assert "4. Materials" in est
+    assert "Subtotal" in est
+    assert "$4,736.20" in est
+    assert "$2,368.10" in est
+    assert "[Square payment link]" in est
     assert "Rafael" not in est and "Rafael" not in pres
     assert "studio.empirebox.store" not in est
-    assert "track re-center" not in est.lower()
-    assert "hr @" not in est.lower()
     assert "OPENING SCHEDULE" in pres
     assert "STATIONARY" in pres
     assert "RIPPLEFOLD" in pres
@@ -138,8 +139,9 @@ def test_empire_brand_uses_the_empire_phone():
     reset_rules()
     packet = build_packet(sample_phase1(billed_by="empire_workroom"))
     text = _text(render_packet_pdfs(packet)[0])
-    assert "EMPIRE WORKROOM" in text.upper()
-    assert "NELMA" not in text.upper()
+    assert "Empire Workroom" in text
+    assert "(703) 213-6484" in text
+    assert "(703) 623-9203" not in text
 
 
 def test_chat_tool_drafts_and_does_not_send():
@@ -159,7 +161,7 @@ def test_chat_tool_drafts_and_does_not_send():
     assert result.result["sent"] is False
     assert result.result["status"] == "draft"
     assert result.result["project_address"] == "9408 Old Courthouse Rd, Tysons, VA"
-    assert result.result["total"] > 0
+    assert result.result["total"] == 4736.20
     from app.services.quote_service import get_quote
     quote = get_quote(result.result["quote_id"])
     assert quote["status"] == "draft"

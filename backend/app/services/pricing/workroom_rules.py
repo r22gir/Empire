@@ -1,8 +1,11 @@
 """Workroom job rules. Defaults live here; Pricing Studio can edit them.
 
-Install is $245 per 8 ft section, prorated (Rafael 2026-10-23), never hourly
-unless the founder explicitly overrides. Track is $325 per 8 ft section,
-prorated. A flat section rate still replaces the formula when set.
+Re-line install is $145 per window through 8 ft, then $20 per foot over
+that, unless the founder sets a flat rate for the section.
+``install_per_window`` keeps that meaning. New-fabrication uses a
+separate $245 / 8 ft install and $325 / 8 ft track (prorated); those
+keys never alias the re-line window rate.
+
 Re-line widths are
 
     (window width × 2 + 11.5") / panels / 48
@@ -22,18 +25,14 @@ from __future__ import annotations
 
 import logging
 import math
+from decimal import Decimal, ROUND_HALF_UP
 
 logger = logging.getLogger(__name__)
 
 DEFAULT_RULES: dict[str, float] = {
-    "install_per_8ft": 245.0,
-    "track_per_8ft": 325.0,
-    "install_section_ft": 8.0,
-    # Alias: Pricing Studio historically edited install_per_window. It now
-    # means the 8 ft section rate (same dollars as install_per_8ft).
-    "install_per_window": 245.0,
+    "install_per_window": 145.0,
     "install_included_ft": 8.0,
-    "install_overage_per_ft": 0.0,
+    "install_overage_per_ft": 20.0,
     "reline_per_width": 150.0,
     "reline_no_bump_per_width": 125.0,  # Rafael 10/4/2026: lining only, no bump
     "lining_removal_per_panel": 95.0,
@@ -50,8 +49,10 @@ DEFAULT_RULES: dict[str, float] = {
     "fabric_width_in": 48.0,
     "hem_allowance_in": 16.0,
     "deposit_percent": 50.0,
-    # New-fabrication rate card (Willard / REV C generator defaults).
-    # Fixture rates only — not a live client job.
+    # New-fabrication only. Not used by re-line. Not aliased to install_per_window.
+    "install_per_8ft": 245.0,
+    "track_per_8ft": 325.0,
+    "install_section_ft": 8.0,
     "new_fab_per_width": 95.0,
     "new_fab_fullness": 2.5,
     "new_fab_goods_width_in": 54.0,
@@ -159,17 +160,8 @@ def set_rule(key: str, value: float) -> dict[str, float]:
         known = ", ".join(sorted(DEFAULT_RULES))
         raise KeyError(f"Unknown workroom rule '{key}'. Known: {known}")
     _RULES[key] = float(value)
-    # Keep the 8 ft section rate and the legacy key in lockstep.
-    if key == "install_per_window":
-        _RULES["install_per_8ft"] = float(value)
-    elif key == "install_per_8ft":
-        _RULES["install_per_window"] = float(value)
     try:
         _persist_rule(key, float(value))
-        if key == "install_per_window":
-            _persist_rule("install_per_8ft", float(value))
-        elif key == "install_per_8ft":
-            _persist_rule("install_per_window", float(value))
     except Exception:
         logger.debug("workroom rules: could not persist %s", key, exc_info=True)
     return rules()
@@ -279,15 +271,28 @@ def new_fab_widths(
     }
 
 
-def install_price(
-    width_in: float,
-    flat: float | None = None,
-    *,
-    hourly: float | None = None,
-) -> dict:
-    """$245 per 8 ft section, prorated. Flat or hourly only when explicitly set."""
-    from app.services.estimates.rafael_format import install_section_price
-    return install_section_price(width_in, flat=flat, hourly=hourly)
+def _money(value: float) -> float:
+    return float(Decimal(str(value)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP))
+
+
+def install_price(width_in: float, flat: float | None = None) -> dict:
+    """$145 per window through 8 ft, then $20/ft over. Flat replaces the formula."""
+    if flat is not None:
+        return {
+            "amount": _money(float(flat)),
+            "method": "flat",
+            "width_ft": float(width_in) / 12.0,
+        }
+    width_ft = float(width_in) / 12.0
+    included = rule("install_included_ft")
+    over = max(0.0, width_ft - included)
+    amount = rule("install_per_window") + over * rule("install_overage_per_ft")
+    return {
+        "amount": _money(amount),
+        "method": "measured",
+        "width_ft": width_ft,
+        "over_ft": over,
+    }
 
 
 def track_price(
@@ -295,7 +300,12 @@ def track_price(
     *,
     hours: float | None = None,
     flat: float | None = None,
+    override: bool = False,
 ) -> dict:
-    """$325 per 8 ft section, prorated. Hourly only when hours are passed."""
+    """New-fab complete track: $325 per 8 ft, prorated.
+
+    Hourly is unreachable unless the founder sets an explicit per-quote
+    override (``override=True`` and ``hours``).
+    """
     from app.services.estimates.rafael_format import track_section_price
-    return track_section_price(width_in, hours=hours, flat=flat)
+    return track_section_price(width_in, hours=hours, flat=flat, override=override)

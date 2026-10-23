@@ -1,11 +1,9 @@
 """Rafael 2026-10-23 estimate / invoice rules for Max.
 
 Canonical source for Max chat, draft_estimate_and_presentation, and the
-Willard-layout PDF renderer. Layout matches the Le Midi REV C generator
-(modeled on Willard 812-C): landscape Empire chrome, area → LABOR /
+Willard area-layout PDF renderer: landscape Empire chrome, area → LABOR /
 MATERIALS / INSTALLATION, client TOTAL only vs internal RATE / AMOUNT /
-MARKUP / TOTAL. Le Midi REV C is a format reference only — not approved
-and never loaded as a live job.
+MARKUP / TOTAL. Format reference only — never loaded as a live job.
 """
 from __future__ import annotations
 
@@ -18,8 +16,8 @@ from app.services.pricing.dimensions import format_inches_plain, plain_fractions
 
 FORMAT_ID = "rafael_willard_2026_10_23"
 FORMAT_DATE = "2026-10-23"
-REFERENCE_DOCS = ("812-C", "838", "909", "Le Midi REV C layout")
-LE_MIDI_REV_C_PENDING = True  # format reference only; not founder-approved
+REFERENCE_DOCS = ("Willard area layout",)
+WILLARD_FORMAT_PENDING = True  # format reference only; not founder-approved
 
 CLIENT_FACTOR = 1.20
 DEFAULT_DEPOSIT_PERCENT = 50.0
@@ -56,11 +54,10 @@ _HOUR_RE = re.compile(r"\b(\d+(?:\.\d+)?)\s*(?:hr|hrs|hour|hours)\b", re.I)
 
 @dataclass(frozen=True)
 class WillardLayout:
-    """Landscape Willard / Le Midi REV C sheet geometry (letter, points).
+    """Landscape Willard area-layout sheet geometry (letter, points).
 
-    Coordinates follow the REV C generator: content 30–762, ITEM at 30,
-    DESCRIPTION at 92, QTY at 520; internal RATE 570 / AMOUNT 630 /
-    MARKUP 690 / TOTAL 762. Tune these if REV C is revised.
+    Content 30–762, ITEM at 30, DESCRIPTION at 92, QTY at 520; internal
+    RATE 570 / AMOUNT 630 / MARKUP 690 / TOTAL 762.
     """
 
     page_w: float = 792.0
@@ -82,13 +79,11 @@ class WillardLayout:
     col_total: float = 762.0
     line_leading: float = 8.4
     wrap_chars: int = 86
-    # Le Midi REV C hook
-    le_midi_rev: str = "C"
-    le_midi_overrides: dict[str, float] = field(default_factory=dict)
+    layout_overrides: dict[str, float] = field(default_factory=dict)
 
     def tuned(self, **overrides: float) -> "WillardLayout":
-        """Return a copy with named knobs replaced (Le Midi REV C pass)."""
-        data = {**self.le_midi_overrides, **overrides}
+        """Return a copy with named knobs replaced."""
+        data = {**self.layout_overrides, **overrides}
         return replace(self, **{k: v for k, v in data.items() if hasattr(self, k)})
 
 
@@ -97,36 +92,35 @@ DEFAULT_LAYOUT = WillardLayout()
 
 # Injected into Max system / desk prompts and TOOLS_DOC.
 MAX_ESTIMATE_RULES = f"""
-== Estimate / invoice format (Rafael {FORMAT_DATE}; Willard 812-C / 838 / 909) ==
-This overrides older Header-B room grouping and hourly install defaults.
-- Use the Willard / Le Midi REV C estimate layout (landscape Empire chrome)
-  for every Max-generated estimate. REV C is a format reference only.
-- Group by AREA (e.g. A. MAIN DRAPERY, B. SHEERS). Inside each area, group
-  lines into LABOR / MATERIALS / INSTALLATION. Columns: ITEM, DESCRIPTION,
-  QTY; client shows TOTAL only; internal adds RATE, AMOUNT (base), MARKUP
-  20%, TOTAL (client). Then group subtotal, area total, grand total,
-  deposit, and balance. Internal also prints MARKUP 20% (DESIGNER).
-- COM lines print COM, never $0.00. Track rate prints as $325/8 ft;
-  install rate as $245/8 ft.
+== Estimate / invoice format (Rafael {FORMAT_DATE}; Willard area layout) ==
+New fabrication uses the Willard area layout. Re-line keeps Header-B
+and the old $145/window install unless the founder opts that job in.
+- New fabrication: landscape Empire chrome. Group by AREA (e.g. A. MAIN
+  DRAPERY, B. SHEERS). Inside each area: LABOR / MATERIALS /
+  INSTALLATION. Client: ITEM, DESCRIPTION, QTY, TOTAL. Internal adds
+  RATE, AMOUNT (base), MARKUP 20%, TOTAL (client). Then group subtotal,
+  area total, grand total, deposit, balance. Designer name and markup
+  come from job/quote metadata only.
+- COM lines print COM, never $0.00. New-fab track prints as $325/8 ft;
+  new-fab install as $245/8 ft.
 - New fabrication (lined main drapery + sheers): per-width labor at the
   new_fab_per_width rate, width count = coverage × 2.5 fullness / 54"
-  goods (sheers use 110" goods). Re-line jobs keep the existing 48"
-  half-width math.
-- Track is a complete track per ft (${TRACK_PER_8FT:.0f} per {SECTION_FT:.0f} ft
-  prorated, carriers included) on BOTH main and sheer. Never an hourly
-  "track re-center" line.
-- Drapery install is priced per linear foot or per {SECTION_FT:.0f} ft section,
-  prorated, never hourly (e.g. ${INSTALL_PER_8FT:.0f} base per {SECTION_FT:.0f} ft
-  for removal + install). Hourly only if the founder explicitly overrides.
-- Upholstery estimates keep the existing area grouping with columns
-  Description, Qty, Unit, Sq ft, Price/sq ft, Total.
+  goods (sheers use 110" goods).
+- Re-line keeps the existing 48" half-width math, $145/window install
+  through 8 ft then $20/ft over, and track_hours only when the founder
+  sets that per-quote override. install_per_window still means the
+  window rate.
+- New-fab track is a complete track per ft (${TRACK_PER_8FT:.0f} per
+  {SECTION_FT:.0f} ft prorated, carriers included) on BOTH layers.
+  Hourly install/track is unreachable unless the founder sets an
+  explicit per-quote override. Default tool calls never pass hours.
+- Upholstery estimates keep Description, Qty, Unit, Sq ft, Price/sq ft,
+  Total.
 - Measurements in fractions only (e.g. 189 3/8"), never decimals.
 - Empire Workroom branding unless billed_by is Nelma's. Never print the
   founder's personal name. Never print fabric brand or supplier names; use
   internal fabric codes (V###-Color).
 - Email / item lists: one item per line (never a comma-joined paragraph).
-- draft_estimate_and_presentation and the quote PDF Max emails/opens both
-  render this layout (client + internal variants).
 """
 
 
@@ -143,18 +137,15 @@ def client_factor(quote: dict | None = None) -> float:
 
 
 def designer_name(quote: dict | None = None) -> str:
-    meta = _meta(quote)
-    for key in ("designer_name", "designer", "designer_label"):
-        raw = meta.get(key) or (quote or {}).get(key)
-        if isinstance(raw, str) and raw.strip():
-            return raw.strip()
-    party = (quote or {}).get("prepared_for") or {}
-    company = str(party.get("company") or party.get("attn") or "").strip()
-    if "maggie" in company.lower() or "o'neil" in company.lower() or "o’neil" in company.lower():
-        return "Maggie"
-    customer = str((quote or {}).get("customer_name") or "").lower()
-    if "maggie" in customer or "o'neil" in customer or "o’neil" in customer:
-        return "Maggie"
+    """Designer label from job/quote metadata only. Never infer from a name."""
+    sources = [_meta(quote), quote or {}, (quote or {}).get("project") or {}]
+    for src in sources:
+        if not isinstance(src, dict):
+            continue
+        for key in ("designer_name", "designer", "designer_label"):
+            raw = src.get(key)
+            if isinstance(raw, str) and raw.strip():
+                return raw.strip()
     return "Designer"
 
 
@@ -185,7 +176,7 @@ def apply_client(base: float, quote: dict | None = None) -> float:
 
 
 def apply_designer(base: float, quote: dict | None = None) -> float:
-    return round(apply_client(base, quote) * designer_factor(quote), 2)
+    return money_round(apply_client(base, quote) * designer_factor(quote))
 
 
 def section_prorate(width_in: float, rate_per_section: float, section_ft: float = SECTION_FT) -> dict:
@@ -210,39 +201,82 @@ def section_prorate(width_in: float, rate_per_section: float, section_ft: float 
     }
 
 
-def install_section_price(width_in: float, *, flat: float | None = None, hourly: float | None = None) -> dict:
-    """Removal + install: $245 / 8 ft prorated. Hourly only if explicitly set."""
-    if hourly is not None:
+def founder_hourly_override(opening: dict | None = None) -> bool:
+    """True only when the founder set an explicit per-quote hourly override.
+
+    Re-line ``track_hours`` is that historic override. New fabrication
+    ignores hours unless ``hourly_override`` / ``founder_hourly`` is set.
+    """
+    if not opening:
+        return False
+    if opening.get("hourly_override") in (True, "true", "True", 1, "1"):
+        return True
+    if opening.get("founder_hourly") in (True, "true", "True", 1, "1"):
+        return True
+    if opening.get("founder_hourly_override") in (True, "true", "True", 1, "1"):
+        return True
+    return False
+
+
+def install_section_price(
+    width_in: float,
+    *,
+    flat: float | None = None,
+    hourly: float | None = None,
+    override: bool = False,
+) -> dict:
+    """New-fab removal + install: $245 / 8 ft prorated.
+
+    Hourly is unreachable unless ``override`` is true and ``hourly`` is set.
+    """
+    if hourly is not None and override:
         hours = float(hourly)
         from app.services.pricing.workroom_rules import rule
         rate = rule("track_labor_per_hour")
         return {
-            "amount": round(hours * rate, 2),
+            "amount": money_round(hours * rate),
             "method": "hourly_override",
             "hours": hours,
             "rate": rate,
             "width_ft": float(width_in) / 12.0,
         }
     if flat is not None:
-        return {"amount": round(float(flat), 2), "method": "flat", "width_ft": float(width_in) / 12.0}
+        return {
+            "amount": money_round(float(flat)),
+            "method": "flat",
+            "width_ft": float(width_in) / 12.0,
+        }
     from app.services.pricing.workroom_rules import rule
     return section_prorate(width_in, rule("install_per_8ft"), rule("install_section_ft"))
 
 
-def track_section_price(width_in: float, *, hours: float | None = None, flat: float | None = None) -> dict:
-    """Track: $325 / 8 ft prorated. Hourly only if the founder passes hours."""
-    if hours is not None:
+def track_section_price(
+    width_in: float,
+    *,
+    hours: float | None = None,
+    flat: float | None = None,
+    override: bool = False,
+) -> dict:
+    """New-fab track: $325 / 8 ft prorated.
+
+    Hourly is unreachable unless ``override`` is true and ``hours`` is set.
+    """
+    if hours is not None and override:
         from app.services.pricing.workroom_rules import rule
         rate = rule("track_labor_per_hour")
         return {
-            "amount": round(float(hours) * rate, 2),
+            "amount": money_round(float(hours) * rate),
             "method": "hourly_override",
             "hours": float(hours),
             "rate": rate,
             "width_ft": float(width_in) / 12.0,
         }
     if flat is not None:
-        return {"amount": round(float(flat), 2), "method": "flat", "width_ft": float(width_in) / 12.0}
+        return {
+            "amount": money_round(float(flat)),
+            "method": "flat",
+            "width_ft": float(width_in) / 12.0,
+        }
     from app.services.pricing.workroom_rules import rule
     return section_prorate(width_in, rule("track_per_8ft"), rule("install_section_ft"))
 
@@ -287,7 +321,7 @@ def _ft_label(width_ft: float) -> str:
 def classify_group(item: dict) -> str:
     """Map a line into Labor / Materials / Installation.
 
-    Le Midi REV C: track hardware is MATERIALS; removal+install is
+    Willard area layout: track hardware is MATERIALS; removal+install is
     INSTALLATION. Hourly track labor is INSTALLATION only as an override.
     """
     explicit = str(item.get("group") or item.get("line_group") or "").strip()
@@ -384,12 +418,12 @@ def group_willard_areas(items: Sequence[dict]) -> list[dict]:
             grouped = [ln for ln in lines if ln["group"] == gname]
             if not grouped:
                 continue
-            sub = round(sum(_base_amount(ln) for ln in grouped), 2)
+            sub = money_round(sum(_base_amount(ln) for ln in grouped))
             groups.append({"name": gname, "lines": grouped, "subtotal": sub})
         areas.append({
             "name": name,
             "groups": groups,
-            "subtotal": round(sum(g["subtotal"] for g in groups), 2),
+            "subtotal": money_round(sum(g["subtotal"] for g in groups)),
         })
     return areas
 
@@ -449,7 +483,7 @@ def is_upholstery_quote(quote: dict) -> bool:
 
 
 def uses_willard_layout(quote: dict | None) -> bool:
-    """True for Max Willard estimates; False for upholstery / legacy McLean."""
+    """True for new-fab Willard estimates. Re-line Header-B stays off."""
     if not quote:
         return False
     if is_upholstery_quote(quote):
@@ -458,18 +492,18 @@ def uses_willard_layout(quote: dict | None) -> bool:
     fmt = str(meta.get("estimate_format") or quote.get("estimate_format") or "").lower()
     if fmt in {FORMAT_ID, "willard", "rafael", "rafael_willard"}:
         return True
-    if quote.get("areas") or meta.get("willard_areas"):
+    if meta.get("willard_areas"):
         return True
-    if quote.get("rooms"):
-        return True
-    items = quote.get("line_items") or quote.get("items") or []
-    for it in items:
-        if not isinstance(it, dict):
-            continue
-        area = str(it.get("area") or it.get("room") or "")
-        if _canonical_area(area) in {AREA_MAIN_DRAPERY, AREA_SHEERS}:
-            return True
-        if str(it.get("group") or "").title() in GROUP_ORDER:
+    areas = quote.get("areas") or []
+    if areas:
+        names = {
+            str(g.get("name") or "")
+            for area in areas
+            for g in (area.get("groups") or [])
+        }
+        if names & {"Preparation", "Construction"}:
+            return False
+        if names & set(GROUP_ORDER):
             return True
     return False
 
@@ -551,7 +585,7 @@ def is_com_line(item: dict) -> bool:
 
 
 def format_rate_label(item: dict) -> str:
-    """Le Midi REV C: section rates print as $245/8 ft and $325/8 ft."""
+    """Willard area layout: section rates print as $245/8 ft and $325/8 ft."""
     if is_com_line(item):
         return ""
     raw = item.get("base_rate", item.get("rate", item.get("unit_price")))
@@ -610,7 +644,7 @@ def markup_label(item: dict, quote: dict | None = None) -> str:
 
 
 def totals_from_areas(areas: Sequence[dict], quote: dict | None = None) -> dict:
-    base = round(sum(float(a.get("subtotal") or 0) for a in areas), 2)
+    base = money_round(sum(float(a.get("subtotal") or 0) for a in areas))
     client = apply_client(base, quote)
     designer = apply_designer(base, quote)
     deposit_pct = DEFAULT_DEPOSIT_PERCENT
@@ -619,21 +653,21 @@ def totals_from_areas(areas: Sequence[dict], quote: dict | None = None) -> dict:
             deposit_pct = float(quote.get("deposit_percent") or DEFAULT_DEPOSIT_PERCENT)
         except (TypeError, ValueError):
             deposit_pct = DEFAULT_DEPOSIT_PERCENT
-    client_deposit = round(client * deposit_pct / 100.0, 2)
+    client_deposit = money_round(client * deposit_pct / 100.0)
     return {
         "base": base,
         "client": client,
         "designer": designer,
         "deposit_percent": deposit_pct,
         "deposit": client_deposit,
-        "balance": round(client - client_deposit, 2),
+        "balance": money_round(client - client_deposit),
         "paid": _paid(quote),
     }
 
 
 def display_amount(base: float, variant: str, quote: dict | None = None) -> float:
     if variant == VARIANT_INTERNAL:
-        return round(float(base), 2)
+        return money_round(float(base))
     return apply_client(base, quote)
 
 
@@ -646,12 +680,12 @@ def _base_amount(it: dict) -> float:
                     continue
                 if val or key in {"amount", "subtotal", "base_amount", "base"}:
                     if key == "final_price" and it.get("price_overridden"):
-                        return val
+                        return money_round(val)
             except (TypeError, ValueError):
                 pass
     if it.get("price_overridden") and it.get("final_price") is not None:
         try:
-            return float(it["final_price"])
+            return money_round(float(it["final_price"]))
         except (TypeError, ValueError):
             return 0.0
     amount = it.get("amount")
@@ -661,7 +695,7 @@ def _base_amount(it: dict) -> float:
         try:
             qty = float(it.get("quantity") or 1)
             rate = it.get("base_rate", it.get("rate", it.get("unit_price")))
-            amount = qty * float(rate or 0)
+            amount = money_round(qty * float(rate or 0))
         except (TypeError, ValueError):
             amount = 0.0
     try:
@@ -702,11 +736,11 @@ def _paid(quote: dict | None) -> float:
                     total += float(pay.get("amount") or pay.get("paid") or 0)
                 except (TypeError, ValueError):
                     pass
-        return round(total, 2)
+        return money_round(total)
     for key in ("deposit_paid", "amount_paid", "paid_to_date"):
         if quote.get(key) not in (None, ""):
             try:
-                return round(float(quote[key]), 2)
+                return money_round(float(quote[key]))
             except (TypeError, ValueError):
                 pass
     return 0.0
@@ -722,7 +756,7 @@ def willard_metadata(packet: dict, *, designer: str | None = None) -> dict:
         "install_rule": f"${INSTALL_PER_8FT:.0f} per {SECTION_FT:.0f} ft section, prorated",
         "track_rule": f"${TRACK_PER_8FT:.0f} per {SECTION_FT:.0f} ft section, prorated",
         "reference_docs": list(REFERENCE_DOCS),
-        "le_midi_rev_c_pending": LE_MIDI_REV_C_PENDING,
+        "willard_format_pending": WILLARD_FORMAT_PENDING,
         "willard_areas": packet.get("areas") or [],
     }
 
@@ -781,7 +815,7 @@ def mock_willard_document(**overrides: Any) -> dict:
             f'Sheers cover {format_inches_plain(MOCK_SHEER_COVERAGE_IN)}, 2.5× on 110\" goods',
             "Install $245 base per 8 ft, prorated; track $325 per 8 ft, prorated, carriers included",
         ],
-        "metadata": {"estimate_format": FORMAT_ID, "le_midi_rev_c_pending": True},
+        "metadata": {"estimate_format": FORMAT_ID, "willard_format_pending": True},
     }
     doc.update(overrides)
     return doc
