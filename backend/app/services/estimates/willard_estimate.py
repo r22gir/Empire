@@ -177,7 +177,7 @@ def render_willard_estimate(
 
     def room(need: float) -> None:
         nonlocal y
-        if y - need < floor + 24:
+        if y - need < floor + 10:
             y = new_page()
 
     if specs:
@@ -212,7 +212,7 @@ def render_willard_estimate(
         pages[-1].append(("asub", area["name"], area["subtotal"]))
         y -= 16
 
-    room(72)
+    room(48)
     pages[-1].append(("rollup", areas, totals))
     if variant == VARIANT_INTERNAL and pending:
         pages[-1].append(("pending", pending))
