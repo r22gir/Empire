@@ -142,8 +142,14 @@ class ResponseQualityEngine:
         if result.issues:
             result.cleaned = self._apply_auto_fixes(result)
 
-        # Determine pass/block — founder messages are never blocked by quality engine
-        if founder_override:
+        # Determine pass/block.
+        # Quote underprice flags are founder-review blocks and must never
+        # auto-unblock — even if founder_override is set for chat hedging.
+        quote_blocks = [
+            i for i in result.issues
+            if i.check == "quote_anomaly" and i.severity == Severity.CRITICAL
+        ]
+        if founder_override and not quote_blocks:
             result.passed = True
             result.blocked = False
         else:
@@ -334,44 +340,32 @@ class ResponseQualityEngine:
                 message="Quote has no valid customer name",
             ))
 
-        # CHECK 4: Abnormal total (compare to historical average)
-        if stated_total > 0:
-            self._check_quote_anomaly(result, stated_total)
+        # CHECK 4: Like-for-like underprice (category + size-normalized).
+        # Never compare a scoped job total against an unrelated whole-job
+        # or all-quotes average. Only flag when enough same-category
+        # history exists. Founder-review block — never auto-unblock.
+        if stated_total > 0 or quote_data.get("line_items") or quote_data.get("rooms"):
+            self._check_quote_anomaly(result, quote_data, ctx)
 
-    def _check_quote_anomaly(self, result: QualityResult, total: float):
-        """Flag if quote total is >15% off from historical average."""
+    def _check_quote_anomaly(self, result: QualityResult, quote_data: dict, ctx: dict):
+        """Flag when a scoped unit rate is 50%+ below like-for-like history."""
         try:
-            import os
-            quotes_dir = os.path.expanduser("~/empire-repo/backend/data/quotes")
-            if not os.path.isdir(quotes_dir):
+            from app.services.quote_engine.like_for_like_quality import (
+                evaluate_like_for_like,
+            )
+
+            comparison = evaluate_like_for_like(
+                quote_data,
+                history=ctx.get("comparable_quotes"),
+                quotes_dir=ctx.get("quotes_dir"),
+            )
+            if not comparison.flagged:
                 return
-
-            past_totals = []
-            for fname in os.listdir(quotes_dir):
-                if not fname.endswith(".json") or fname.startswith("_"):
-                    continue
-                try:
-                    with open(os.path.join(quotes_dir, fname)) as f:
-                        q = json.load(f)
-                    t = q.get("total", 0)
-                    if t > 50:  # Skip test/zero quotes
-                        past_totals.append(t)
-                except Exception:
-                    pass
-
-            if len(past_totals) < 3:
-                return  # Not enough history
-
-            avg = sum(past_totals) / len(past_totals)
-            deviation = abs(total - avg) / avg
-
-            if deviation > 0.15:  # >15% off
-                direction = "higher" if total > avg else "lower"
-                result.issues.append(QualityIssue(
-                    check="quote_anomaly",
-                    severity=Severity.CRITICAL,
-                    message=f"Quote total ${total:,.2f} is {deviation:.0%} {direction} than average (${avg:,.2f}). BLOCKED — founder review required.",
-                ))
+            result.issues.append(QualityIssue(
+                check="quote_anomaly",
+                severity=Severity.CRITICAL,
+                message=" ".join(comparison.reasons),
+            ))
         except Exception as e:
             logger.debug(f"Quote anomaly check failed: {e}")
 
