@@ -138,6 +138,8 @@ def create_all_tables(conn: sqlite3.Connection):
         quote_id TEXT NOT NULL REFERENCES quotes_v2(id),
         line_number INTEGER DEFAULT 0,
         item_type TEXT,
+        windows INTEGER,
+        lf REAL,
         item_style TEXT,
         description TEXT,
         room TEXT,
@@ -386,6 +388,8 @@ def create_all_tables(conn: sqlite3.Connection):
         # by intent, not by drift, and must not "correct" them.
         "ALTER TABLE quote_line_items ADD COLUMN rate_source TEXT DEFAULT 'catalog'",
         "ALTER TABLE quote_line_items ADD COLUMN idea_diagram_json TEXT",
+        "ALTER TABLE quote_line_items ADD COLUMN windows INTEGER",
+        "ALTER TABLE quote_line_items ADD COLUMN lf REAL",
     ):
         try:
             conn.execute(_alter_sql)

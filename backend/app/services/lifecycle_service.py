@@ -221,7 +221,8 @@ def create_invoice_from_quote(quote_id: str, changed_by: str = "system") -> dict
             if d.get("subtotal") is not None:
                 d["amount"] = d["subtotal"]
             _li.append(d)
-        line_items_json = json.dumps(_li, default=str)
+        from app.services.install_line_tagging import dumps_line_items
+        line_items_json = dumps_line_items(_li)
 
         deposit_paid = q.get('deposit_paid', 0) or 0
         balance = round((q.get('total', 0) or 0) - deposit_paid, 2)

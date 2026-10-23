@@ -494,6 +494,7 @@ EMPIRE_CATALOG = {
         "get_weather": {"description": "Live weather data (no API key needed)", "access_level": 1, "category": "system"},
         "get_services_health": {"description": "Check which Empire services are running", "access_level": 1, "category": "system"},
         "present": {"description": "Generate professional presentation/report PDF and send via Telegram", "access_level": 1, "category": "presentation"},
+        "compare_install_prices": {"description": "Compare past installation prices ($/window, $/LF) against a new quote. Saves a PDF table to the job. Does NOT send Telegram/email/WhatsApp and does NOT use the present tool.", "access_level": 1, "category": "quote"},
         "shell_execute": {"description": "Execute safe allowlisted shell command", "access_level": 3, "category": "system"},
         "dispatch_to_openclaw": {"description": "Send task to OpenClaw for autonomous execution", "access_level": 3, "category": "autonomous"},
         "file_read": {"description": "Read a file with optional line range", "access_level": 1, "category": "dev"},

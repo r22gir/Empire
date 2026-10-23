@@ -677,6 +677,20 @@ def _store_line_fabric_fields(conn, quote_id: str, line_number: int, line: dict)
     )
 
 
+def _persist_install_line_tags(conn, data: dict, *, quote_id: str | None = None,
+                               line_number: int | None = None, item_id: int | None = None,
+                               incoming: dict | None = None) -> None:
+    """On quote line save: tag installation rows + windows / lf."""
+    try:
+        from app.services.install_line_tagging import persist_quote_line_tags
+        persist_quote_line_tags(
+            conn, data or {}, quote_id=quote_id, line_number=line_number, item_id=item_id,
+            incoming=incoming,
+        )
+    except Exception:
+        pass
+
+
 def _ensure_idea_diagram_column(conn) -> None:
     """Additive column for idea-diagram metadata. Safe on already-migrated DBs."""
     try:
@@ -1016,6 +1030,7 @@ def create_quote(data: dict) -> dict:
                 idea["idea_diagram_json"],
             ))
             _store_line_fabric_fields(conn, quote_id, idx + 1, li)
+            _persist_install_line_tags(conn, li, quote_id=quote_id, line_number=idx + 1)
 
         _recalculate_totals(conn, quote_id, 'api')
         _audit_log(conn, 'quote', quote_id, 'created', None, None, quote_number, 'api')
@@ -1122,6 +1137,7 @@ def update_quote(quote_id: str, data: dict) -> dict:
                     pricing["computed_json"],
                 ))
                 _store_line_fabric_fields(conn, quote_id, idx + 1, li)
+                _persist_install_line_tags(conn, li, quote_id=quote_id, line_number=idx + 1)
             _audit_log(conn, "quote", quote_id, "updated", "line_items", None,
                        f"{len(items)} items", "api")
 
@@ -1231,6 +1247,7 @@ def add_line_item(quote_id: str, data: dict) -> dict:
             idea["idea_diagram_json"],
         ))
 
+        _persist_install_line_tags(conn, data, quote_id=quote_id, line_number=max_ln + 1)
         _recalculate_totals(conn, quote_id, 'api')
         _audit_log(conn, 'quote', quote_id, 'item_added', 'line_items', None,
                    data.get('description', ''), 'api')
@@ -1427,6 +1444,7 @@ def update_line_item(quote_id: str, item_id: int, data: dict) -> dict:
             'quantity', 'unit', 'unit_price', 'subtotal', 'category',
             'manual_price_override', 'price_is_manual',
             'pricing_snapshot_json',
+            'windows', 'lf',
         ]
         sets, params = ["updated_at = ?"], [_utc_now_iso()]
         for f in updatable:
@@ -1454,6 +1472,7 @@ def update_line_item(quote_id: str, item_id: int, data: dict) -> dict:
 
         params.append(item_id)
         conn.execute(f"UPDATE quote_line_items SET {', '.join(sets)} WHERE id = ?", params)
+        _persist_install_line_tags(conn, merged, item_id=item_id, incoming=data)
         _recalculate_totals(conn, quote_id, 'api')
 
     return get_quote(quote_id)

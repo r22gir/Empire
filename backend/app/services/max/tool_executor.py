@@ -665,6 +665,10 @@ def execute_tool(tool_call: dict, desk: Optional[str] = None, access_context: Op
             "list_quotes": "search_quotes",
             "search_quote": "search_quotes",
             "get_quotes": "search_quotes",
+            "compare_install": "compare_install_prices",
+            "compare_install_price": "compare_install_prices",
+            "install_price_compare": "compare_install_prices",
+            "compare_installation_prices": "compare_install_prices",
             "find_contacts": "search_contacts",
             "list_contacts": "search_contacts",
             "find_customer": "search_contacts",
@@ -8887,6 +8891,19 @@ try:
     _can_do.register_tools(tool, ToolResult)
 except Exception as _can_do_err:
     logger.error(f"voice_can_do not loaded: {_can_do_err}")
+
+# Install price comparison (read-only; PDF to job; send off by default).
+try:
+    import importlib as _importlib, sys as _sys
+    _install_cmp_name = "app.services.max.tools_install_compare"
+    _tools_install_compare = (
+        _importlib.reload(_sys.modules[_install_cmp_name])
+        if _install_cmp_name in _sys.modules
+        else _importlib.import_module(_install_cmp_name)
+    )
+    TOOLS_DOC = TOOLS_DOC + _tools_install_compare.INSTALL_COMPARE_TOOLS_DOC
+except Exception as _install_cmp_err:
+    logger.error(f"tools_install_compare not loaded: {_install_cmp_err}")
 
 # QuoteIQ job-request chain (intake → CRM → dims → Pricing Studio → DRAFT).
 try:
