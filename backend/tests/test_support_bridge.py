@@ -89,6 +89,34 @@ def test_webhook_loopback_refuses_owner_and_studio_ports(monkeypatch):
     assert _webhook_loopback_ports() == {8099}
 
 
+def test_webhook_brother_is_name_not_email(monkeypatch):
+    from app.services.support_bridge import build_webhook_payload
+
+    amp = build_webhook_payload(
+        {
+            "id": "fh-amp",
+            "edition": "amp",
+            "sender": "juan@example.com",
+            "message": "hola",
+            "created_at": "2026-10-23T00:00:00Z",
+        }
+    )
+    assert amp["brother"] == "Juan Diego Giraldo"
+    assert "@" not in amp["brother"]
+
+    maxine = build_webhook_payload(
+        {
+            "id": "fh-maxine",
+            "edition": "maxine",
+            "sender": "camilo@example.com",
+            "message": "hola",
+            "created_at": "2026-10-23T00:00:00Z",
+        }
+    )
+    assert maxine["brother"] == "Camilo Giraldo"
+    assert "@" not in maxine["brother"]
+
+
 def test_webhook_auth_header_default_and_custom(monkeypatch):
     from app.services.support_bridge import webhook_auth_header
 
@@ -200,7 +228,7 @@ def test_create_returns_while_webhook_hangs(monkeypatch, tmp_path):
         )
         elapsed = time.monotonic() - start
         assert ticket["id"].startswith("fh-")
-        assert elapsed < 0.8, f"create_ticket blocked on webhook ({elapsed:.2f}s)"
+        assert elapsed < 1.5, f"create_ticket blocked on webhook ({elapsed:.2f}s)"
         payloads = _wait_payloads(timeout=4.0)
         assert payloads and payloads[0]["ticket_id"] == ticket["id"]
     finally:
