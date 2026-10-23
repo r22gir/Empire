@@ -1,7 +1,12 @@
 """Workroom job rules. Defaults live here; Pricing Studio can edit them.
 
-Install is $145 per window through 8 ft, then $20 per foot over that,
-unless the founder sets a flat rate for the section. Re-line widths are
+Re-line install is $145 per window through 8 ft, then $20 per foot over
+that, unless the founder sets a flat rate for the section.
+``install_per_window`` keeps that meaning. New-fabrication uses a
+separate $245 / 8 ft install and $325 / 8 ft track (prorated); those
+keys never alias the re-line window rate.
+
+Re-line widths are
 
     (window width × 2 + 11.5") / panels / 48
 
@@ -20,6 +25,7 @@ from __future__ import annotations
 
 import logging
 import math
+from decimal import Decimal, ROUND_HALF_UP
 
 logger = logging.getLogger(__name__)
 
@@ -43,6 +49,16 @@ DEFAULT_RULES: dict[str, float] = {
     "fabric_width_in": 48.0,
     "hem_allowance_in": 16.0,
     "deposit_percent": 50.0,
+    # New-fabrication only. Not used by re-line. Not aliased to install_per_window.
+    "install_per_8ft": 245.0,
+    "track_per_8ft": 325.0,
+    "install_section_ft": 8.0,
+    "new_fab_per_width": 95.0,
+    "new_fab_fullness": 2.5,
+    "new_fab_goods_width_in": 54.0,
+    "sheer_goods_width_in": 110.0,
+    "sheer_hem_allowance_in": 12.0,
+    "baton_fiberglass_each": 25.15,
 }
 
 _RULES: dict[str, float] = dict(DEFAULT_RULES)
@@ -212,17 +228,84 @@ def lining_yards(width_count: float, finished_in: float) -> float:
     return round(yards + 1e-9, 1)
 
 
+def ceil_yards(width_count: float, cut_in: float) -> int:
+    """Whole yards covering ``width_count`` cuts of ``cut_in`` inches."""
+    return int(math.ceil(float(width_count) * float(cut_in) / 36.0 - 1e-9))
+
+
+def track_feet(width_in: float) -> int:
+    """Whole feet of track, rounded up (21 ft for 249 5/16\", 16 ft for 189 3/8\")."""
+    return int(math.ceil(float(width_in) / 12.0 - 1e-9))
+
+
+def new_fab_widths(
+    coverage_in: float,
+    *,
+    fullness: float | None = None,
+    goods_in: float | None = None,
+    panels: int = 2,
+) -> dict:
+    """New-fabrication width count: coverage × fullness / goods, ceil to a whole width.
+
+    REV C default: 2.5× fullness on 54\" goods (main) or 110\" goods (sheers).
+    249 5/16\" × 2.5 / 54 → 12 widths; 189 3/8\" × 2.5 / 110 → 5 widths.
+    """
+    fullness = float(fullness if fullness is not None else rule("new_fab_fullness"))
+    goods = float(goods_in if goods_in is not None else rule("new_fab_goods_width_in"))
+    if fullness > 10:
+        fullness = fullness / 100.0
+    fabric_in = float(coverage_in) * fullness
+    raw = fabric_in / goods if goods else 0.0
+    total = int(math.ceil(raw - 1e-9)) if raw > 0 else 0
+    panels = max(1, int(panels))
+    per_panel = total / panels
+    return {
+        "coverage": float(coverage_in),
+        "fullness": fullness,
+        "goods_in": goods,
+        "fabric_in": fabric_in,
+        "raw": raw,
+        "total": total,
+        "panels": panels,
+        "per_panel": per_panel,
+    }
+
+
+def _money(value: float) -> float:
+    return float(Decimal(str(value)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP))
+
+
 def install_price(width_in: float, flat: float | None = None) -> dict:
-    """Flat section rate replaces the measured formula when the founder sets one."""
+    """$145 per window through 8 ft, then $20/ft over. Flat replaces the formula."""
     if flat is not None:
-        return {"amount": round(float(flat), 2), "method": "flat", "width_ft": width_in / 12.0}
+        return {
+            "amount": _money(float(flat)),
+            "method": "flat",
+            "width_ft": float(width_in) / 12.0,
+        }
     width_ft = float(width_in) / 12.0
     included = rule("install_included_ft")
     over = max(0.0, width_ft - included)
     amount = rule("install_per_window") + over * rule("install_overage_per_ft")
     return {
-        "amount": round(amount, 2),
+        "amount": _money(amount),
         "method": "measured",
         "width_ft": width_ft,
         "over_ft": over,
     }
+
+
+def track_price(
+    width_in: float,
+    *,
+    hours: float | None = None,
+    flat: float | None = None,
+    override: bool = False,
+) -> dict:
+    """New-fab complete track: $325 per 8 ft, prorated.
+
+    Hourly is unreachable unless the founder sets an explicit per-quote
+    override (``override=True`` and ``hours``).
+    """
+    from app.services.estimates.rafael_format import track_section_price
+    return track_section_price(width_in, hours=hours, flat=flat, override=override)

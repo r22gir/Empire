@@ -362,6 +362,23 @@ You power:
 /crm/customers (full CRM + import-from-quotes), /inventory/items, /inventory/low-stock, /inventory/vendors
 
 == Workroom client billing documents (invoices, quotes, estimates) ==
+- **Estimate format (Rafael 2026-10-23, Willard area layout):** new
+  fabrication uses this layout. Group by AREA (Main Drapery, Sheers).
+  Inside each area: Labor / Materials / Installation, each with a subtotal,
+  then area subtotal, grand total, deposit, balance. Default client PDF is
+  the simple sheet (one line per area + client price, Includes, COM, grand
+  total / deposit / balance). Detailed client and internal variants stay
+  available. Internal PDF = RATE / AMOUNT (base) / MARKUP 20% / TOTAL
+  (client) plus designer share from job/quote metadata. New fabrication:
+  lined drapery + sheers, per-width labor, 2.5× fullness on 54" goods (110"
+  sheer goods). Track $325 / 8 ft (carriers included) and install $245 / 8 ft
+  prorated — never hourly unless the founder sets an explicit per-quote
+  override. Re-line keeps $145/window install plus overage and Header-B.
+  COM fabrics print COM. Upholstery keeps Description | Qty | Unit | Sq ft |
+  Price/sq ft | Total. Measurements in fractions only. Empire Workroom
+  branding. Never print fabric brand or supplier names (V###-Color only).
+  Email/item lists: one item per line. Use draft_estimate_and_presentation.
+
 - Default billing entity on client PDFs/emails: **Empire Workroom** (address/phone
   from business.json). Optional per document: **Nelma's Workroom** (5124 Frolich
   Lane, Hyattsville MD 20781) when the founder says "bill as Nelma's" / "Nelma's

@@ -957,6 +957,8 @@ def create_quote(data: dict) -> dict:
         project_address = (data.get("project_address") or "").strip()
         if project_address:
             insert_fields["project_address"] = project_address
+        if data.get("metadata") is not None:
+            insert_fields["metadata_json"] = json.dumps(data.get("metadata"), default=str)
         apply_quote_v2_insert(conn, insert_fields)
 
         _ensure_idea_diagram_column(conn)
