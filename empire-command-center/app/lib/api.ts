@@ -1,4 +1,5 @@
 import { empireApiV1 } from './instanceUrl';
+import { recordClientError } from './lastClientError';
 
 function resolveApiBase(): string {
   if (typeof window === 'undefined') {
@@ -36,7 +37,11 @@ export async function apiFetch<T = any>(path: string, opts?: RequestInit): Promi
     headers: { 'Content-Type': 'application/json', ...opts?.headers },
     cache: 'no-store',
   });
-  if (!res.ok) throw new Error(`API ${res.status}: ${path}`);
+  if (!res.ok) {
+    const err = new Error(`API ${res.status}: ${path}`);
+    recordClientError(err);
+    throw err;
+  }
   return res.json();
 }
 

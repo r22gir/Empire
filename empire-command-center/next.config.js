@@ -90,6 +90,10 @@ const nextConfig = {
         destination: `${BACKEND_UPSTREAM}/api/v1/:path*`,
       },
       {
+        source: '/api/support/:path*',
+        destination: `${BACKEND_UPSTREAM}/api/support/:path*`,
+      },
+      {
         source: '/intake_uploads/:path*',
         destination: `${BACKEND_UPSTREAM}/intake_uploads/:path*`,
       },

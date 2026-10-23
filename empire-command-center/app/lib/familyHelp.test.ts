@@ -6,6 +6,10 @@ import {
   inferHelpMime,
   validateHelpFile,
 } from './familyHelpUpload.ts';
+import { currentHelpScreen, lastClientError, recordClientError } from './lastClientError.ts';
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 test('Spanish is the default copy for Pedir ayuda a Max', () => {
   const es = familyHelpLabels('es');
@@ -39,4 +43,16 @@ test('client upload checks size, type, and browser MIME aliases', () => {
     validateHelpFile({ name: 'huge.png', type: 'image/png', size: HELP_MAX_FILE_BYTES + 1 }).ok,
     false,
   );
+});
+
+test('Pedir ayuda button stays on AskMaxHelp and records last client error', () => {
+  const here = dirname(fileURLToPath(import.meta.url));
+  const ui = readFileSync(join(here, '../components/family/AskMaxHelp.tsx'), 'utf8');
+  assert.match(ui, /data-testid="pedir-ayuda"/);
+  assert.match(ui, /data-testid="pedir-ayuda-thread"/);
+  assert.match(ui, /currentHelpScreen\('chat'\)/);
+  assert.match(ui, /lastClientError\(\)/);
+  recordClientError('API 500: /family-help/tickets');
+  assert.equal(lastClientError(), 'API 500: /family-help/tickets');
+  assert.equal(currentHelpScreen('chat'), 'chat');
 });

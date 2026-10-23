@@ -1034,6 +1034,7 @@ import re as _re
 
 _PUBLIC_SALES_PREFIX = "/api/v1/public/ventas/"
 _PUBLIC_SALES_LEAD = _re.compile(r"^/api/v1/public/ventas/projects/[a-z0-9-]{1,80}/lead$")
+_SUPPORT_REPLY = _re.compile(r"^/api/support/tickets/[A-Za-z0-9._-]{1,80}/reply$")
 
 
 def public_sales_exempt(method: str, path: str) -> bool:
@@ -1047,8 +1048,22 @@ def public_sales_exempt(method: str, path: str) -> bool:
     return verb == "POST" and bool(_PUBLIC_SALES_LEAD.match(clean))
 
 
+def support_reply_exempt(method: str, path: str) -> bool:
+    """Chief e inbound reply: secret-gated, not a user-session path.
+
+    Independent of PR #217 (which only changes public ventas + GET /edition).
+    Always matches POST /api/support/tickets/{ticket_id}/reply.
+    """
+    clean = path.split("?", 1)[0]
+    if ".." in clean or "//" in clean:
+        return False
+    return method.upper() == "POST" and bool(_SUPPORT_REPLY.match(clean))
+
+
 def access_exempt(method: str, path: str) -> bool:
     clean = path.split("?", 1)[0]
+    if support_reply_exempt(method, clean):
+        return True
     if public_sales_exempt(method, clean):
         return True
     for allowed_method, allowed_path in _ALLOWLIST_EXEMPT:
