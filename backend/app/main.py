@@ -248,6 +248,9 @@ load_router("app.routers.cursor_requests", "/api/v1", ["cursor-requests"])
 # Family editions → personal Max help inbox (amp / maxine write; founder reads)
 load_router("app.routers.family_help", "/api/v1", ["family-help"])
 
+# Chief e inbound replies (secret-gated; family editions only; /api/v1/* for CF)
+load_router("app.routers.support_tickets", "/api/v1/support", ["support"])
+
 # Shared MiniMax meter (all editions) + H3 approval queue (founder only)
 load_router("app.routers.minimax_meter", "/api/v1", ["minimax-meter"])
 

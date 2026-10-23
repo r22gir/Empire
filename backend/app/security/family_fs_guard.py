@@ -51,6 +51,60 @@ def _edition() -> str:
     return os.getenv("EMPIRE_EDITION", "").strip().lower()
 
 
+# Workroom / Studio / owner loopback — never opened by SUPPORT_WEBHOOK_URL.
+# 8000 = Workroom backend (EDITION_PROFILES workroom.backend_port, API_PORT)
+# 3005 = Studio Command Center (workroom.frontend_port, main.py Command Center)
+# 3000 = owner/Hermes port called out in review
+_OWNER_LOOPBACK_PORTS = {8000, 3000, 3005}
+
+
+def _owner_loopback_ports() -> set[int]:
+    ports = set(_OWNER_LOOPBACK_PORTS)
+    try:
+        from app.edition import EDITION_PROFILES
+
+        wr = EDITION_PROFILES.get("workroom") or {}
+        for key in ("backend_port", "frontend_port"):
+            value = wr.get(key)
+            if value:
+                ports.add(int(value))
+    except Exception:
+        pass
+    return ports
+
+
+def _webhook_loopback_ports() -> set[int]:
+    """Allow SUPPORT_WEBHOOK_URL when it is loopback (local mock / Dell).
+
+    Public Chief e URLs are already allowed (addr_denied skips non-private
+    IPs). Owner / Workroom / Studio ports are never opened, even if the
+    webhook URL points at them.
+    """
+    raw = (os.getenv("SUPPORT_WEBHOOK_URL") or "").strip()
+    if not raw:
+        return set()
+    try:
+        from urllib.parse import urlparse
+
+        parsed = urlparse(raw)
+    except Exception:
+        return set()
+    host = (parsed.hostname or "").lower()
+    if host not in {"127.0.0.1", "localhost", "::1"}:
+        return set()
+    if parsed.port:
+        port = int(parsed.port)
+    elif parsed.scheme == "https":
+        port = 443
+    elif parsed.scheme == "http":
+        port = 80
+    else:
+        return set()
+    if port in _owner_loopback_ports():
+        return set()
+    return {port}
+
+
 class _Policy:
     def __init__(self) -> None:
         ed = _edition()
@@ -93,6 +147,7 @@ class _Policy:
         prof = {"amp": (8011, 3011), "maxine": (8012, 3012)}.get(ed, ())
         ports.update(prof)
         ports.add(11434)  # local model runtime, holds no owner data
+        ports.update(_webhook_loopback_ports())
         ports.discard(0)
         self.local_ports = ports
         self._cache: dict = {}

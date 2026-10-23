@@ -142,6 +142,8 @@ async def create_ticket(
     history_json: str = Form("[]"),
     language: Optional[str] = Form(None),
     request_type: Optional[str] = Form(None),
+    current_screen: Optional[str] = Form(None),
+    last_error: Optional[str] = Form(None),
     voice: Optional[UploadFile] = File(None),
     files: Optional[list[UploadFile]] = File(None),
     file: Optional[UploadFile] = File(None),
@@ -202,6 +204,8 @@ async def create_ticket(
             transcript=transcript,
             attachments=attachments,
             request_type=request_type,
+            current_screen=current_screen,
+            last_error=last_error,
         )
     except PermissionError as exc:
         raise HTTPException(status_code=403, detail=str(exc)) from exc
