@@ -73,10 +73,13 @@ def test_chats_and_admin_are_not_allowlist_exempt():
     assert ("GET", "/api/v1/whatsapp/credentials") not in exempt
     assert ("GET", "/api/v1/whatsapp/webhook") in exempt
     assert ("POST", "/api/v1/whatsapp/webhook") in exempt
+    assert ("GET", "/api/v1/edition") not in exempt
     assert access_exempt("GET", "/api/v1/whatsapp/webhook") is True
     assert access_exempt("POST", "/api/v1/whatsapp/webhook") is True
     assert access_exempt("GET", "/api/v1/whatsapp/chats") is False
     assert access_exempt("GET", "/api/v1/whatsapp/status") is False
+    assert access_exempt("GET", "/api/v1/edition") is False
+    assert access_exempt("GET", "/api/v1/public/ventas/projects") is False
 
 
 def test_anonymous_whatsapp_admin_and_chats_are_denied_on_amp_and_maxine(monkeypatch, tmp_path):

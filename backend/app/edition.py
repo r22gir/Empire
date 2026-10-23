@@ -153,10 +153,12 @@ AMP_MODULE_LABELS_ES = {
     "max": "Max-e",
 }
 
+# Family /api/v1 is owner-session only. The only holes left open are
+# health, the AMP login/session endpoints, and the Meta WhatsApp webhook.
+# GET /api/v1/edition and /api/v1/public/ventas/* are not exempt.
 _ALLOWLIST_EXEMPT = (
     ("GET", "/health"),
     ("GET", "/"),
-    ("GET", "/api/v1/edition"),
     # Edition login. These do not trust client identity headers.
     ("POST", "/api/v1/amp/auth/request"),
     ("POST", "/api/v1/amp/auth/verify"),
@@ -1125,9 +1127,12 @@ def public_sales_exempt(method: str, path: str) -> bool:
 
 
 def access_exempt(method: str, path: str) -> bool:
+    """Family middleware bypass. Founder edition never consults this.
+
+    Public ventas stays a helper for Maxine's own router, but family
+    /api/v1 callers still need an owner session.
+    """
     clean = path.split("?", 1)[0]
-    if public_sales_exempt(method, clean):
-        return True
     for allowed_method, allowed_path in _ALLOWLIST_EXEMPT:
         if method.upper() == allowed_method and clean == allowed_path:
             return True

@@ -163,8 +163,10 @@ def test_module_gating_blocks_hidden_routes(monkeypatch, tmp_path):
     assert "no disponible" in denied.json()["detail"]
     craft = client.get("/api/v1/craftforge/designs", headers=_owner())
     assert craft.status_code == 403
-    # Shared edition manifest stays open.
-    edition = client.get("/api/v1/edition")
+    denied_edition = client.get("/api/v1/edition")
+    assert denied_edition.status_code == 403
+    assert denied_edition.json()["code"] == "sin_acceso"
+    edition = client.get("/api/v1/edition", headers=_owner())
     assert edition.status_code == 200
     assert edition.json()["edition"] == "amp"
 
@@ -253,12 +255,11 @@ def test_family_prompt_asks_for_short_spanish_and_search_first(monkeypatch, tmp_
 
 def test_spanish_default_and_english_greeting(monkeypatch, tmp_path):
     client = _client(monkeypatch, tmp_path)
-    body = client.get("/api/v1/edition").json()
+    assert client.get("/api/v1/edition").status_code == 403
+    body = client.get("/api/v1/edition", headers=_owner()).json()
     assert body["default_locale"] == "es"
     assert body["greeting"].startswith("¡Quiubo manito!")
-    assert "Juan Diego Giraldo" not in body["greeting"]
-    assert "Juan Diego Giraldo" not in body["assistant"]["greeting_es"]
-    assert "Juan Diego Giraldo" not in body["assistant"]["greeting_en"]
+    assert "Juan Diego Giraldo" in body["greeting"]
     from app.edition import greeting
     assert greeting("en").startswith("Hi, I'm Max-e")
     assert "Juan Diego Giraldo" in greeting("es", include_owner=True)

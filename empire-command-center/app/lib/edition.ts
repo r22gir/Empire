@@ -71,7 +71,7 @@ export function useEdition(): string {
 
   useEffect(() => {
     let cancelled = false;
-    fetch(`${API_BASE}/api/v1/edition`)
+    fetch(`${API_BASE}/api/v1/edition`, { credentials: 'include', cache: 'no-store' })
       .then((res) => (res.ok ? res.json() : null))
       .then((data) => {
         if (!cancelled && data?.edition) setEdition(String(data.edition));
