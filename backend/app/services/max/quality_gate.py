@@ -86,8 +86,9 @@ def validate_response(
     # For ACTION responses (owner said "send email", "create task", etc.),
     # tool errors are informational — never mark as FAILED.
     # The owner explicitly requested the action; report results, don't block.
-    if is_action:
-        # Action responses: tool errors downgrade to MODERATE at worst
+    if is_action and result.level != FAILED:
+        # Action responses: tool errors downgrade to MODERATE at worst.
+        # failed-check (believable wrong values) stays FAILED — do not act.
         if any("tool_error" in w for w in result.warnings):
             result.level = MODERATE
             result.disclaimer = ""  # Tool error details are already in the response
@@ -119,6 +120,12 @@ def _check_tool_results(result: QualityResult, tool_results: list):
     result.checks_performed.append("tool_verification")
     for tr in tool_results:
         tr_dict = tool_result_to_dict(tr)
+        payload = tr_dict.get("result") or {}
+        if isinstance(payload, dict) and payload.get("failed_check"):
+            tool_name = tr_dict.get("tool", "unknown")
+            result.level = FAILED
+            result.warnings.append(f"failed_check:{tool_name}")
+            continue
         if not tr_dict.get("success"):
             tool_name = tr_dict.get("tool", "unknown")
             error = tr_dict.get("error", "unknown error")

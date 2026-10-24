@@ -521,6 +521,18 @@ def tool(name: str):
     return decorator
 
 
+def run_checked_handler(tool_name: str, handler, tool_call: dict, desk: Optional[str] = None) -> "ToolResult":
+    """Run a registered handler, then apply code-level sanity checks.
+
+    Extracted so tests can exercise the real post-auth tool path without
+    importing the auth/tier stack. Production execute_tool uses this
+    after PIN/tier gates.
+    """
+    from app.services.max.tool_checks import gate_tool_result
+    result = _coerce_tool_result(tool_name, handler(tool_call, desk))
+    return gate_tool_result(tool_name, result, tool_call)
+
+
 def execute_tool(tool_call: dict, desk: Optional[str] = None, access_context: Optional[dict] = None, founder: bool = False, channel: Optional[str] = None) -> ToolResult:
     """Dispatch and execute a tool call (with tier gating and access control).
 
@@ -709,7 +721,7 @@ def execute_tool(tool_call: dict, desk: Optional[str] = None, access_context: Op
 
         handler = TOOL_REGISTRY.get(tool_name)
         if handler:
-            return _coerce_tool_result(tool_name, handler(tool_call, desk))
+            return run_checked_handler(tool_name, handler, tool_call, desk)
 
         available = ", ".join(sorted(TOOL_REGISTRY.keys()))
         return ToolResult(tool=tool_name, success=False,
@@ -3075,6 +3087,49 @@ def _auto_email_pdf(pdf_path: str, email_to: str, drawing_name: str) -> dict | N
         return {"emailed": False, "error": str(e)}
 
 
+def _attach_drawing_cuts(result: dict, params: dict, dims: dict | None = None) -> dict:
+    """Copy/compute wood-foam-fabric cuts onto a drawing result for tool_checks."""
+    from app.services.max.tool_checks import attach_cut_sheet, fabric_allowance_for_foam
+
+    src = {}
+    explicit = False
+    for block in (result, params, dims or {}):
+        if not isinstance(block, dict):
+            continue
+        src.update(block)
+        nested = block.get("cuts") or block.get("cut_sheet")
+        if isinstance(nested, dict):
+            src.update(nested)
+            explicit = True
+        if any(block.get(k) is not None for k in (
+            "wood_cut", "board_cut", "foam_cut", "fabric_cut",
+        )):
+            explicit = True
+    wood = (
+        src.get("wood_cut") or src.get("board_cut")
+        or src.get("width") or src.get("width_in")
+    )
+    thickness = (
+        src.get("foam_thickness") or src.get("foam_thk")
+        or src.get("seat_cushion_thickness")
+    )
+    if wood is None:
+        return result
+    if not explicit and fabric_allowance_for_foam(thickness) is None:
+        return result
+    if not explicit and thickness is None:
+        return result
+    sheet = attach_cut_sheet(
+        wood,
+        thickness,
+        foam_cut=src.get("foam_cut"),
+        fabric_cut=src.get("fabric_cut"),
+    )
+    result["cuts"] = sheet
+    result["cut_sheet"] = sheet
+    return result
+
+
 def _render_bench_shop_drawing(params: dict, dims: dict) -> ToolResult | None:
     """Straight bench / banquette → bench_renderer (plan + front + optional side)."""
     try:
@@ -3151,23 +3206,27 @@ def _render_bench_shop_drawing(params: dict, dims: dict) -> ToolResult | None:
         f.write(svg)
     filename = os.path.basename(output_path)
     svg_filename = os.path.basename(svg_path)
+    bench_result = {
+        "pdf_path": output_path,
+        "svg_path": svg_path,
+        "size_bytes": size,
+        "product_type": "bench",
+        "item_type": "bench",
+        "svg": svg,
+        "svg_url": f"/api/v1/drawings/files/{svg_filename}",
+        "pdf_url": f"/api/v1/drawings/files/{filename}",
+        "drawing_engine": "vision.bench_renderer",
+        "business_unit": get_business_unit("bench"),
+        "panel_style": resolved["panel_style"],
+        "back_height_assumed": resolved["back_height_assumed"],
+        "width": resolved.get("width_in"),
+        "seat_cushion_thickness": resolved.get("seat_cushion_thickness"),
+    }
+    _attach_drawing_cuts(bench_result, params, {**dims, **resolved})
     return ToolResult(
         tool="render_shop_drawing",
         success=True,
-        result={
-            "pdf_path": output_path,
-            "svg_path": svg_path,
-            "size_bytes": size,
-            "product_type": "bench",
-            "item_type": "bench",
-            "svg": svg,
-            "svg_url": f"/api/v1/drawings/files/{svg_filename}",
-            "pdf_url": f"/api/v1/drawings/files/{filename}",
-            "drawing_engine": "vision.bench_renderer",
-            "business_unit": get_business_unit("bench"),
-            "panel_style": resolved["panel_style"],
-            "back_height_assumed": resolved["back_height_assumed"],
-        },
+        result=bench_result,
     )
 
 
@@ -3423,21 +3482,23 @@ def _render_shop_drawing(params: dict, desk: Optional[str] = None) -> ToolResult
             email_to = os.getenv("FOUNDER_EMAIL", "empirebox2026@gmail.com")
         email_status = _auto_email_pdf(str(out_path), email_to, product_type)
 
+    shop_result = {
+        "pdf_path": str(out_path),
+        "size_bytes": size,
+        "product_type": product_type,
+        "dims": spec["dims"],
+        "drawing_engine": "templates.render_spec (B1)",
+        "email": email_status,
+        "warnings": (
+            # Heuristic for surfacing — read first 200 chars of
+            # the rendered PDF for an ASSUMED-list preview.
+            "(see assumptions block in PDF)"
+        ),
+    }
+    _attach_drawing_cuts(shop_result, params, spec["dims"])
     return ToolResult(
         tool="render_shop_drawing", success=True,
-        result={
-            "pdf_path": str(out_path),
-            "size_bytes": size,
-            "product_type": product_type,
-            "dims": spec["dims"],
-            "drawing_engine": "templates.render_spec (B1)",
-            "email": email_status,
-            "warnings": (
-                # Heuristic for surfacing — read first 200 chars of
-                # the rendered PDF for an ASSUMED-list preview.
-                "(see assumptions block in PDF)"
-            ),
-        },
+        result=shop_result,
     )
 
 
@@ -5432,6 +5493,11 @@ def _draft_estimate_and_presentation(params: dict, desk: Optional[str] = None) -
             error=f"draft failed: {exc}. Nothing was sent.",
         )
     quote = drafted.get("quote") or {}
+    packet = drafted["packet"]
+    line_items = []
+    for opening in packet.get("rooms") or []:
+        for group in opening.get("groups") or []:
+            line_items.extend(group.get("lines") or [])
     return ToolResult(
         tool="draft_estimate_and_presentation",
         success=True,
@@ -5439,11 +5505,15 @@ def _draft_estimate_and_presentation(params: dict, desk: Optional[str] = None) -
             "status": "draft",
             "sent": False,
             "quote_id": quote.get("id"),
-            "quote_number": quote.get("quote_number") or drafted["packet"]["quote_number"],
-            "project_address": (drafted["packet"].get("project") or {}).get("address"),
-            "total": drafted["packet"]["total"],
-            "deposit": drafted["packet"]["deposit"],
-            "payment_line": drafted["packet"]["payment_line"],
+            "quote_number": quote.get("quote_number") or packet["quote_number"],
+            "project_address": (packet.get("project") or {}).get("address"),
+            "total": packet["total"],
+            "subtotal": packet.get("subtotal"),
+            "tax": packet.get("tax"),
+            "deposit": packet["deposit"],
+            "balance": packet.get("balance", round(packet["total"] - packet["deposit"], 2)),
+            "line_items": line_items,
+            "payment_line": packet["payment_line"],
             "estimate_bytes": len(drafted["estimate_pdf"]),
             "presentation_bytes": len(drafted["presentation_pdf"]),
         },
