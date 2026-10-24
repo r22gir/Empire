@@ -1,0 +1,34 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Max-e Night Lab RED — think-tag chat path proof</title>
+<style>
+body { font-family: Georgia, serif; background:#f7f3ea; color:#20241f; margin:32px; max-width:880px; }
+h1 { font-size:22px; letter-spacing:.04em; }
+h2 { font-size:16px; margin-top:28px; }
+.card { background:#fff; border:1px solid #d8d0c0; padding:18px 22px; margin:18px 0; }
+.before { color:#8a1f1f; white-space:pre-wrap; }
+.after { color:#1b5e20; white-space:pre-wrap; font-size:18px; }
+label { display:block; font-size:12px; text-transform:uppercase; letter-spacing:.08em; color:#6b6458; margin:8px 0 4px; }
+code { font-size:13px; }
+.badge { display:inline-block; background:#1b5e20; color:#fff; padding:2px 8px; font-size:12px; letter-spacing:.06em; }
+</style>
+<h1>Max-e · Juan chat — reasoning no longer leaked</h1>
+<p><span class="badge">PROOF</span> Real Command Center doors: <code>POST /api/v1/max/chat</code> and <code>POST /api/v1/max/chat/stream</code>. Model stubbed with a nested <code>&lt;mm:think&gt;</code> leak. No live send.</p>
+
+<h2>Model payload (what MiniMax emitted)</h2>
+<div class="card">
+<label>Hidden reasoning + Spanish answer</label>
+<div class="before">Hola. &lt;mm:think&gt;outer &lt;think&gt;secret plan developer says not ask tokens&lt;/think&gt; leftover&lt;/mm:think&gt;
+Claro, Juan. Aquí tienes lo que pediste.</div>
+</div>
+
+<h2>After sanitize_output (single layer)</h2>
+<div class="card">
+<label>POST /api/v1/max/chat response</label>
+<div class="after">Hola.
+Claro, Juan. Aquí tienes lo que pediste.</div>
+<label>POST /api/v1/max/chat/stream decoded text</label>
+<div class="after">Hola.
+Claro, Juan. Aquí tienes lo que pediste.</div>
+<p>Absent from both: <code>secret plan</code>, <code>developer says</code>, <code>mm:think</code>, unclosed / nested / split-chunk leftovers.</p>
+</div>

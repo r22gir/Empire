@@ -22,6 +22,11 @@ _COMPLETE_TAG_RE = re.compile(
     rf"<(?:{_TAG_ALT})\b[^>]*>.*?</(?:{_TAG_ALT})>",
     re.IGNORECASE | re.DOTALL,
 )
+# Innermost first: do not let an inner </think> close an outer <mm:think>.
+_INNERMOST_COMPLETE_RE = re.compile(
+    rf"<(?:{_TAG_ALT})\b[^>]*>(?:(?!<(?:{_TAG_ALT})\b).)*?</(?:{_TAG_ALT})>",
+    re.IGNORECASE | re.DOTALL,
+)
 _UNCLOSED_TAG_RE = re.compile(
     rf"<(?:{_TAG_ALT})\b[^>]*>.*\Z",
     re.IGNORECASE | re.DOTALL,
@@ -172,15 +177,32 @@ def _strip_untagged_reasoning_preamble(text: str) -> str:
     return "\n\n".join(kept) if kept else text
 
 
+def _strip_complete_blocks(text: str) -> str:
+    """Peel complete think blocks from the inside out.
+
+    One ``.*?`` pass stops at the first close tag, so nested
+    ``<mm:think>…<think>…</think> leftover</mm:think>`` used to leave an
+    orphan close that ate the visible prefix. Repeat until stable.
+    """
+    cleaned = text
+    for _ in range(8):
+        nxt = _INNERMOST_COMPLETE_RE.sub("", cleaned)
+        nxt = _SPECIAL_COMPLETE_RE.sub("", nxt)
+        nxt = _FENCE_COMPLETE_RE.sub("", nxt)
+        if nxt == cleaned:
+            nxt = _COMPLETE_TAG_RE.sub("", nxt)
+        if nxt == cleaned:
+            return cleaned
+        cleaned = nxt
+    return cleaned
+
+
 def strip_thinking(text: str | None, *, trim_edges: bool = True) -> str:
     """Remove hidden reasoning from a complete (or flushed) model string."""
     if not text:
         return "" if text is None else text
 
-    cleaned = str(text)
-    cleaned = _COMPLETE_TAG_RE.sub("", cleaned)
-    cleaned = _SPECIAL_COMPLETE_RE.sub("", cleaned)
-    cleaned = _FENCE_COMPLETE_RE.sub("", cleaned)
+    cleaned = _strip_complete_blocks(str(text))
     # Unclosed think at end-of-string: drop it, do not keep the inner text.
     cleaned = _UNCLOSED_TAG_RE.sub("", cleaned)
     cleaned = _SPECIAL_UNCLOSED_RE.sub("", cleaned)
@@ -294,17 +316,83 @@ def sanitize_tool_call(tool_call: dict | None) -> dict:
     return cleaned
 
 
+_THINK_NAME_RE = re.compile(
+    rf"^{_TAG_ALT}$",
+    re.IGNORECASE,
+)
+_THINK_CANDIDATES = ("think", "thinking", "thought", "reason", "reasoning")
+
+
+def _xml_tag_name(tag: str) -> str | None:
+    if not (tag.startswith("<") and tag.endswith(">") and len(tag) >= 3):
+        return None
+    inner = tag[1:-1].strip()
+    if not inner:
+        return None
+    return inner.split(None, 1)[0]
+
+
+def _is_think_xml_tag(tag: str) -> bool:
+    name = _xml_tag_name(tag)
+    if not name:
+        return False
+    if name.startswith("/"):
+        name = name[1:]
+    return bool(_THINK_NAME_RE.match(name))
+
+
+def _name_could_be_think(name: str, *, closed: bool) -> bool:
+    if not name:
+        return not closed
+    if _THINK_NAME_RE.match(name):
+        return True
+    if closed:
+        return False
+    lower = name.lower()
+    if ":" in lower:
+        _prefix, _, rest = lower.partition(":")
+        if not _prefix:
+            return False
+        return rest == "" or any(cand.startswith(rest) for cand in _THINK_CANDIDATES)
+    if any(cand.startswith(lower) for cand in _THINK_CANDIDATES):
+        return True
+    return bool(re.match(r"^[A-Za-z][\w.-]*$", name))
+
+
+def _xml_buffer_could_be_think(buf: str) -> bool:
+    if not buf.startswith("<"):
+        return False
+    inner = buf[1:]
+    if not inner:
+        return True
+    if inner[0] == "/":
+        inner = inner[1:]
+        if not inner:
+            return True
+    if inner[0] in " \t\n!?":
+        return False
+    name = ""
+    for ch in inner:
+        if ch in " \t\n>/":
+            return _name_could_be_think(name, closed=True)
+        name += ch
+    return _name_could_be_think(name, closed=False)
+
+
 class ThinkingStreamFilter:
     """Stateful filter for streamed tokens with split ``<think>`` tags.
 
     Per-chunk regex cannot hide reasoning that starts in one chunk and
     ends in the next. Hold tag prefixes; drop everything between a
-    recognized open tag and its close tag.
+    recognized open tag and its close tag. Namespaced variants
+    (``<mm:think>``, ``<foo:thinking>``) are matched, not just a
+    hard-coded list — chunks often split mid-tag.
     """
 
     def __init__(self) -> None:
         self._mode = "visible"  # visible | thinking | fence
         self._buffer = ""
+        self._depth = 0
         self._max_open = max(len(tag) for tag in _STREAM_OPEN_TAGS)
         self._max_close = max(len(tag) for tag in _STREAM_CLOSE_TAGS)
 
@@ -322,12 +410,15 @@ class ThinkingStreamFilter:
         """End of stream. Drop leftover thinking; emit a non-tag remainder."""
         if self._mode != "visible":
             self._buffer = ""
+            self._depth = 0
             self._mode = "visible"
             return ""
         leftover = self._buffer
         self._buffer = ""
-        if leftover and _could_be_open_prefix(leftover):
-            # Incomplete ``<thi`` at EOS is not user text we can trust.
+        if leftover and (
+            _could_be_open_prefix(leftover) or _xml_buffer_could_be_think(leftover)
+        ):
+            # Incomplete ``<thi`` / ``<mm:th`` at EOS is not user text.
             if leftover.startswith("<") or leftover.startswith("◁") or leftover.startswith("```"):
                 return ""
         return leftover
@@ -338,13 +429,21 @@ class ThinkingStreamFilter:
         return self._consume_hidden(char)
 
     def _consume_visible(self, char: str) -> str:
-        start = self._buffer + char
         if not self._buffer:
-            if _could_be_open_prefix(char):
+            if _could_be_open_prefix(char) or char == "<":
                 self._buffer = char
                 return ""
             return char
-        self._buffer = start
+        self._buffer += char
+        if self._buffer.startswith("```") or self._buffer.startswith("◁") or self._buffer.startswith("<|"):
+            return self._consume_special_visible()
+        if self._buffer.startswith("<"):
+            return self._consume_xml_visible()
+        flushed = self._buffer
+        self._buffer = ""
+        return flushed
+
+    def _consume_special_visible(self) -> str:
         lowered = self._buffer.lower()
         exact = [tag for tag in _STREAM_OPEN_TAGS if lowered == tag.lower()]
         longer = [
@@ -353,37 +452,81 @@ class ThinkingStreamFilter:
         ]
         if exact and not longer:
             self._mode = "fence" if exact[0].startswith("```") else "thinking"
+            self._depth = 0 if exact[0].startswith("```") else 1
             self._buffer = ""
             return ""
         if longer and len(self._buffer) <= self._max_open:
             return ""
-        # Not a think-tag prefix. Flush as visible text.
         flushed = self._buffer
         self._buffer = ""
         return flushed
 
+    def _consume_xml_visible(self) -> str:
+        if ">" in self._buffer:
+            idx = self._buffer.find(">")
+            tag = self._buffer[: idx + 1]
+            rest = self._buffer[idx + 1 :]
+            self._buffer = ""
+            if _is_think_xml_tag(tag):
+                name = _xml_tag_name(tag) or ""
+                if name.startswith("/"):
+                    # Orphan close in visible text. Keep the tag so the
+                    # final strip_thinking can drop the reasoning prefix
+                    # (``secret plan</mm:think>Hola``).
+                    return tag + rest
+                self._mode = "thinking"
+                self._depth = 1
+                return rest
+            return tag + rest
+        if not _xml_buffer_could_be_think(self._buffer) or len(self._buffer) > 200:
+            flushed = self._buffer
+            self._buffer = ""
+            return flushed
+        return ""
+
     def _consume_hidden(self, char: str) -> str:
         self._buffer += char
         lowered = self._buffer.lower()
-        close_tags = _STREAM_CLOSE_TAGS
         if self._mode == "fence":
-            # A thinking fence ends at the next triple-backtick.
             if self._buffer.endswith("```") and len(self._buffer) >= 3:
                 self._mode = "visible"
+                self._depth = 0
                 self._buffer = ""
                 return ""
             if len(self._buffer) > 8000:
                 self._mode = "visible"
+                self._depth = 0
                 self._buffer = ""
             return ""
-        for tag in close_tags:
-            if lowered.endswith(tag.lower()):
-                self._mode = "visible"
+        if char == ">":
+            idx = self._buffer.rfind("<")
+            if idx >= 0 and _is_think_xml_tag(self._buffer[idx:]):
+                name = _xml_tag_name(self._buffer[idx:]) or ""
+                if name.startswith("/"):
+                    self._depth = max(0, self._depth - 1)
+                    self._buffer = ""
+                    if self._depth == 0:
+                        self._mode = "visible"
+                    return ""
+                self._depth += 1
                 self._buffer = ""
                 return ""
-        if len(self._buffer) > self._max_close:
-            # Keep only a suffix that could still complete a close tag.
-            self._buffer = self._buffer[-self._max_close:]
+        for tag in _STREAM_CLOSE_TAGS:
+            if lowered.endswith(tag.lower()):
+                self._depth = max(0, self._depth - 1)
+                self._buffer = ""
+                if self._depth == 0:
+                    self._mode = "visible"
+                return ""
+        for tag in _STREAM_OPEN_TAGS:
+            if tag.startswith("```"):
+                continue
+            if lowered.endswith(tag.lower()):
+                self._depth += 1
+                self._buffer = ""
+                return ""
+        if len(self._buffer) > max(self._max_close, 80):
+            self._buffer = self._buffer[-max(self._max_close, 80):]
         return ""
 
 

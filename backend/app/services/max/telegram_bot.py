@@ -523,8 +523,10 @@ class TelegramBot:
                 # background_tasks=None: bot has its own history
                 # persistence via _append_and_save below.
             )
+            from app.services.max.guardrails import sanitize_output
+
             model = resp.model_used or ""
-            response = resp.response or "No response."
+            response = sanitize_output(resp.response or "No response.")
             tool_results = resp.tool_results or []
             # Persist to disk (bot's own history path)
             _append_and_save(cid, "user", text, **(user_meta or {}))
@@ -546,8 +548,10 @@ class TelegramBot:
                     resp = await client.post(empire_api_url("/api/v1/max/chat"), json=payload)
                     if resp.status_code == 200:
                         data = resp.json()
+                        from app.services.max.guardrails import sanitize_output
+
                         model = data.get("model_used", "")
-                        response = data.get("response", "No response.")
+                        response = sanitize_output(data.get("response", "No response."))
                         tool_results = data.get("tool_results", [])
                         _append_and_save(cid, "user", text, **(user_meta or {}))
                         _append_and_save(cid, "assistant", response)

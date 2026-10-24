@@ -89,6 +89,10 @@ class EmailService:
                 "Email not configured — set SENDGRID_API_KEY or SMTP_USER/SMTP_PASSWORD env vars"
             )
         source_text = body_text if body_text is not None else html_to_text(body_html or "")
+        from app.services.max.guardrails import sanitize_output
+
+        source_text = sanitize_output(source_text)
+        subject = sanitize_output(subject or "")
         self._verify_send_payload(to, subject, source_text, attachments)
         rendered = render_house_email(source_text, recipient_name=recipient_name)
         # Always generate a fresh ID for each provider submission. With no
@@ -474,7 +478,9 @@ def generate_email_reply_draft(
                 api_resp = _post()
             if api_resp.status_code == 200:
                 data = api_resp.json()
-                result["max_response_text"] = (
+                from app.services.max.guardrails import sanitize_output
+
+                result["max_response_text"] = sanitize_output(
                     data.get("choices", [{}])[0].get("message", {}).get("content", "")
                 )
                 result["model_used"] = f"{provider_key}-{result['model']}"
