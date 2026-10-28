@@ -63,7 +63,7 @@ docker-compose -f docker-compose.yml up -d
 - No test command in package.json
 
 ## Gotchas
-- Multi-worker mode: background services only run on primary worker (file lock at `/tmp/empire_primary_worker.lock`)
+- Multi-worker mode: background services only run on primary worker (file lock at `/home/rg/empire-data/run/empire_primary_worker.lock`, not `/tmp`; a 30s loop re-binds the name if it is unlinked)
 - CORS origins from `CORS_ORIGINS` env (default: `*`)
 - SQLite used for dev, PostgreSQL for prod (docker-compose)
 - Frontend port 3005 stated in CLAUDE.md but not in package.json (run via `npm run dev` then access on 3005)
