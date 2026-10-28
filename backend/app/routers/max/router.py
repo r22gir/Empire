@@ -32,7 +32,7 @@ from app.services.max.guardrails import (
     is_imperative_action_request,
 )
 from app.services.max.security.sanitizer import sanitizer as input_sanitizer, audit_dir as security_audit_dir
-from app.services.max.tool_executor import parse_tool_blocks, parse_tool_blocks_with_errors, strip_tool_blocks, execute_tool, ToolResult, get_xai_tool_definitions
+from app.services.max.tool_executor import parse_tool_blocks, parse_tool_blocks_with_errors, strip_tool_blocks, execute_tool, ToolResult, get_xai_tool_definitions, filter_unregistered_tool_calls
 from app.services.max.minimax_tools import minimax_tools_status
 from app.services.max.tool_result_normalizer import (
     normalize_tool_result_entry as _normalize_tool_result_entry_canonical,
@@ -1601,6 +1601,8 @@ def _sanitize_internal_leakage_text(text: str | None) -> str:
     cleaned = re.sub(r"```(?:tool|json|actions?)?\s*", "", cleaned, flags=re.IGNORECASE)
     cleaned = re.sub(r"```", "", cleaned)
     cleaned = re.sub(r"\[\s*Tool\s+call\s*:[^\]]*\]", "", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"</?(?:minimax:)?tool_calls?\b[^>]*>", "", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"<invoke\b[^>]*>.*?</invoke>", "", cleaned, flags=re.IGNORECASE | re.DOTALL)
     cleaned = re.sub(r"\bI should check\b[^\n.]*[.\n]?", "", cleaned, flags=re.IGNORECASE)
     cleaned = re.sub(r"\bruntime check required\b[^\n.]*[.\n]?", "", cleaned, flags=re.IGNORECASE)
     cleaned = re.sub(r"\bdelegation check required\b[^\n.]*[.\n]?", "", cleaned, flags=re.IGNORECASE)
@@ -1620,10 +1622,60 @@ def _family_graceful_visible_reply(
 
     Agenda-tool failure (or a leftover 'calendar unavailable' line after
     MiniMax printed ``[Tool call: …]``) becomes a short Spanish fallback.
+    DOCX maestro/resumen success replaces plan-only / LibreOffice-deadend
+    text with the real links. Missing-tool dumps become a short Spanish line.
     """
     cleaned = text or ""
     if not _is_family_edition():
         return cleaned
+    cleaned = _sanitize_internal_leakage_text(cleaned)
+    try:
+        from app.services.max.docx_maestro import (
+            is_docx_process_ask,
+            looks_like_plan_or_deadend,
+            unknown_tool_reply,
+        )
+
+        rows = [row for row in (tool_results or []) if isinstance(row, dict)]
+        docx_ask = is_docx_process_ask(
+            getattr(request, "message", None),
+            getattr(request, "image_filename", None),
+        )
+        docx_ok = [row for row in rows if row.get("tool") == "process_docx" and row.get("success")]
+        has_execute = any(
+            str(row.get("tool") or "") in {"execute_code", "functions.execute_code"}
+            or str((row.get("result") or {}).get("_redirected_from") or "") == "execute_code"
+            for row in rows
+        )
+        if docx_ask or docx_ok or has_execute:
+            if docx_ok:
+                delivery = ""
+                result = docx_ok[0].get("result") or {}
+                if isinstance(result, dict):
+                    delivery = str(result.get("user_reply") or "").strip()
+                if delivery and (
+                    looks_like_plan_or_deadend(cleaned)
+                    or "/files/view/" not in cleaned
+                    or "execute_code" in cleaned.lower()
+                ):
+                    return delivery
+            leftover_tool = bool(re.search(
+                r"(?i)(?:<tool_call|to\s*=\s*functions\.|errorType\s*=|execute_code|\]<\]minimax)",
+                cleaned,
+            ))
+            if leftover_tool or looks_like_plan_or_deadend(cleaned):
+                docx_fail = [
+                    row for row in rows
+                    if row.get("tool") == "process_docx" and not row.get("success")
+                ]
+                if docx_fail:
+                    err = str(docx_fail[0].get("error") or "").strip()
+                    if err:
+                        return err
+                if has_execute or leftover_tool:
+                    return unknown_tool_reply("execute_code")
+    except Exception:
+        pass
     try:
         from app.services.max.today_agenda import agenda_unavailable_reply, is_today_agenda_ask
     except Exception:
@@ -2651,6 +2703,38 @@ async def _inject_today_agenda_prelookup(request, messages, founder: bool) -> li
     return entries
 
 
+def _docx_prelookup_needed(message: str | None, filename: str | None = None) -> bool:
+    try:
+        from app.services.max.docx_maestro import is_docx_process_ask
+        return is_docx_process_ask(message, filename)
+    except Exception:
+        return False
+
+
+async def _inject_docx_prelookup(request, messages, founder: bool) -> list[dict[str, Any]]:
+    """Run process_docx before the model can promise a plan or call execute_code."""
+    entries: list[dict[str, Any]] = []
+    try:
+        from app.services.max.docx_maestro import prelookup_calls, prelookup_message
+        filename = getattr(request, "image_filename", None)
+        calls = prelookup_calls(request.message, filename)
+        if not calls:
+            return entries
+        rendered: list[tuple[str, str]] = []
+        for tc in calls:
+            result = await asyncio.to_thread(execute_tool, tc, desk=request.desk, founder=founder)
+            entry = _normalize_tool_result_entry(result)
+            entries.append(entry)
+            body = entry.get("error") if not entry.get("success") else _safe_dumps(entry.get("result") or {})
+            rendered.append((tc.get("tool") or "tool", str(body)[:4000]))
+        note = prelookup_message(rendered)
+        if note:
+            messages.insert(-1, AIMessage(role="system", content=note))
+    except Exception as exc:
+        logger.debug("docx_maestro prelookup skipped: %s", exc)
+    return entries
+
+
 def _is_family_edition() -> bool:
     try:
         from app.edition import is_family_edition
@@ -3423,9 +3507,16 @@ async def _chat_with_max_service_impl(
             messages.insert(-1, AIMessage(role="system", content=(
                 finance_system_preamble(include_totals=True) + "\n" + _finance_context
             )))
-        _agenda_prelookup_entries = []
+        # Agenda prelookup writes into messages only. Do not extend the
+        # returned entries into tool_results_list — that double-counts
+        # when the model also emits get_today_agenda / list_schedule.
         if _today_agenda_prelookup_needed(request.message):
-            _agenda_prelookup_entries = await _inject_today_agenda_prelookup(
+            await _inject_today_agenda_prelookup(
+                request, messages, founder,
+            )
+        _docx_prelookup_entries = []
+        if _docx_prelookup_needed(request.message, request.image_filename):
+            _docx_prelookup_entries = await _inject_docx_prelookup(
                 request, messages, founder,
             )
         if _family_pre_search_open(request.desk) and (
@@ -3433,6 +3524,7 @@ async def _chat_with_max_service_impl(
              or is_factual_question(request.message))
             and not _is_local_finance_readiness_request(request.message)
             and not _today_agenda_prelookup_needed(request.message)
+            and not _docx_prelookup_needed(request.message, request.image_filename)
         ):
             from app.services.max.search_context import build_search_query
             _built = build_search_query(request.message, history=request.history)
@@ -3503,6 +3595,7 @@ async def _chat_with_max_service_impl(
         if _pre_search_entry:
             tool_results_list.append(_pre_search_entry)
         tool_results_list.extend(_research_page_entries)
+        tool_results_list.extend(_docx_prelookup_entries)
         final_content = response.content
         loop_messages = list(messages)
         current_response = response
@@ -3528,6 +3621,7 @@ async def _chat_with_max_service_impl(
             tool_calls, tool_block_errors = parse_tool_blocks_with_errors(
                 current_response.content
             )
+            tool_calls = filter_unregistered_tool_calls(tool_calls, tool_results_list)
             if tool_block_errors:
                 for err in tool_block_errors:
                     logger.warning(
@@ -3634,6 +3728,8 @@ async def _chat_with_max_service_impl(
                 # Inject image_filename into quote tools so uploaded photos flow through
                 if request.image_filename and tc.get("tool") in ("create_quick_quote", "photo_to_quote") and "image_filename" not in tc:
                     tc["image_filename"] = request.image_filename
+                if request.image_filename and tc.get("tool") == "process_docx" and not tc.get("filename"):
+                    tc["filename"] = request.image_filename
 
                 tc = _coerce_drawing_tool_call(
                     tc, request.message, request.image_filename,
@@ -3838,6 +3934,7 @@ async def _chat_with_max_service_impl(
             is_factual_question(request.message)
             and not _is_local_finance_readiness_request(request.message)
             and not _today_agenda_prelookup_needed(request.message)
+            and not _docx_prelookup_needed(request.message, request.image_filename)
             and "web_search" not in tools_used_names
             and not _local_tools_answered
         ):
@@ -4525,12 +4622,20 @@ async def _chat_stream_impl(request: ChatRequest, http_request: Request | None =
             )))
         if _today_agenda_prelookup_needed(request.message):
             yield f"data: {_safe_dumps({'type': 'progress', 'phase': 'agenda', 'message': 'Revisando calendario y tareas'})}\n\n"
+            # messages only — not counted again in tool_results_list
             await _inject_today_agenda_prelookup(request, messages, founder)
+        _stream_docx_prelookup_entries: list[dict[str, Any]] = []
+        if _docx_prelookup_needed(request.message, request.image_filename):
+            yield f"data: {_safe_dumps({'type': 'progress', 'phase': 'docx', 'message': 'Procesando el documento Word'})}\n\n"
+            _stream_docx_prelookup_entries = await _inject_docx_prelookup(
+                request, messages, founder,
+            )
         if _family_pre_search_open(request.desk) and (
             (_is_performative_web_search_request(request.message)
              or is_factual_question(request.message))
             and not _is_local_finance_readiness_request(request.message)
             and not _today_agenda_prelookup_needed(request.message)
+            and not _docx_prelookup_needed(request.message, request.image_filename)
         ):
             from app.services.max.search_context import build_search_query
             _stream_built = build_search_query(request.message, history=request.history)
@@ -4585,6 +4690,7 @@ async def _chat_stream_impl(request: ChatRequest, http_request: Request | None =
             if _stream_pre_search_entry:
                 tool_results_list.append(_stream_pre_search_entry)
             tool_results_list.extend(_stream_page_entries)
+            tool_results_list.extend(_stream_docx_prelookup_entries)
             loop_messages = list(messages)
             current_text = full_response
             _seen_send_tool_calls: set[str] = set()
@@ -4601,6 +4707,7 @@ async def _chat_stream_impl(request: ChatRequest, http_request: Request | None =
                 # parse + structured error feedback as the non-streaming
                 # chat path above.
                 tool_calls, tool_block_errors = parse_tool_blocks_with_errors(current_text)
+                tool_calls = filter_unregistered_tool_calls(tool_calls, tool_results_list)
                 if tool_block_errors:
                     for err in tool_block_errors:
                         logger.warning(
@@ -4680,6 +4787,8 @@ async def _chat_stream_impl(request: ChatRequest, http_request: Request | None =
                     # Inject image_filename into quote tools so uploaded photos flow through
                     if request.image_filename and tc.get("tool") in ("create_quick_quote", "photo_to_quote") and "image_filename" not in tc:
                         tc["image_filename"] = request.image_filename
+                    if request.image_filename and tc.get("tool") == "process_docx" and not tc.get("filename"):
+                        tc["filename"] = request.image_filename
 
                     tc = _coerce_drawing_tool_call(
                         tc, request.message, request.image_filename,

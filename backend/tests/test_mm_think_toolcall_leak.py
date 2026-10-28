@@ -280,8 +280,7 @@ def test_chat_endpoint_strips_oct21_mm_think_leak(monkeypatch, tmp_path):
     )
     assert res.status_code == 200, res.text
     body = res.json()
-    proof = Path(__file__).resolve().parents[2] / "reports" / "2026-10-22_mm_think_chat_path.json"
-    proof.parent.mkdir(parents=True, exist_ok=True)
+    proof = tmp_path / "mm_think_chat_path.json"
     proof.write_text(json.dumps({
         "endpoint": "/api/v1/max/chat",
         "user": "hola",
@@ -329,7 +328,7 @@ def test_stream_endpoint_strips_oct21_mm_think_leak(monkeypatch, tmp_path):
     )
     assert res.status_code == 200, res.text
     streamed = _sse_text(res.text)
-    proof = Path(__file__).resolve().parents[2] / "reports" / "2026-10-22_mm_think_stream_path.txt"
+    proof = tmp_path / "mm_think_stream_path.txt"
     proof.write_text(
         "POST /api/v1/max/chat/stream\n"
         f"decoded_text={streamed}\n\n"
@@ -391,7 +390,7 @@ def test_resumeme_el_dia_chat_runs_tools_and_hides_markup(monkeypatch, tmp_path)
     body = res.json()
     text = body["response"]
     tools = [row.get("tool") for row in (body.get("tool_results") or [])]
-    proof = Path(__file__).resolve().parents[2] / "reports" / "2026-10-22_mm_think_resumeme_chat.json"
+    proof = tmp_path / "mm_think_resumeme_chat.json"
     proof.write_text(json.dumps({
         "endpoint": "/api/v1/max/chat",
         "user": RESUMEME_EL_DIA,

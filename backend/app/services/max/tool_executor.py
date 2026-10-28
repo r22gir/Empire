@@ -239,6 +239,43 @@ _TEXT_TOOL_CALL_RE = re.compile(
     r"\[\s*Tool\s+call\s*:\s*([A-Za-z_][A-Za-z0-9_]*)\s*\]",
     re.IGNORECASE,
 )
+# MiniMax native / leaked function-call shapes (ticket fh-bec7a9e9f39e).
+_MINIMAX_INVOKE_RE = re.compile(
+    r"<invoke\b[^>]*\bname\s*=\s*[\"']([A-Za-z_][A-Za-z0-9_.]*)[\"'][^>]*>",
+    re.IGNORECASE,
+)
+_MINIMAX_TO_FUNCTIONS_RE = re.compile(
+    r"\bto\s*=\s*functions\.([A-Za-z_][A-Za-z0-9_]*)\b",
+    re.IGNORECASE,
+)
+_MINIMAX_TOOL_TAG_RE = re.compile(
+    r"</?(?:minimax:)?tool_calls?\b[^>]*>",
+    re.IGNORECASE,
+)
+_MINIMAX_INVOKE_BLOCK_RE = re.compile(
+    r"<invoke\b[^>]*>.*?</invoke>",
+    re.IGNORECASE | re.DOTALL,
+)
+# A whole line that is only MiniMax protocol (possibly several fields).
+# Never a Spanish sentence that merely mentions to=functions / errorType.
+_PROTOCOL_FIELD = (
+    r"to\s*=\s*functions\.\S+"
+    r"|errorType\s*=\S+"
+    r"|error\s*=\s*Tool\s+\\?\"[^\"]+\\?\"\s+is not available[^\n]*"
+    r"|code"
+)
+_PROTOCOL_ONLY_LINE_RE = re.compile(
+    rf"^[ \t]*(?:to\s*=\s*functions\.\S+|errorType\s*=\S+|"
+    rf"error\s*=\s*Tool\s+\\?\"[^\"]+\\?\"\s+is not available[^\n]*)"
+    rf"(?:[ \t,]+(?:{_PROTOCOL_FIELD}))*[ \t.]*$",
+    re.IGNORECASE | re.MULTILINE,
+)
+# Unclosed <tool_call> + protocol remainder of that same line only.
+_TOOL_CALL_LINE_RE = re.compile(
+    r"</?(?:minimax:)?tool_calls?\b[^>]*>[ \t]*(?:to\s*=\s*functions\.[^\n]*)?",
+    re.IGNORECASE,
+)
+UNREGISTERED_LEAK_TOOLS = frozenset({"execute_code", "functions.execute_code"})
 
 QUOTES_DIR = str(dp.quotes_data_dir())
 
@@ -374,6 +411,18 @@ def parse_tool_blocks_with_errors(text: str) -> tuple[list[dict], list[dict]]:
             results.append(sanitize_tool_call({"tool": name}))
             seen_tools.add(name)
 
+    for match in _MINIMAX_INVOKE_RE.finditer(text):
+        name = _canonical_tool_name(match.group(1))
+        if name and name not in seen_tools:
+            results.append(sanitize_tool_call({"tool": name}))
+            seen_tools.add(name)
+
+    for match in _MINIMAX_TO_FUNCTIONS_RE.finditer(text):
+        name = _canonical_tool_name(match.group(1))
+        if name and name not in seen_tools:
+            results.append(sanitize_tool_call({"tool": name}))
+            seen_tools.add(name)
+
     for match in TOOL_BLOCK_RE.finditer(text):
         candidate = match.group(1).strip()
         if candidate in seen_payloads:
@@ -402,7 +451,42 @@ def parse_tool_blocks_with_errors(text: str) -> tuple[list[dict], list[dict]]:
         # Prose-only assistant replies (email bodies, narratives) — not tool blocks.
         return results, errors
 
-    return results, errors
+    return filter_unregistered_tool_calls(results), errors
+
+
+def filter_unregistered_tool_calls(
+    calls: list[dict],
+    prior_results: list | None = None,
+) -> list[dict]:
+    """Drop leaked execute_code once redirected, or when it cannot be redirected.
+
+    MiniMax prints ``to=functions.execute_code`` as text. Parsing that back
+    into a tool call loops the chat and trips the quality badge. Keep the
+    call only when it still looks like a DOCX job we can turn into
+    process_docx and process_docx has not already run.
+    """
+    prior = [row for row in (prior_results or []) if isinstance(row, dict)]
+    docx_done = any(row.get("tool") == "process_docx" for row in prior)
+    already_redirected = any(
+        str((row.get("result") or {}).get("_redirected_from") or "") == "execute_code"
+        for row in prior
+    )
+    kept: list[dict] = []
+    for call in calls:
+        if not isinstance(call, dict):
+            continue
+        name = _canonical_tool_name(str(call.get("tool") or ""))
+        if name in UNREGISTERED_LEAK_TOOLS:
+            if docx_done or already_redirected:
+                continue
+            try:
+                from app.services.max.docx_maestro import looks_like_docx_code_job
+            except Exception:
+                continue
+            if not looks_like_docx_code_job(call):
+                continue
+        kept.append(call)
+    return kept
 
 
 def _parse_ndjson_block(body: str) -> tuple[list[dict], list[dict]]:
@@ -504,6 +588,13 @@ def _parse_ndjson_block(body: str) -> tuple[list[dict], list[dict]]:
     return actions, errors
 
 
+def _canonical_tool_name(name: str | None) -> str:
+    raw = (name or "").strip()
+    if raw.lower().startswith("functions."):
+        raw = raw.split(".", 1)[1]
+    return raw
+
+
 def strip_tool_blocks(text: str) -> str:
     """Remove executable tool protocol text from visible text.
 
@@ -511,9 +602,19 @@ def strip_tool_blocks(text: str) -> str:
     JSON tool actions is also suppressed; those actions are for the dispatcher,
     never for the user-facing transcript. Literal ``[Tool call: name]``
     markup is never shown — it is executed by parse_tool_blocks, not printed.
+    MiniMax leftovers are stripped only as tool_call / invoke regions or
+    as lines that are themselves protocol — never a Spanish sentence that
+    happens to mention to=functions or errorType.
     """
-    cleaned = TOOL_BLOCK_RE.sub("", text or "")
+    from app.services.max.thinking import strip_protocol_delimiters
+
+    cleaned = strip_protocol_delimiters(text or "")
+    cleaned = TOOL_BLOCK_RE.sub("", cleaned)
     cleaned = _TEXT_TOOL_CALL_RE.sub("", cleaned)
+    cleaned = _MINIMAX_INVOKE_BLOCK_RE.sub("", cleaned)
+    cleaned = _TOOL_CALL_LINE_RE.sub("", cleaned)
+    cleaned = _MINIMAX_TOOL_TAG_RE.sub("", cleaned)
+    cleaned = _PROTOCOL_ONLY_LINE_RE.sub("", cleaned)
     cleaned = re.sub(r"[ \t]{2,}", " ", cleaned)
     cleaned = re.sub(r"\n{3,}", "\n\n", cleaned).strip()
     if cleaned and cleaned[0] in "[{":
@@ -616,6 +717,7 @@ Nunca pongas fotos de clientes, correos, teléfonos, rutas del Workroom ni datos
 La voz speech-2.8 solo si está encendida. El video H3 solo crea un borrador; Rafael genera desde Max personal
 con X-Minimax-Video-Confirm: aprobar. Esta herramienta no genera clips ni acepta approval_id.
 Agenda de hoy: get_today_agenda + list_schedule + get_tasks para "qué hay hoy" / "mi agenda" / "what's on today".
+DOCX adjunto + maestro/resumen/paginación: process_docx. Nunca execute_code.
 Mandar un enlace: send_me_link solo al WhatsApp y correo del dueño de ESTA instancia. Nunca send_me_this_link.
 "Can you send me X" / "puedes enviarme X": llama send_me_link, nunca un sí de catálogo.
 """
@@ -747,12 +849,36 @@ def execute_tool(tool_call: dict, desk: Optional[str] = None, access_context: Op
             "generate_presentation": "present",
             "make_presentation": "present",
             "presentation": "present",
+            "process_document": "process_docx",
+            "procesar_docx": "process_docx",
+            "make_maestro": "process_docx",
+            "generate_maestro": "process_docx",
+            "generar_maestro": "process_docx",
         }
         if tool_name not in TOOL_REGISTRY and tool_name in TOOL_CORRECTIONS:
             corrected = TOOL_CORRECTIONS[tool_name]
             logger.info(f"Auto-corrected tool '{tool_name}' → '{corrected}'")
             tool_name = corrected
             tool_call["tool"] = corrected
+
+        # MiniMax's built-in execute_code is not registered here. Do not
+        # wire arbitrary code execution. If the call is clearly a DOCX
+        # maestro/resumen job, route to process_docx instead.
+        if tool_name in UNREGISTERED_LEAK_TOOLS and tool_name not in TOOL_REGISTRY:
+            try:
+                from app.services.max.docx_maestro import filename_from_code_job, looks_like_docx_code_job
+
+                if looks_like_docx_code_job(tool_call):
+                    logger.info("Redirected execute_code → process_docx (DOCX job)")
+                    tool_name = "process_docx"
+                    tool_call["tool"] = "process_docx"
+                    if not tool_call.get("filename"):
+                        found = filename_from_code_job(tool_call)
+                        if found:
+                            tool_call["filename"] = found
+                    tool_call["_redirected_from"] = "execute_code"
+            except Exception:
+                pass
 
         # ── FOUNDER access_controller BYPASS only ──
         # H81 Phase 2 (2026-09-01): founder still bypasses the
@@ -853,8 +979,25 @@ def execute_tool(tool_call: dict, desk: Optional[str] = None, access_context: Op
 
         handler = TOOL_REGISTRY.get(tool_name)
         if handler:
-            return _coerce_tool_result(tool_name, handler(tool_call, desk))
+            outcome = _coerce_tool_result(tool_name, handler(tool_call, desk))
+            redirected = tool_call.get("_redirected_from")
+            if redirected and isinstance(outcome.result, dict):
+                outcome.result = {**outcome.result, "_redirected_from": redirected}
+            elif redirected and outcome.result is None and outcome.success:
+                outcome.result = {"_redirected_from": redirected}
+            return outcome
 
+        if _is_family_edition():
+            try:
+                from app.services.max.docx_maestro import unknown_tool_reply
+
+                return ToolResult(tool=tool_name, success=False, error=unknown_tool_reply(tool_name))
+            except Exception:
+                return ToolResult(
+                    tool=tool_name,
+                    success=False,
+                    error="Esa herramienta no está disponible aquí.",
+                )
         available = ", ".join(sorted(TOOL_REGISTRY.keys()))
         return ToolResult(tool=tool_name, success=False,
                           error=f"Unknown tool: {tool_name}. Available tools: {available}")
@@ -7953,6 +8096,18 @@ try:
         pass
 except Exception as _guides_err:
     logger.error(f"tools_maxe_guides not loaded: {_guides_err}")
+
+try:
+    import importlib as _importlib, sys as _sys
+    _docx_name = "app.services.max.docx_maestro"
+    _docx_maestro = (_importlib.reload(_sys.modules[_docx_name]) if _docx_name in _sys.modules
+                     else _importlib.import_module(_docx_name))
+    _docx_maestro.register_tools(tool, ToolResult)
+    FAMILY_TOOLS_DOC = FAMILY_TOOLS_DOC + _docx_maestro.DOCX_MAESTRO_DOC
+    if "TOOLS_DOC" in globals():
+        TOOLS_DOC = TOOLS_DOC + _docx_maestro.DOCX_MAESTRO_DOC
+except Exception as _docx_err:
+    logger.error(f"docx_maestro not loaded: {_docx_err}")
 
 TOOL_COUNT = len(TOOL_REGISTRY)
 TOOLS_DOC = TOOLS_DOC.replace("__TOOL_COUNT__", str(TOOL_COUNT))
