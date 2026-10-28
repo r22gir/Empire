@@ -73,6 +73,29 @@ REASONING_PART_TYPES = frozenset({
     "reasoning_content",
 })
 
+# MiniMax-M3 leaked these protocol delimiters into Max-e chat
+# (ticket fh-bec7a9e9f39e, 2026-10-28). They wrap tool-call text.
+# Strip the delimiter only — keep the inner text so parse_tool_blocks
+# can still see ``<tool_call>`` / ``to=functions.*``.
+_PROTOCOL_DELIM_RE = re.compile(
+    r"\]?<\]minimax\[>\[?"
+    r"|<\|\s*/?\s*minimax\s*\|>"
+    r"|</?minimax>"
+    r"|\]~<minimax>",
+    re.IGNORECASE,
+)
+
+# Self-closing protocol tokens the stream filter drops (not a think region).
+_STREAM_PROTOCOL_DELIMS = (
+    "]<]minimax[>[",
+    "]<]minimax[>",
+    "<]minimax[>[",
+    "<]minimax[>",
+    "<|minimax|>",
+    "<|/minimax|>",
+    "</|minimax|>",
+)
+
 # Open-tag prefixes the stream filter must hold until it can decide.
 _STREAM_OPEN_TAGS = (
     "<think>",
@@ -91,6 +114,10 @@ _STREAM_OPEN_TAGS = (
     "```reason",
     "```reasoning",
     "```thought",
+    "]<]minimax[>[",
+    "]<]minimax[>",
+    "<]minimax[>",
+    "<|minimax|>",
 )
 _STREAM_CLOSE_TAGS = (
     "</think>",
@@ -172,12 +199,22 @@ def _strip_untagged_reasoning_preamble(text: str) -> str:
     return "\n\n".join(kept) if kept else text
 
 
+def strip_protocol_delimiters(text: str | None) -> str:
+    """Remove MiniMax special-token delimiters; keep surrounding prose."""
+    if not text:
+        return "" if text is None else text
+    cleaned = _PROTOCOL_DELIM_RE.sub("", str(text))
+    cleaned = re.sub(r"[ \t]{2,}", " ", cleaned)
+    return cleaned
+
+
 def strip_thinking(text: str | None, *, trim_edges: bool = True) -> str:
     """Remove hidden reasoning from a complete (or flushed) model string."""
     if not text:
         return "" if text is None else text
 
     cleaned = str(text)
+    cleaned = strip_protocol_delimiters(cleaned)
     cleaned = _COMPLETE_TAG_RE.sub("", cleaned)
     cleaned = _SPECIAL_COMPLETE_RE.sub("", cleaned)
     cleaned = _FENCE_COMPLETE_RE.sub("", cleaned)
@@ -352,8 +389,11 @@ class ThinkingStreamFilter:
             if tag.lower().startswith(lowered) and len(tag) > len(self._buffer)
         ]
         if exact and not longer:
-            self._mode = "fence" if exact[0].startswith("```") else "thinking"
+            matched = exact[0]
             self._buffer = ""
+            if any(matched.lower() == tok.lower() for tok in _STREAM_PROTOCOL_DELIMS):
+                return ""
+            self._mode = "fence" if matched.startswith("```") else "thinking"
             return ""
         if longer and len(self._buffer) <= self._max_open:
             return ""

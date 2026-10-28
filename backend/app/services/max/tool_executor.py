@@ -239,6 +239,31 @@ _TEXT_TOOL_CALL_RE = re.compile(
     r"\[\s*Tool\s+call\s*:\s*([A-Za-z_][A-Za-z0-9_]*)\s*\]",
     re.IGNORECASE,
 )
+# MiniMax native / leaked function-call shapes (ticket fh-bec7a9e9f39e).
+_MINIMAX_INVOKE_RE = re.compile(
+    r"<invoke\b[^>]*\bname\s*=\s*[\"']([A-Za-z_][A-Za-z0-9_.]*)[\"'][^>]*>",
+    re.IGNORECASE,
+)
+_MINIMAX_TO_FUNCTIONS_RE = re.compile(
+    r"\bto\s*=\s*functions\.([A-Za-z_][A-Za-z0-9_]*)\b",
+    re.IGNORECASE,
+)
+_MINIMAX_TOOL_TAG_RE = re.compile(
+    r"</?(?:minimax:)?tool_calls?\b[^>]*>",
+    re.IGNORECASE,
+)
+_MINIMAX_INVOKE_BLOCK_RE = re.compile(
+    r"<invoke\b[^>]*>.*?</invoke>",
+    re.IGNORECASE | re.DOTALL,
+)
+_MINIMAX_TOOL_ERROR_RE = re.compile(
+    r"(?:errorType\s*=\s*\S+[^\n]*|error\s*=\s*Tool\s+\\?\"[^\"]+\\?\"\s+is not available[^\n]*)",
+    re.IGNORECASE,
+)
+_MINIMAX_FUNCTIONS_LINE_RE = re.compile(
+    r"^[^\n]*\bto\s*=\s*functions\.[A-Za-z_][A-Za-z0-9_]*[^\n]*$",
+    re.IGNORECASE | re.MULTILINE,
+)
 
 QUOTES_DIR = str(dp.quotes_data_dir())
 
@@ -374,6 +399,18 @@ def parse_tool_blocks_with_errors(text: str) -> tuple[list[dict], list[dict]]:
             results.append(sanitize_tool_call({"tool": name}))
             seen_tools.add(name)
 
+    for match in _MINIMAX_INVOKE_RE.finditer(text):
+        name = _canonical_tool_name(match.group(1))
+        if name and name not in seen_tools:
+            results.append(sanitize_tool_call({"tool": name}))
+            seen_tools.add(name)
+
+    for match in _MINIMAX_TO_FUNCTIONS_RE.finditer(text):
+        name = _canonical_tool_name(match.group(1))
+        if name and name not in seen_tools:
+            results.append(sanitize_tool_call({"tool": name}))
+            seen_tools.add(name)
+
     for match in TOOL_BLOCK_RE.finditer(text):
         candidate = match.group(1).strip()
         if candidate in seen_payloads:
@@ -504,6 +541,13 @@ def _parse_ndjson_block(body: str) -> tuple[list[dict], list[dict]]:
     return actions, errors
 
 
+def _canonical_tool_name(name: str | None) -> str:
+    raw = (name or "").strip()
+    if raw.lower().startswith("functions."):
+        raw = raw.split(".", 1)[1]
+    return raw
+
+
 def strip_tool_blocks(text: str) -> str:
     """Remove executable tool protocol text from visible text.
 
@@ -511,9 +555,18 @@ def strip_tool_blocks(text: str) -> str:
     JSON tool actions is also suppressed; those actions are for the dispatcher,
     never for the user-facing transcript. Literal ``[Tool call: name]``
     markup is never shown — it is executed by parse_tool_blocks, not printed.
+    MiniMax ``<tool_call>`` / ``to=functions.*`` / ``errorType=`` leftovers
+    are stripped so they never reach Juan.
     """
-    cleaned = TOOL_BLOCK_RE.sub("", text or "")
+    from app.services.max.thinking import strip_protocol_delimiters
+
+    cleaned = strip_protocol_delimiters(text or "")
+    cleaned = TOOL_BLOCK_RE.sub("", cleaned)
     cleaned = _TEXT_TOOL_CALL_RE.sub("", cleaned)
+    cleaned = _MINIMAX_INVOKE_BLOCK_RE.sub("", cleaned)
+    cleaned = _MINIMAX_TOOL_TAG_RE.sub("", cleaned)
+    cleaned = _MINIMAX_FUNCTIONS_LINE_RE.sub("", cleaned)
+    cleaned = _MINIMAX_TOOL_ERROR_RE.sub("", cleaned)
     cleaned = re.sub(r"[ \t]{2,}", " ", cleaned)
     cleaned = re.sub(r"\n{3,}", "\n\n", cleaned).strip()
     if cleaned and cleaned[0] in "[{":
@@ -616,6 +669,7 @@ Nunca pongas fotos de clientes, correos, teléfonos, rutas del Workroom ni datos
 La voz speech-2.8 solo si está encendida. El video H3 solo crea un borrador; Rafael genera desde Max personal
 con X-Minimax-Video-Confirm: aprobar. Esta herramienta no genera clips ni acepta approval_id.
 Agenda de hoy: get_today_agenda + list_schedule + get_tasks para "qué hay hoy" / "mi agenda" / "what's on today".
+DOCX adjunto + maestro/resumen/paginación: process_docx. Nunca execute_code.
 Mandar un enlace: send_me_link solo al WhatsApp y correo del dueño de ESTA instancia. Nunca send_me_this_link.
 "Can you send me X" / "puedes enviarme X": llama send_me_link, nunca un sí de catálogo.
 """
@@ -747,12 +801,31 @@ def execute_tool(tool_call: dict, desk: Optional[str] = None, access_context: Op
             "generate_presentation": "present",
             "make_presentation": "present",
             "presentation": "present",
+            "process_document": "process_docx",
+            "procesar_docx": "process_docx",
+            "make_maestro": "process_docx",
+            "generate_maestro": "process_docx",
+            "generar_maestro": "process_docx",
         }
         if tool_name not in TOOL_REGISTRY and tool_name in TOOL_CORRECTIONS:
             corrected = TOOL_CORRECTIONS[tool_name]
             logger.info(f"Auto-corrected tool '{tool_name}' → '{corrected}'")
             tool_name = corrected
             tool_call["tool"] = corrected
+
+        # MiniMax's built-in execute_code is not registered here. Do not
+        # wire arbitrary code execution. If the call is clearly a DOCX
+        # maestro/resumen job, route to process_docx instead.
+        if tool_name in {"execute_code", "functions.execute_code"} and tool_name not in TOOL_REGISTRY:
+            try:
+                from app.services.max.docx_maestro import looks_like_docx_code_job
+
+                if looks_like_docx_code_job(tool_call):
+                    logger.info("Redirected execute_code → process_docx (DOCX job)")
+                    tool_name = "process_docx"
+                    tool_call["tool"] = "process_docx"
+            except Exception:
+                pass
 
         # ── FOUNDER access_controller BYPASS only ──
         # H81 Phase 2 (2026-09-01): founder still bypasses the
@@ -855,6 +928,17 @@ def execute_tool(tool_call: dict, desk: Optional[str] = None, access_context: Op
         if handler:
             return _coerce_tool_result(tool_name, handler(tool_call, desk))
 
+        if _is_family_edition():
+            try:
+                from app.services.max.docx_maestro import unknown_tool_reply
+
+                return ToolResult(tool=tool_name, success=False, error=unknown_tool_reply(tool_name))
+            except Exception:
+                return ToolResult(
+                    tool=tool_name,
+                    success=False,
+                    error="Esa herramienta no está disponible aquí.",
+                )
         available = ", ".join(sorted(TOOL_REGISTRY.keys()))
         return ToolResult(tool=tool_name, success=False,
                           error=f"Unknown tool: {tool_name}. Available tools: {available}")
@@ -7953,6 +8037,18 @@ try:
         pass
 except Exception as _guides_err:
     logger.error(f"tools_maxe_guides not loaded: {_guides_err}")
+
+try:
+    import importlib as _importlib, sys as _sys
+    _docx_name = "app.services.max.docx_maestro"
+    _docx_maestro = (_importlib.reload(_sys.modules[_docx_name]) if _docx_name in _sys.modules
+                     else _importlib.import_module(_docx_name))
+    _docx_maestro.register_tools(tool, ToolResult)
+    FAMILY_TOOLS_DOC = FAMILY_TOOLS_DOC + _docx_maestro.DOCX_MAESTRO_DOC
+    if "TOOLS_DOC" in globals():
+        TOOLS_DOC = TOOLS_DOC + _docx_maestro.DOCX_MAESTRO_DOC
+except Exception as _docx_err:
+    logger.error(f"docx_maestro not loaded: {_docx_err}")
 
 TOOL_COUNT = len(TOOL_REGISTRY)
 TOOLS_DOC = TOOLS_DOC.replace("__TOOL_COUNT__", str(TOOL_COUNT))

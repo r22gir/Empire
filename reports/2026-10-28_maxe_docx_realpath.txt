@@ -1,0 +1,15 @@
+POST /api/v1/max/chat  (Max-e Centro de mando)
+attachment=adjunto_juan.docx
+executed=['process_docx', 'execute_code', 'execute_code', 'execute_code']
+maestro=/tmp/pytest-of-ubuntu/pytest-3/test_chat_docx_path_strips_lea0/uploads/documents/adjunto_juan_maestro_20261028_160445.docx
+resumen=/tmp/pytest-of-ubuntu/pytest-3/test_chat_docx_path_strips_lea0/uploads/documents/adjunto_juan_resumen_20261028_160445.docx
+libreoffice=False
+pagination_verified=False
+
+visible_reply=
+Listo. Leí el cuerpo completo de adjunto_juan.docx (6 bloque(s) de texto) y generé el maestro y el resumen.
+
+- Maestro: /api/v1/files/view/documents/adjunto_juan_maestro_20261028_160445.docx
+- Resumen: /api/v1/files/view/documents/adjunto_juan_resumen_20261028_160445.docx
+
+No pude verificar la paginación exacta ni la tabla de contenido con LibreOffice (no está en este runtime).
