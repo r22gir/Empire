@@ -1,10 +1,10 @@
 # Max-e: MiniMax tool-call leak + DOCX maestro/resumen (ticket fh-bec7a9e9f39e)
 
 **Instance:** Max-e (Juan) · branch `family/amp-live-20261014`  
-**Seen:** 2026-10-28 from Centro de mando chat (`/ · Max-e · Centro de mando · chat`)  
-**Fix:** strip `]<]minimax[>[` / `<tool_call>` / `to=functions.*` markup; never register `execute_code`; `process_docx` delivers maestro + resumen with python-docx when LibreOffice is absent.
+**Kind:** offline test output (no running Max-e in this cloud agent).  
+**Seen:** 2026-10-28 from Centro de mando chat (`/ · Max-e · Centro de mando · chat`)
 
-No live model. No paid APIs. No deploy.
+Tests do not overwrite these files. No live model. No paid APIs. No deploy.
 
 ---
 
@@ -16,9 +16,9 @@ Esta vez voy a ejecutar el procesamiento real y no a describir un plan: buscaré
 to=functions.execute_code code errorType=unknown_error, error=Tool \"execute_code\" is not available in this environment.
 ```
 
-## After
+## After (TestClient `/api/v1/max/chat`, mocked MiniMax payload)
 
-Visible reply on `POST /api/v1/max/chat` (same door as Command Center):
+Visible reply:
 
 ```
 Listo. Leí el cuerpo completo de adjunto_juan.docx (6 bloque(s) de texto) y generé el maestro y el resumen.
@@ -29,26 +29,21 @@ Listo. Leí el cuerpo completo de adjunto_juan.docx (6 bloque(s) de texto) y gen
 No pude verificar la paginación exacta ni la tabla de contenido con LibreOffice (no está en este runtime).
 ```
 
-No `]<]minimax[>[`, no `<tool_call>`, no `execute_code`, no `errorType`.
-
-## Paths
-
-| Path | Gate |
-|---|---|
-| Delimiters | `strip_protocol_delimiters` / `ThinkingStreamFilter` |
-| Tool markup | `parse_tool_blocks` + `strip_tool_blocks` |
-| Missing tool | family `unknown_tool_reply` (Spanish). `execute_code` is not registered. |
-| DOCX | `process_docx` (python-docx). LibreOffice optional. |
-| Chat doors | prelookup + `_family_graceful_visible_reply` on `/api/v1/max/chat` and `/stream` |
+Executed tools: `process_docx` only (leaked `execute_code` is dropped after redirect, no 3-round loop, no Quality-issue badge).
 
 ## Tests
 
+There is no GitHub Actions workflow on this repo (only `.github/workflows-disabled/`). Local run:
+
 ```
-python3 -m pytest tests/test_docx_maestro_leak.py \
+cd backend && python3 -m pytest tests/test_docx_maestro_leak.py \
   tests/test_minimax_thinking_strip.py \
-  tests/test_mm_think_toolcall_leak.py -q
-
-48 passed
+  tests/test_mm_think_toolcall_leak.py \
+  tests/test_tool_block_parser_hotfix.py -q
 ```
 
-Proof files: `reports/2026-10-28_maxe_docx_chat_path.json`, `reports/2026-10-28_maxe_docx_realpath.txt`, plus the generated maestro/resumen DOCX copies in `reports/`.
+**68 passed**, 7 warnings, 2.33s. Full transcript: `reports/2026-10-28_maxe_docx_pytest.txt`.
+
+(The earlier report line `48 passed` was wrong — that three-file subset was never 48, and the PR body later said 67. This count is from the transcript above.)
+
+The JSON/DOCX files next to this report are **offline test output** from TestClient + python-docx, not a capture from a live EmpireDell Max-e process. The first-PR JSON still shows the `process_docx` + `execute_code` ×3 loop; tests no longer write `reports/`.

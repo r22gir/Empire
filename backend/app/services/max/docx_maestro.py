@@ -36,26 +36,26 @@ NO_FILE_ES = (
 )
 FAILED_ES = "No pude leer ese documento Word. Inténtalo de nuevo en un momento."
 
+# Need a Word file in play (attachment or ".docx" in the text) plus a
+# maestro/resumen/pagination ask. Bare "resumen", "procesar", "publica"
+# or "enlaces" must not steal agenda / send-me turns.
 _DOCX_PROCESS = re.compile(
     r"(?:"
-    r"\bmaestro\b|"
-    r"\bresumen\b|"
-    r"\bpaginaci[oó]n\b|"
+    r"(?:maestro.{0,80}resumen|resumen.{0,80}maestro)|"
+    r"(?:maestro|resumen).{0,40}(?:\.docx|\bword\b|documento)|"
+    r"(?:\.docx|\bword\b|documento).{0,40}(?:maestro|resumen)|"
+    r"\bpaginaci[oó]n\b.{0,40}(?:docx|word|maestro|documento)|"
+    r"(?:docx|word|maestro|documento).{0,40}\bpaginaci[oó]n\b|"
     r"\btabla\s+de\s+contenido\b|"
     r"\btable\s+of\s+contents\b|"
-    r"\bTOC\b|"
-    r"proces(?:a|ar|amiento)|"
-    r"gener(?:a|ar|e)\b|"
-    r"public(?:a|ar)\b|"
-    r"\benlaces\b|"
-    r"cuerpo\s+completo|"
-    r"lee(?:r)?\s+(?:el\s+|este\s+)?(?:docx|documento|word|archivo)|"
-    r"read\s+(?:the\s+)?(?:full\s+)?(?:docx|document|word)|"
-    r"process\s+(?:the\s+)?(?:attached\s+)?(?:docx|document|word)"
+    r"proces(?:a|ar)\s+(?:el\s+|este\s+|the\s+)?(?:docx|documento(?:\s+word)?|word|archivo\s+\.docx)|"
+    r"lee(?:r)?\s+(?:el\s+|este\s+)?(?:docx|documento\s+word|archivo\s+\.docx)|"
+    r"process\s+(?:the\s+)?(?:attached\s+)?(?:docx|word\s+document)"
     r")",
     re.I,
 )
 _DOCX_NAME = re.compile(r"[\w.\- ()]+\.docx?\b", re.I)
+_DOCX_TOKEN = re.compile(r"[\w.\-()]+\.docx?\b", re.I)
 _SENTENCE = re.compile(r"(?s).+?(?:[.!?…](?:\s+|$)|$)")
 
 
@@ -65,14 +65,24 @@ def attachment_is_docx(filename: Optional[str]) -> bool:
 
 
 def is_docx_process_ask(message: Optional[str], filename: Optional[str] = None) -> bool:
-    """True when Juan wants maestro/resumen (or similar) from a Word file."""
+    """True when Juan wants maestro/resumen from a Word file — not a generic ask."""
     text = message or ""
-    if not text.strip():
+    if not text.strip() or not _DOCX_PROCESS.search(text):
         return False
-    mentioned = bool(_DOCX_PROCESS.search(text)) or bool(_DOCX_NAME.search(text))
-    if attachment_is_docx(filename):
-        return bool(_DOCX_PROCESS.search(text))
-    return bool(_DOCX_PROCESS.search(text) and _DOCX_NAME.search(text))
+    return attachment_is_docx(filename) or bool(_DOCX_NAME.search(text))
+
+
+def filename_from_code_job(tool_call: Optional[dict]) -> str:
+    """Best-effort .docx name from a leaked execute_code call."""
+    if not isinstance(tool_call, dict):
+        return ""
+    for key in ("filename", "file", "path", "source_path"):
+        raw = str(tool_call.get(key) or "").strip()
+        if raw:
+            return Path(raw).name
+    blob = " ".join(str(v) for v in tool_call.values())
+    tokens = _DOCX_TOKEN.findall(blob)
+    return tokens[-1] if tokens else ""
 
 
 def looks_like_docx_code_job(tool_call: Optional[dict]) -> bool:
@@ -109,20 +119,59 @@ def _output_dir() -> Path:
     return path
 
 
-def resolve_source(filename: Optional[str], explicit_path: Optional[str] = None) -> Optional[Path]:
+def _upload_roots() -> list[Path]:
+    from app.services.uploads.chat_uploads import upload_search_roots
+
+    roots: list[Path] = []
+    for raw in upload_search_roots():
+        try:
+            roots.append(Path(raw).expanduser().resolve())
+        except OSError:
+            continue
+    return roots
+
+
+def _under_upload_roots(path: Path, roots: Optional[list[Path]] = None) -> bool:
+    try:
+        resolved = path.expanduser().resolve()
+    except OSError:
+        return False
+    for root in (roots or _upload_roots()):
+        try:
+            resolved.relative_to(root)
+            return True
+        except ValueError:
+            continue
+    return False
+
+
+def resolve_source(
+    filename: Optional[str],
+    explicit_path: Optional[str] = None,
+    *,
+    path: Optional[str] = None,
+) -> Optional[Path]:
+    """Resolve a Word file only under this instance's upload_search_roots()."""
+    from app.services.uploads.chat_uploads import resolve_uploaded_file
+
+    explicit_path = explicit_path or path
+    roots = _upload_roots()
+    if not roots:
+        return None
     if explicit_path:
         candidate = Path(explicit_path).expanduser()
-        if candidate.is_file():
-            return candidate
-    name = (filename or "").strip()
+        try:
+            if candidate.is_file() and _under_upload_roots(candidate, roots):
+                return candidate.resolve()
+        except OSError:
+            pass
+    name = Path((filename or explicit_path or "").strip()).name
     if not name:
         return None
-    from app.services.uploads.chat_uploads import resolve_uploaded_file, upload_search_roots
-
-    found = resolve_uploaded_file(name, roots=upload_search_roots())
-    if found is not None:
-        return found
-    return resolve_uploaded_file(Path(name).name)
+    found = resolve_uploaded_file(name, roots=roots)
+    if found is not None and _under_upload_roots(found, roots):
+        return found.resolve()
+    return None
 
 
 def _paragraphs_and_outline(document) -> tuple[list[str], list[str]]:
@@ -294,7 +343,7 @@ def process_docx(
     title: Optional[str] = None,
 ) -> dict[str, Any]:
     """Read a Word file and write maestro + resumen into this instance's uploads."""
-    source = resolve_source(filename, path)
+    source = resolve_source(filename, path=path)
     if source is None:
         return {"ok": False, "error": NO_FILE_ES, "user_reply": NO_FILE_ES}
 
@@ -430,9 +479,9 @@ def prelookup_message(results: list[tuple[str, str]]) -> str:
 
 def looks_like_plan_or_deadend(text: Optional[str]) -> bool:
     """Model promised to do it / refused without LibreOffice / leaked a plan."""
-    low = (text or "").lower()
-    if not low.strip():
-        return True
+    low = (text or "").strip().lower()
+    if not low:
+        return False
     markers = (
         "esta vez voy a",
         "voy a ejecutar",

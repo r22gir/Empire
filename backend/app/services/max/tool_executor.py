@@ -256,14 +256,26 @@ _MINIMAX_INVOKE_BLOCK_RE = re.compile(
     r"<invoke\b[^>]*>.*?</invoke>",
     re.IGNORECASE | re.DOTALL,
 )
-_MINIMAX_TOOL_ERROR_RE = re.compile(
-    r"(?:errorType\s*=\s*\S+[^\n]*|error\s*=\s*Tool\s+\\?\"[^\"]+\\?\"\s+is not available[^\n]*)",
-    re.IGNORECASE,
+# A whole line that is only MiniMax protocol (possibly several fields).
+# Never a Spanish sentence that merely mentions to=functions / errorType.
+_PROTOCOL_FIELD = (
+    r"to\s*=\s*functions\.\S+"
+    r"|errorType\s*=\S+"
+    r"|error\s*=\s*Tool\s+\\?\"[^\"]+\\?\"\s+is not available[^\n]*"
+    r"|code"
 )
-_MINIMAX_FUNCTIONS_LINE_RE = re.compile(
-    r"^[^\n]*\bto\s*=\s*functions\.[A-Za-z_][A-Za-z0-9_]*[^\n]*$",
+_PROTOCOL_ONLY_LINE_RE = re.compile(
+    rf"^[ \t]*(?:to\s*=\s*functions\.\S+|errorType\s*=\S+|"
+    rf"error\s*=\s*Tool\s+\\?\"[^\"]+\\?\"\s+is not available[^\n]*)"
+    rf"(?:[ \t,]+(?:{_PROTOCOL_FIELD}))*[ \t.]*$",
     re.IGNORECASE | re.MULTILINE,
 )
+# Unclosed <tool_call> + protocol remainder of that same line only.
+_TOOL_CALL_LINE_RE = re.compile(
+    r"</?(?:minimax:)?tool_calls?\b[^>]*>[ \t]*(?:to\s*=\s*functions\.[^\n]*)?",
+    re.IGNORECASE,
+)
+UNREGISTERED_LEAK_TOOLS = frozenset({"execute_code", "functions.execute_code"})
 
 QUOTES_DIR = str(dp.quotes_data_dir())
 
@@ -439,7 +451,42 @@ def parse_tool_blocks_with_errors(text: str) -> tuple[list[dict], list[dict]]:
         # Prose-only assistant replies (email bodies, narratives) — not tool blocks.
         return results, errors
 
-    return results, errors
+    return filter_unregistered_tool_calls(results), errors
+
+
+def filter_unregistered_tool_calls(
+    calls: list[dict],
+    prior_results: list | None = None,
+) -> list[dict]:
+    """Drop leaked execute_code once redirected, or when it cannot be redirected.
+
+    MiniMax prints ``to=functions.execute_code`` as text. Parsing that back
+    into a tool call loops the chat and trips the quality badge. Keep the
+    call only when it still looks like a DOCX job we can turn into
+    process_docx and process_docx has not already run.
+    """
+    prior = [row for row in (prior_results or []) if isinstance(row, dict)]
+    docx_done = any(row.get("tool") == "process_docx" for row in prior)
+    already_redirected = any(
+        str((row.get("result") or {}).get("_redirected_from") or "") == "execute_code"
+        for row in prior
+    )
+    kept: list[dict] = []
+    for call in calls:
+        if not isinstance(call, dict):
+            continue
+        name = _canonical_tool_name(str(call.get("tool") or ""))
+        if name in UNREGISTERED_LEAK_TOOLS:
+            if docx_done or already_redirected:
+                continue
+            try:
+                from app.services.max.docx_maestro import looks_like_docx_code_job
+            except Exception:
+                continue
+            if not looks_like_docx_code_job(call):
+                continue
+        kept.append(call)
+    return kept
 
 
 def _parse_ndjson_block(body: str) -> tuple[list[dict], list[dict]]:
@@ -555,8 +602,9 @@ def strip_tool_blocks(text: str) -> str:
     JSON tool actions is also suppressed; those actions are for the dispatcher,
     never for the user-facing transcript. Literal ``[Tool call: name]``
     markup is never shown — it is executed by parse_tool_blocks, not printed.
-    MiniMax ``<tool_call>`` / ``to=functions.*`` / ``errorType=`` leftovers
-    are stripped so they never reach Juan.
+    MiniMax leftovers are stripped only as tool_call / invoke regions or
+    as lines that are themselves protocol — never a Spanish sentence that
+    happens to mention to=functions or errorType.
     """
     from app.services.max.thinking import strip_protocol_delimiters
 
@@ -564,9 +612,9 @@ def strip_tool_blocks(text: str) -> str:
     cleaned = TOOL_BLOCK_RE.sub("", cleaned)
     cleaned = _TEXT_TOOL_CALL_RE.sub("", cleaned)
     cleaned = _MINIMAX_INVOKE_BLOCK_RE.sub("", cleaned)
+    cleaned = _TOOL_CALL_LINE_RE.sub("", cleaned)
     cleaned = _MINIMAX_TOOL_TAG_RE.sub("", cleaned)
-    cleaned = _MINIMAX_FUNCTIONS_LINE_RE.sub("", cleaned)
-    cleaned = _MINIMAX_TOOL_ERROR_RE.sub("", cleaned)
+    cleaned = _PROTOCOL_ONLY_LINE_RE.sub("", cleaned)
     cleaned = re.sub(r"[ \t]{2,}", " ", cleaned)
     cleaned = re.sub(r"\n{3,}", "\n\n", cleaned).strip()
     if cleaned and cleaned[0] in "[{":
@@ -816,14 +864,19 @@ def execute_tool(tool_call: dict, desk: Optional[str] = None, access_context: Op
         # MiniMax's built-in execute_code is not registered here. Do not
         # wire arbitrary code execution. If the call is clearly a DOCX
         # maestro/resumen job, route to process_docx instead.
-        if tool_name in {"execute_code", "functions.execute_code"} and tool_name not in TOOL_REGISTRY:
+        if tool_name in UNREGISTERED_LEAK_TOOLS and tool_name not in TOOL_REGISTRY:
             try:
-                from app.services.max.docx_maestro import looks_like_docx_code_job
+                from app.services.max.docx_maestro import filename_from_code_job, looks_like_docx_code_job
 
                 if looks_like_docx_code_job(tool_call):
                     logger.info("Redirected execute_code → process_docx (DOCX job)")
                     tool_name = "process_docx"
                     tool_call["tool"] = "process_docx"
+                    if not tool_call.get("filename"):
+                        found = filename_from_code_job(tool_call)
+                        if found:
+                            tool_call["filename"] = found
+                    tool_call["_redirected_from"] = "execute_code"
             except Exception:
                 pass
 
@@ -926,7 +979,13 @@ def execute_tool(tool_call: dict, desk: Optional[str] = None, access_context: Op
 
         handler = TOOL_REGISTRY.get(tool_name)
         if handler:
-            return _coerce_tool_result(tool_name, handler(tool_call, desk))
+            outcome = _coerce_tool_result(tool_name, handler(tool_call, desk))
+            redirected = tool_call.get("_redirected_from")
+            if redirected and isinstance(outcome.result, dict):
+                outcome.result = {**outcome.result, "_redirected_from": redirected}
+            elif redirected and outcome.result is None and outcome.success:
+                outcome.result = {"_redirected_from": redirected}
+            return outcome
 
         if _is_family_edition():
             try:

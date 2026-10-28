@@ -32,7 +32,7 @@ from app.services.max.guardrails import (
     is_imperative_action_request,
 )
 from app.services.max.security.sanitizer import sanitizer as input_sanitizer, audit_dir as security_audit_dir
-from app.services.max.tool_executor import parse_tool_blocks, parse_tool_blocks_with_errors, strip_tool_blocks, execute_tool, ToolResult, get_xai_tool_definitions
+from app.services.max.tool_executor import parse_tool_blocks, parse_tool_blocks_with_errors, strip_tool_blocks, execute_tool, ToolResult, get_xai_tool_definitions, filter_unregistered_tool_calls
 from app.services.max.minimax_tools import minimax_tools_status
 from app.services.max.tool_result_normalizer import (
     normalize_tool_result_entry as _normalize_tool_result_entry_canonical,
@@ -1603,9 +1603,6 @@ def _sanitize_internal_leakage_text(text: str | None) -> str:
     cleaned = re.sub(r"\[\s*Tool\s+call\s*:[^\]]*\]", "", cleaned, flags=re.IGNORECASE)
     cleaned = re.sub(r"</?(?:minimax:)?tool_calls?\b[^>]*>", "", cleaned, flags=re.IGNORECASE)
     cleaned = re.sub(r"<invoke\b[^>]*>.*?</invoke>", "", cleaned, flags=re.IGNORECASE | re.DOTALL)
-    cleaned = re.sub(r"^[^\n]*\bto\s*=\s*functions\.[A-Za-z_][A-Za-z0-9_]*[^\n]*$", "", cleaned, flags=re.IGNORECASE | re.MULTILINE)
-    cleaned = re.sub(r"errorType\s*=\s*\S+[^\n]*", "", cleaned, flags=re.IGNORECASE)
-    cleaned = re.sub(r"Tool\s+[\"'][^\"']+[\"']\s+is not available[^\n]*", "", cleaned, flags=re.IGNORECASE)
     cleaned = re.sub(r"\bI should check\b[^\n.]*[.\n]?", "", cleaned, flags=re.IGNORECASE)
     cleaned = re.sub(r"\bruntime check required\b[^\n.]*[.\n]?", "", cleaned, flags=re.IGNORECASE)
     cleaned = re.sub(r"\bdelegation check required\b[^\n.]*[.\n]?", "", cleaned, flags=re.IGNORECASE)
@@ -1633,43 +1630,50 @@ def _family_graceful_visible_reply(
         return cleaned
     cleaned = _sanitize_internal_leakage_text(cleaned)
     try:
-        from app.services.max.docx_maestro import looks_like_plan_or_deadend, unknown_tool_reply
+        from app.services.max.docx_maestro import (
+            is_docx_process_ask,
+            looks_like_plan_or_deadend,
+            unknown_tool_reply,
+        )
 
-        docx_ok = [
-            row for row in (tool_results or [])
-            if isinstance(row, dict) and row.get("tool") == "process_docx" and row.get("success")
-        ]
-        if docx_ok:
-            delivery = ""
-            result = docx_ok[0].get("result") or {}
-            if isinstance(result, dict):
-                delivery = str(result.get("user_reply") or "").strip()
-            if delivery and (
-                looks_like_plan_or_deadend(cleaned)
-                or "/files/view/" not in cleaned
-                or "execute_code" in cleaned.lower()
-            ):
-                return delivery
-        leftover_tool = bool(re.search(
-            r"(?i)(?:<tool_call|to\s*=\s*functions\.|errorType\s*=|execute_code|\]<\]minimax)",
-            cleaned,
-        ))
-        if leftover_tool or looks_like_plan_or_deadend(cleaned):
-            docx_fail = [
-                row for row in (tool_results or [])
-                if isinstance(row, dict) and row.get("tool") == "process_docx" and not row.get("success")
-            ]
-            if docx_fail:
-                err = str(docx_fail[0].get("error") or "").strip()
-                if err:
-                    return err
-            missing = [
-                row for row in (tool_results or [])
-                if isinstance(row, dict) and not row.get("success")
-                and str(row.get("tool") or "") in {"execute_code", "functions.execute_code"}
-            ]
-            if missing or leftover_tool:
-                return unknown_tool_reply("execute_code")
+        rows = [row for row in (tool_results or []) if isinstance(row, dict)]
+        docx_ask = is_docx_process_ask(
+            getattr(request, "message", None),
+            getattr(request, "image_filename", None),
+        )
+        docx_ok = [row for row in rows if row.get("tool") == "process_docx" and row.get("success")]
+        has_execute = any(
+            str(row.get("tool") or "") in {"execute_code", "functions.execute_code"}
+            or str((row.get("result") or {}).get("_redirected_from") or "") == "execute_code"
+            for row in rows
+        )
+        if docx_ask or docx_ok or has_execute:
+            if docx_ok:
+                delivery = ""
+                result = docx_ok[0].get("result") or {}
+                if isinstance(result, dict):
+                    delivery = str(result.get("user_reply") or "").strip()
+                if delivery and (
+                    looks_like_plan_or_deadend(cleaned)
+                    or "/files/view/" not in cleaned
+                    or "execute_code" in cleaned.lower()
+                ):
+                    return delivery
+            leftover_tool = bool(re.search(
+                r"(?i)(?:<tool_call|to\s*=\s*functions\.|errorType\s*=|execute_code|\]<\]minimax)",
+                cleaned,
+            ))
+            if leftover_tool or looks_like_plan_or_deadend(cleaned):
+                docx_fail = [
+                    row for row in rows
+                    if row.get("tool") == "process_docx" and not row.get("success")
+                ]
+                if docx_fail:
+                    err = str(docx_fail[0].get("error") or "").strip()
+                    if err:
+                        return err
+                if has_execute or leftover_tool:
+                    return unknown_tool_reply("execute_code")
     except Exception:
         pass
     try:
@@ -3503,9 +3507,11 @@ async def _chat_with_max_service_impl(
             messages.insert(-1, AIMessage(role="system", content=(
                 finance_system_preamble(include_totals=True) + "\n" + _finance_context
             )))
-        _agenda_prelookup_entries = []
+        # Agenda prelookup writes into messages only. Do not extend the
+        # returned entries into tool_results_list — that double-counts
+        # when the model also emits get_today_agenda / list_schedule.
         if _today_agenda_prelookup_needed(request.message):
-            _agenda_prelookup_entries = await _inject_today_agenda_prelookup(
+            await _inject_today_agenda_prelookup(
                 request, messages, founder,
             )
         _docx_prelookup_entries = []
@@ -3589,7 +3595,6 @@ async def _chat_with_max_service_impl(
         if _pre_search_entry:
             tool_results_list.append(_pre_search_entry)
         tool_results_list.extend(_research_page_entries)
-        tool_results_list.extend(_agenda_prelookup_entries)
         tool_results_list.extend(_docx_prelookup_entries)
         final_content = response.content
         loop_messages = list(messages)
@@ -3616,6 +3621,7 @@ async def _chat_with_max_service_impl(
             tool_calls, tool_block_errors = parse_tool_blocks_with_errors(
                 current_response.content
             )
+            tool_calls = filter_unregistered_tool_calls(tool_calls, tool_results_list)
             if tool_block_errors:
                 for err in tool_block_errors:
                     logger.warning(
@@ -4616,6 +4622,7 @@ async def _chat_stream_impl(request: ChatRequest, http_request: Request | None =
             )))
         if _today_agenda_prelookup_needed(request.message):
             yield f"data: {_safe_dumps({'type': 'progress', 'phase': 'agenda', 'message': 'Revisando calendario y tareas'})}\n\n"
+            # messages only — not counted again in tool_results_list
             await _inject_today_agenda_prelookup(request, messages, founder)
         _stream_docx_prelookup_entries: list[dict[str, Any]] = []
         if _docx_prelookup_needed(request.message, request.image_filename):
@@ -4700,6 +4707,7 @@ async def _chat_stream_impl(request: ChatRequest, http_request: Request | None =
                 # parse + structured error feedback as the non-streaming
                 # chat path above.
                 tool_calls, tool_block_errors = parse_tool_blocks_with_errors(current_text)
+                tool_calls = filter_unregistered_tool_calls(tool_calls, tool_results_list)
                 if tool_block_errors:
                     for err in tool_block_errors:
                         logger.warning(

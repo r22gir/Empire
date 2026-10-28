@@ -1,3 +1,5 @@
+# offline-test-output (TestClient + python-docx). Not a live Max-e capture.
+# First-PR snapshot: executed process_docx + execute_code x3. Tests no longer write reports/.
 POST /api/v1/max/chat  (Max-e Centro de mando)
 attachment=adjunto_juan.docx
 executed=['process_docx', 'execute_code', 'execute_code', 'execute_code']

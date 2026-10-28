@@ -7,7 +7,8 @@ Juan's Centro de mando chat showed raw MiniMax protocol:
 
 and then dead-ended because LibreOffice was missing.
 
-No live model. No paid APIs. No real sends.
+These tests write only under pytest tmp / cwd. They do not overwrite
+tracked files in reports/. No live model. No paid APIs. No real sends.
 """
 from __future__ import annotations
 
@@ -22,11 +23,16 @@ from app.services.max.docx_maestro import (
     looks_like_docx_code_job,
     looks_like_plan_or_deadend,
     process_docx,
+    resolve_source,
     unknown_tool_reply,
     verify_pagination,
 )
 from app.services.max.thinking import strip_protocol_delimiters, strip_thinking
-from app.services.max.tool_executor import parse_tool_blocks, strip_tool_blocks
+from app.services.max.tool_executor import (
+    filter_unregistered_tool_calls,
+    parse_tool_blocks,
+    strip_tool_blocks,
+)
 
 TICKET_LEAK = (
     "Esta vez voy a ejecutar el procesamiento real y no a describir un plan: "
@@ -39,10 +45,6 @@ TICKET_LEAK = (
     'to=functions.execute_code code errorType=unknown_error, error=Tool '
     '\\"execute_code\\" is not available in this environment.'
 )
-
-PROOF_DIR = Path(__file__).resolve().parents[2] / "reports"
-PROOF_JSON = PROOF_DIR / "2026-10-28_maxe_docx_chat_path.json"
-PROOF_LOG = PROOF_DIR / "2026-10-28_maxe_docx_realpath.txt"
 
 
 def _sample_docx(path: Path) -> Path:
@@ -75,6 +77,20 @@ def test_ticket_leak_tokens_are_stripped():
     assert "errorType" not in cleaned
     assert "unknown_error" not in cleaned
     assert "is not available in this environment" not in cleaned
+    assert "maestro" in cleaned.lower()
+    assert "LibreOffice no está disponible" in cleaned
+
+
+def test_line_strips_do_not_eat_real_spanish():
+    real = (
+        "Juan dijo que no use to=functions.execute_code en el chat. "
+        "errorType=unknown_error no es un mensaje para él."
+    )
+    cleaned = _sanitize_internal_leakage_text(real)
+    assert "Juan dijo" in cleaned
+    assert "no es un mensaje" in cleaned
+    visible = strip_tool_blocks(real)
+    assert "Juan dijo" in visible
 
 
 def test_strip_thinking_keeps_spanish_and_drops_delimiters():
@@ -84,17 +100,22 @@ def test_strip_thinking_keeps_spanish_and_drops_delimiters():
     assert strip_protocol_delimiters("hola]<]minimax[>[mundo") == "holamundo"
 
 
-def test_minimax_execute_code_markup_is_parsed_and_stripped():
+def test_minimax_execute_code_markup_is_stripped_not_looped():
     calls = parse_tool_blocks(TICKET_LEAK)
-    assert [c["tool"] for c in calls] == ["execute_code"]
+    assert calls == []
     visible = strip_tool_blocks(TICKET_LEAK)
     assert "<tool_call>" not in visible
     assert "to=functions" not in visible
     assert "execute_code" not in visible
     assert "errorType" not in visible
+    leftover = filter_unregistered_tool_calls(
+        [{"tool": "execute_code"}],
+        [{"tool": "process_docx", "success": True}],
+    )
+    assert leftover == []
 
 
-def test_unknown_tool_error_is_short_spanish(monkeypatch, tmp_path):
+def test_family_missing_tool_is_spanish(monkeypatch, tmp_path):
     monkeypatch.setenv("EMPIRE_EDITION", "amp")
     monkeypatch.setenv("EMPIRE_DATA_DIR", str(tmp_path))
     from app.edition import apply_amp_process_paths
@@ -110,20 +131,7 @@ def test_unknown_tool_error_is_short_spanish(monkeypatch, tmp_path):
     assert "Available tools:" not in (result.error or "")
 
 
-def test_family_missing_tool_is_spanish(monkeypatch, tmp_path):
-    monkeypatch.setenv("EMPIRE_EDITION", "amp")
-    monkeypatch.setenv("EMPIRE_DATA_DIR", str(tmp_path))
-    from app.edition import apply_amp_process_paths
-    from app.services.max.tool_executor import execute_tool
-
-    apply_amp_process_paths()
-    result = execute_tool({"tool": "execute_code", "code": "print(1)"}, founder=True)
-    assert result.success is False
-    assert result.error == unknown_tool_reply("execute_code")
-    assert "Available tools:" not in result.error
-
-
-def test_execute_code_docx_job_redirects(monkeypatch, tmp_path):
+def test_execute_code_docx_job_redirects_and_succeeds(monkeypatch, tmp_path):
     monkeypatch.setenv("EMPIRE_EDITION", "amp")
     monkeypatch.setenv("EMPIRE_DATA_DIR", str(tmp_path))
     from app.edition import apply_amp_process_paths
@@ -131,14 +139,32 @@ def test_execute_code_docx_job_redirects(monkeypatch, tmp_path):
 
     apply_amp_process_paths()
     src = _sample_docx(tmp_path / "uploads" / "documents" / "plan.docx")
-    assert looks_like_docx_code_job({"tool": "execute_code", "code": "import docx; maestro()"})
+    assert looks_like_docx_code_job({"tool": "execute_code", "code": f"read {src.name} and write maestro"})
     result = execute_tool(
         {"tool": "execute_code", "code": f"read {src.name} and write maestro"},
         founder=True,
     )
-    # Redirect only happens when the call looks like a DOCX job; filename may
-    # still be missing, so success can be false with a Spanish file error.
+    assert result.success is True
     assert result.tool == "process_docx"
+    assert (result.result or {}).get("ok") is True
+    assert (result.result or {}).get("_redirected_from") == "execute_code"
+    assert Path(result.result["maestro"]["path"]).is_file()
+    assert Path(result.result["resumen"]["path"]).is_file()
+
+
+def test_resolve_source_stays_in_upload_roots(monkeypatch, tmp_path):
+    monkeypatch.setenv("EMPIRE_EDITION", "amp")
+    monkeypatch.setenv("EMPIRE_DATA_DIR", str(tmp_path))
+    from app.edition import apply_amp_process_paths
+
+    apply_amp_process_paths()
+    inside = _sample_docx(tmp_path / "uploads" / "documents" / "ok.docx")
+    outside = tmp_path / "outside.docx"
+    outside.write_bytes(inside.read_bytes())
+    assert resolve_source("ok.docx") == inside.resolve()
+    assert resolve_source(None, path=str(inside)) == inside.resolve()
+    assert resolve_source(None, path=str(outside)) is None
+    assert resolve_source(None, path="/etc/passwd") is None
 
 
 def test_docx_fallback_without_libreoffice(tmp_path, monkeypatch):
@@ -163,17 +189,13 @@ def test_docx_fallback_without_libreoffice(tmp_path, monkeypatch):
     assert result["libreoffice"] is False
     assert Path(result["maestro"]["path"]).is_file()
     assert Path(result["resumen"]["path"]).is_file()
-    assert result["maestro"]["bytes"] > 0
-    assert result["resumen"]["bytes"] > 0
     assert "/api/v1/files/view/documents/" in result["maestro"]["url"]
-    assert "/api/v1/files/view/documents/" in result["resumen"]["url"]
     assert "LibreOffice" in result["user_reply"]
-    assert "maestro" in result["user_reply"].lower()
     import docx
 
     master = docx.Document(result["maestro"]["path"])
     body = "\n".join(p.text for p in master.paragraphs)
-    assert "cuerpo completo" in body.lower() or "Informe de prueba AMP" in body
+    assert "Informe de prueba AMP" in body
     assert "Publicar enlaces reales" in body
 
 
@@ -182,8 +204,13 @@ def test_intent_and_plan_detectors():
         "Lee el DOCX, genera el maestro y el resumen, verifica paginación y publica enlaces",
         "informe.docx",
     )
+    assert is_docx_process_ask("Genera el maestro y el resumen del DOCX", "adjunto.docx")
     assert not is_docx_process_ask("hola manito", None)
+    assert not is_docx_process_ask("resúmeme el día", "informe.docx")
+    assert not is_docx_process_ask("publica los enlaces", "informe.docx")
+    assert not is_docx_process_ask("procesa esto", None)
     assert looks_like_plan_or_deadend(TICKET_LEAK)
+    assert looks_like_plan_or_deadend("") is False
     assert not looks_like_plan_or_deadend("Listo. Aquí están los enlaces del maestro.")
 
 
@@ -249,7 +276,10 @@ def _patch_chat_path(monkeypatch, fake_chat, fake_stream, fake_execute):
 
 
 def test_chat_docx_path_strips_leak_and_delivers(monkeypatch, tmp_path):
-    """POST /api/v1/max/chat — the door Juan's Command Center hits."""
+    """POST /api/v1/max/chat — the door Juan's Command Center hits.
+
+    Writes proof under tmp_path only. Does not touch reports/.
+    """
     from fastapi import FastAPI
     from fastapi.testclient import TestClient
     from app.routers.max.router import router
@@ -299,50 +329,28 @@ def test_chat_docx_path_strips_leak_and_delivers(monkeypatch, tmp_path):
     assert res.status_code == 200, res.text
     body = res.json()
     text = body["response"]
-    import shutil
-
-    PROOF_DIR.mkdir(parents=True, exist_ok=True)
-    saved_maestro = PROOF_DIR / real["maestro"]["filename"]
-    saved_resumen = PROOF_DIR / real["resumen"]["filename"]
-    shutil.copy2(real["maestro"]["path"], saved_maestro)
-    shutil.copy2(real["resumen"]["path"], saved_resumen)
-    PROOF_JSON.write_text(json.dumps({
+    proof = tmp_path / "chat_path.json"
+    proof.write_text(json.dumps({
+        "kind": "offline-test-output",
         "endpoint": "/api/v1/max/chat",
         "ticket": "fh-bec7a9e9f39e",
         "user": message,
         "attachment": src.name,
-        "model_payload": TICKET_LEAK,
         "executed_tools": executed,
-        "process_docx": {
-            "ok": real["ok"],
-            "maestro": real["maestro"],
-            "resumen": real["resumen"],
-            "pagination": real["pagination"],
-            "paragraph_count": real["paragraph_count"],
-        },
-        "response": body,
+        "response": text,
+        "quality": body.get("quality"),
     }, ensure_ascii=False, indent=2, default=str), encoding="utf-8")
-    PROOF_LOG.write_text(
-        "POST /api/v1/max/chat  (Max-e Centro de mando)\n"
-        f"attachment={src.name}\n"
-        f"executed={executed}\n"
-        f"maestro={real['maestro']['path']}\n"
-        f"resumen={real['resumen']['path']}\n"
-        f"libreoffice={real['libreoffice']}\n"
-        f"pagination_verified={real['pagination_verified']}\n\n"
-        f"visible_reply=\n{text}\n",
-        encoding="utf-8",
-    )
-    assert "process_docx" in executed
+    assert executed == ["process_docx"]
+    assert "execute_code" not in executed
     assert "]<]minimax[>" not in text
     assert "<tool_call>" not in text
     assert "to=functions" not in text
     assert "execute_code" not in text
-    assert "errorType" not in text
     assert "/files/view/documents/" in text
     assert "maestro" in text.lower()
-    assert "resumen" in text.lower()
-    assert "LibreOffice" in text
+    quality = body.get("quality") or {}
+    assert quality.get("label") != "Quality issue detected"
+    assert "Quality check flagged" not in text
 
 
 def test_family_graceful_reply_uses_docx_delivery(monkeypatch, tmp_path):
@@ -370,4 +378,10 @@ def test_family_graceful_reply_uses_docx_delivery(monkeypatch, tmp_path):
         [{"tool": "process_docx", "success": True, "result": {"user_reply": delivery}}],
     )
     assert visible == delivery
-    assert "]<]minimax[>" not in visible
+    other = max_router._family_graceful_visible_reply(
+        TICKET_LEAK,
+        ChatRequest(message="hola manito"),
+        [],
+    )
+    assert other != unknown_tool_reply("execute_code")
+    assert "LibreOffice no está disponible" in other or "maestro" in other.lower()

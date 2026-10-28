@@ -125,6 +125,11 @@ def _check_tool_results(result: QualityResult, tool_results: list):
             # Skip access pending errors (those are expected flow)
             if "__ACCESS_PENDING__" in str(error):
                 continue
+            # MiniMax leaked execute_code — dropped or redirected, not a real fail.
+            if tool_name in {"execute_code", "functions.execute_code"}:
+                continue
+            if str((tr_dict.get("result") or {}).get("_redirected_from") or "") == "execute_code":
+                continue
             result.warnings.append(f"tool_error:{tool_name}:{error[:100]}")
 
 

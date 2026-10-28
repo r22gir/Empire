@@ -1,0 +1,44 @@
+# Local pytest transcript (no GitHub Actions on this repo)
+# cwd: backend/
+# command: python3 -m pytest tests/test_docx_maestro_leak.py tests/test_minimax_thinking_strip.py tests/test_mm_think_toolcall_leak.py tests/test_tool_block_parser_hotfix.py -q
+# date: 2026-10-28
+
+/home/ubuntu/.local/lib/python3.12/site-packages/pytest_asyncio/plugin.py:300: PytestDeprecationWarning: The configuration option "asyncio_default_fixture_loop_scope" is unset.
+The event loop scope for asynchronous fixtures will default to the "fixture" caching scope. Future versions of pytest-asyncio will default the loop scope for asynchronous fixtures to "function" scope. Set the default fixture loop scope explicitly in order to avoid unexpected behavior in the future. Valid fixture loop scopes are: "function", "class", "module", "package", "session"
+
+  warnings.warn(PytestDeprecationWarning(_DEFAULT_FIXTURE_LOOP_SCOPE_UNSET))
+....................................................................     [100%]
+[live-data firewall] 2 connect(s) to live services blocked (not failures by themselves): ('127.0.0.1', 8011) x1, ('127.0.0.1', 3011) x1
+[live-data firewall] module constants redirected to temp: 13
+
+=============================== warnings summary ===============================
+app/schemas/license.py:13
+  /workspace/backend/app/schemas/license.py:13: PydanticDeprecatedSince20: Support for class-based `config` is deprecated, use ConfigDict instead. Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.14/migration/
+    class LicenseResponse(LicenseBase):
+
+app/schemas/shipment.py:42
+  /workspace/backend/app/schemas/shipment.py:42: PydanticDeprecatedSince20: Support for class-based `config` is deprecated, use ConfigDict instead. Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.14/migration/
+    class ShipmentLabel(BaseModel):
+
+app/schemas/listing.py:44
+  /workspace/backend/app/schemas/listing.py:44: PydanticDeprecatedSince20: Support for class-based `config` is deprecated, use ConfigDict instead. Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.14/migration/
+    class ListingResponse(ListingBase):
+
+app/schemas/message.py:10
+  /workspace/backend/app/schemas/message.py:10: PydanticDeprecatedSince20: Support for class-based `config` is deprecated, use ConfigDict instead. Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.14/migration/
+    class MessageResponse(BaseModel):
+
+app/core/config.py:5
+  /workspace/backend/app/core/config.py:5: PydanticDeprecatedSince20: Support for class-based `config` is deprecated, use ConfigDict instead. Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.14/migration/
+    class Settings(BaseSettings):
+
+../../home/ubuntu/.local/lib/python3.12/site-packages/passlib/utils/__init__.py:854
+  /home/ubuntu/.local/lib/python3.12/site-packages/passlib/utils/__init__.py:854: DeprecationWarning: 'crypt' is deprecated and slated for removal in Python 3.13
+    from crypt import crypt as _crypt
+
+tests/test_docx_maestro_leak.py::test_chat_docx_path_strips_leak_and_delivers
+  /workspace/backend/app/services/max/unified_message_store.py:386: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    cutoff = (datetime.utcnow() - timedelta(hours=hours)).isoformat()
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+68 passed, 7 warnings in 2.33s

@@ -1,4 +1,6 @@
 {
+  "kind": "offline-test-output",
+  "note": "TestClient + python-docx, not a capture from a live EmpireDell Max-e process. This file is the first-PR snapshot (process_docx + execute_code x3). Tests no longer write reports/.",
   "endpoint": "/api/v1/max/chat",
   "ticket": "fh-bec7a9e9f39e",
   "user": "Procesa el DOCX adjunto: lee el cuerpo completo, genera el maestro y el resumen, verifica la paginación y publica los enlaces.",
