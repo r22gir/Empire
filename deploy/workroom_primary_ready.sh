@@ -1,23 +1,22 @@
 #!/bin/sh
-# Family-edition ExecStartPre: Workroom must be up, and this process
-# must not take Workroom's primary-worker lock.
+# Family-edition ExecStartPre: refuse Workroom lock paths.
+# Does not wait on Workroom's lock or health. Max-e (8011) and Maxine
+# (8012) start even when empire-backend (port 8000) is down.
 #
 # Oct 23 2026: /tmp/empire_primary_worker.lock was unlinked (tmp cleanup)
 # while Workroom still held flock on the old inode. The old guard ran
 #   flock -n /tmp/empire_primary_worker.lock true
 # which *creates* a new unlocked file (and can briefly steal Workroom's
-# exclusive lock), then treated Workroom as down.
+# exclusive lock).
 #
-# This script never flocks Workroom's file. It:
+# This script never flocks Workroom's file. It only:
 #   1. Refuses if EMPIRE_WORKER_LOCK is a Workroom path (realpath;
 #      empty is refused on amp/maxine). Extra slashes like /tmp// fail too.
-#   2. Treats Workroom as ready if /proc/locks or lslocks shows a holder
-#      on an *existing* Workroom lock inode (read-only; never flock).
-#   3. Otherwise accepts http://127.0.0.1:8000/health.
+#   2. Exits 0. Family start does not depend on /proc/locks or
+#      http://127.0.0.1:8000/health.
 #
 # Overrides for tests (never needed on the Dell):
-#   EMPIRE_WORKROOM_LOCK, EMPIRE_WORKROOM_LOCK_LEGACY,
-#   EMPIRE_WORKROOM_HEALTH_URL
+#   EMPIRE_WORKROOM_LOCK, EMPIRE_WORKROOM_LOCK_LEGACY
 set -eu
 
 canon() {
@@ -31,7 +30,6 @@ canon() {
 
 WORKROOM_LOCK="$(canon "${EMPIRE_WORKROOM_LOCK:-/home/rg/empire-data/run/empire_primary_worker.lock}")"
 LEGACY_LOCK="$(canon "${EMPIRE_WORKROOM_LOCK_LEGACY:-/tmp/empire_primary_worker.lock}")"
-HEALTH_URL="${EMPIRE_WORKROOM_HEALTH_URL:-http://127.0.0.1:8000/health}"
 OUR_LOCK="${EMPIRE_WORKER_LOCK:-}"
 EDITION="${EMPIRE_EDITION:-}"
 
@@ -55,65 +53,5 @@ elif is_workroom_lock "$OUR_LOCK"; then
   exit 1
 fi
 
-# Read-only: does some process hold an exclusive flock/posix lock on this inode?
-# Never flock the file — that would steal Workroom's exclusive lock.
-lock_is_held() {
-  path="$1"
-  [ -e "$path" ] || return 1
-  LOCK_PATH="$path" python3 -c '
-import os, subprocess, sys
-
-path = os.environ["LOCK_PATH"]
-try:
-    st = os.stat(path)
-except OSError:
-    sys.exit(1)
-maj, min_ = os.major(st.st_dev), os.minor(st.st_dev)
-ino = st.st_ino
-needles = {
-    f"{maj:x}:{min_:x}:{ino}",
-    f"{maj}:{min_}:{ino}",
-    f"{maj:02x}:{min_:02x}:{ino}",
-}
-try:
-    with open("/proc/locks", encoding="ascii", errors="replace") as fh:
-        for line in fh:
-            for needle in needles:
-                if needle in line.split():
-                    sys.exit(0)
-except OSError:
-    pass
-try:
-    out = subprocess.check_output(["lslocks", "-u", "-n", "-o", "INODE,PATH"], text=True)
-except (OSError, subprocess.CalledProcessError):
-    sys.exit(1)
-real = os.path.realpath(path)
-for line in out.splitlines():
-    parts = line.split(None, 1)
-    if len(parts) != 2:
-        continue
-    if parts[0] == str(ino) and os.path.realpath(parts[1]) == real:
-        sys.exit(0)
-sys.exit(1)
-'
-}
-
-if lock_is_held "$WORKROOM_LOCK" || lock_is_held "$LEGACY_LOCK"; then
-  exit 0
-fi
-
-health_ok() {
-  if command -v curl >/dev/null 2>&1; then
-    curl -fsS --max-time 2 "$HEALTH_URL" >/dev/null
-    return $?
-  fi
-  HEALTH_URL="$HEALTH_URL" python3 -c 'import os, urllib.request; urllib.request.urlopen(os.environ["HEALTH_URL"], timeout=2)'
-}
-
-if health_ok; then
-  echo "Workroom lock path missing or unlocked; 127.0.0.1:8000 is healthy" >&2
-  exit 0
-fi
-
-echo "Workroom not holding primary lock yet and 127.0.0.1:8000 is not healthy" >&2
-exit 1
+echo "family lock path is not a Workroom lock; start does not wait on Workroom" >&2
+exit 0

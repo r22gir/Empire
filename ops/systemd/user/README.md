@@ -10,8 +10,8 @@ recoverable; the live copies live under
 | File | Drop-in path | Purpose |
 |---|---|---|
 | `empire-portal.service.d/rebuild-deps.conf` | `~/.config/systemd/user/empire-portal.service.d/rebuild-deps.conf` | Make `systemctl --user restart empire-portal.service` succeed from a fresh/pruned `node_modules` state without manual `npm install --include=dev` recovery. |
-| `empire-amp.service.d/workroom-ready.conf` | `~/.config/systemd/user/empire-amp.service.d/workroom-ready.conf` | Replace the Oct 23 flock-on-/tmp ExecStartPre with `deploy/workroom_primary_ready.sh` (never create Workroom's lock; health on 127.0.0.1:8000). Same guard as Maxine. Do not restart Workroom. |
-| `empire-maxine.service.d/workroom-ready.conf` | `~/.config/systemd/user/empire-maxine.service.d/workroom-ready.conf` | Same Workroom-ready guard as Max-e. Maxine still must not use the Workroom lock. |
+| `empire-amp.service.d/workroom-ready.conf` | `~/.config/systemd/user/empire-amp.service.d/workroom-ready.conf` | Replace the Oct 23 flock-on-/tmp ExecStartPre with `deploy/workroom_primary_ready.sh` (never create Workroom's lock; do not wait on Workroom lock or 127.0.0.1:8000). Same guard as Maxine. Do not restart Workroom. |
+| `empire-maxine.service.d/workroom-ready.conf` | `~/.config/systemd/user/empire-maxine.service.d/workroom-ready.conf` | Same family lock-path guard as Max-e. Maxine still must not use the Workroom lock. Starts when Workroom is down. |
 
 ## How to install (or restore) a drop-in
 

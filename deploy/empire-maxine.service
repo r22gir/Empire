@@ -17,9 +17,9 @@
 # /home/rg/empire-data/run/...) so this process cannot become the
 # Workroom primary worker. Same ExecStartPre script as Max-e
 # (deploy/workroom_primary_ready.sh): never flock Workroom's file;
-# /proc/locks or 127.0.0.1:8000/health is enough.
-# --workers 2: the worker that does not take *this* instance's lock
-# prints "Secondary worker — skipping singleton background services".
+# do not wait on Workroom's lock or 127.0.0.1:8000/health.
+# Maxine starts when Workroom is down. Primary-only jobs stay off.
+# --workers 2: this instance's lock lives under /data/maxine/run.
 
 [Unit]
 Description=EmpireBox Maxine edition (ConstructionForge command center)

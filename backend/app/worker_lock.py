@@ -7,6 +7,10 @@ A later Workroom change may move that file to
 lock. Path compares use ``os.path.realpath`` so ``/tmp//`` and similar
 spellings do not slip through.
 
+Family editions use a private lock under ``/data/<instance>/run``. Holding
+that file is not becoming the Workroom primary worker. Primary-only jobs
+stay hard-disabled on family editions even when Workroom is down.
+
 This module does not change Workroom's default and does not re-bind a
 deleted lock name. That belongs on the Workroom branch.
 """
@@ -24,6 +28,37 @@ DURABLE_WORKROOM_LOCK_PATH = Path("/home/rg/empire-data/run/empire_primary_worke
 LEGACY_WORKROOM_LOCK_PATH = WORKROOM_LOCK_PATH
 
 WORKROOM_HEALTH_URL = "http://127.0.0.1:8000/health"
+
+# Started only on the Workroom primary worker. Family editions never start
+# these, even if they hold ``/data/<instance>/run/empire_primary_worker.lock``.
+PRIMARY_JOBS = (
+    "telegram_bot",
+    "gmail_email_polling",
+    "desk_scheduler",
+    "social_publish_loop",
+    "max_scheduler",
+    "max_monitor",
+    "openclaw_worker",
+    "vendorops_alert_runner",
+    "task_auto_worker",
+    "startup_probes",
+    "growth_jobs",
+)
+
+# Source markers in ``app.main.start_background_services`` that must sit
+# after the family / secondary skip. Gmail polling and growth jobs start
+# from the scheduler / monitor, not as separate create_task calls.
+PRIMARY_JOB_START_MARKERS = (
+    "telegram_bot.start_webhook_mode",
+    "desk_scheduler.start",
+    "_social_publish_loop",
+    "max_scheduler.start",
+    "max_monitor.start",
+    "openclaw_worker_loop",
+    "vendorops_alert_runner.start",
+    "_task_auto_worker",
+    "_startup_probes",
+)
 
 _worker_lock_file: Optional[IO[str]] = None
 
@@ -77,6 +112,30 @@ def family_must_refuse_workroom_lock(path: Path | None = None) -> bool:
     if not is_family_edition():
         return False
     return is_workroom_lock_path(path if path is not None else primary_worker_lock_path())
+
+
+def primary_jobs_blocked_reason(holds_instance_lock: bool = False) -> Optional[str]:
+    """Why Workroom primary jobs must not start. None means they may start.
+
+    Family editions are always blocked, including when they hold their
+    own ``/data/<instance>/run`` lock and Workroom is down.
+    """
+    from app.edition import is_family_edition
+
+    if is_family_edition():
+        return "family_edition"
+    if not holds_instance_lock:
+        return "not_primary_worker"
+    return None
+
+
+def should_start_primary_jobs(holds_instance_lock: bool = False) -> bool:
+    """True only for the Workroom primary worker.
+
+    Family editions always return False. Holding a private instance lock
+    is not becoming the Workroom primary.
+    """
+    return primary_jobs_blocked_reason(holds_instance_lock) is None
 
 
 def held_lock_file() -> Optional[IO[str]]:
