@@ -79,7 +79,8 @@ def primary_worker_lock_path() -> Path:
     lock lives under that root and the two processes do not share ``/tmp``.
     Family editions must never set ``EMPIRE_WORKER_LOCK`` to a Workroom path
     (``/tmp/empire_primary_worker.lock`` or
-    ``/home/rg/empire-data/run/empire_primary_worker.lock``).
+    ``/home/rg/empire-data/run/empire_primary_worker.lock``). Holding the
+    family file is not becoming the Workroom primary worker.
     """
     explicit = os.getenv("EMPIRE_WORKER_LOCK", "").strip()
     if explicit:

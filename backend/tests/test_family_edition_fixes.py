@@ -93,6 +93,7 @@ def test_amp_unit_uses_empire_amp_not_workroom_checkout():
     assert "Environment=EMPIRE_WORKER_LOCK=/data/amp/run/empire_primary_worker.lock" in text
     assert "ExecStartPre=/home/rg/empire-amp/deploy/workroom_primary_ready.sh" in text
     assert "Environment=EMPIRE_WORKER_LOCK=/tmp/empire_primary_worker.lock" not in text
+    assert "After=empire-backend" not in text
     assert "--port 8000" not in text
     assert "--port 3005" not in text
 
@@ -105,6 +106,7 @@ def test_maxine_unit_uses_its_tree_lock_and_secondary_worker():
     assert "Environment=EMPIRE_WORKER_LOCK=/data/maxine/run/empire_primary_worker.lock" in text
     assert "/tmp/empire_primary_worker.lock" in text
     assert "ExecStartPre=/home/rg/empire-maxine/deploy/workroom_primary_ready.sh" in text
+    assert "After=empire-backend" not in text
     assert "--workers 2" in text
     assert "Environment=EMPIRE_WORKER_LOCK=/tmp/empire_primary_worker.lock" not in text
     assert "--port 8000" not in text
@@ -234,6 +236,8 @@ def test_schema_migration_lock_blocks_a_second_holder(tmp_path, monkeypatch):
     main = (ROOT / "backend" / "app" / "main.py").read_text(encoding="utf-8")
     start = main.index("async def start_background_services")
     secondary = main.index("Secondary worker", start)
+    family = main.index("Family edition — skipping Workroom primary jobs", start)
     assert main.index("_migrate_unified_business()", start) < secondary
+    assert family < main.index("Primary worker — starting singleton background services", start)
     assert "with migration_lock()" in (ROOT / "backend" / "app" / "db" / "init_db.py").read_text(encoding="utf-8")
     assert "with migration_lock()" in (ROOT / "backend" / "app" / "db" / "unified_business_migration.py").read_text(encoding="utf-8")

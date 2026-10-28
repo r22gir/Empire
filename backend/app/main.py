@@ -409,7 +409,8 @@ async def api_voice_transcribe(audio: UploadFile = FileParam(...), language: str
 # must only run in ONE worker, otherwise they fight over getUpdates and crash.
 # We use a simple file-lock: the first worker to acquire it becomes the
 # "primary" and starts all singleton background services.
-# Family editions refuse Workroom lock paths (see app.worker_lock).
+# Family editions refuse Workroom lock paths (see app.worker_lock) and never
+# start these Workroom-primary jobs, even if they hold /data/<instance>/run.
 #
 def _migrate_unified_business() -> None:
     """Create unified tables before either worker serves traffic.
@@ -438,6 +439,7 @@ def _acquire_primary_worker_lock() -> bool:
 
     Returns True if this process now holds the lock (i.e. is the primary).
     Family editions refuse both Workroom lock paths and use their own file.
+    Holding that family file is not becoming the Workroom primary.
     Workroom's default path is unchanged on this branch (``/tmp``).
     """
     from app.worker_lock import acquire_primary_worker_lock
@@ -445,11 +447,18 @@ def _acquire_primary_worker_lock() -> bool:
     return acquire_primary_worker_lock()
 
 
+def _should_start_primary_jobs(holds_instance_lock: bool) -> bool:
+    """Workroom primary only. Family editions always skip these jobs."""
+    from app.worker_lock import should_start_primary_jobs
+
+    return should_start_primary_jobs(holds_instance_lock)
+
+
 @app.on_event("startup")
 async def start_background_services():
     import asyncio
 
-    is_primary = _acquire_primary_worker_lock()
+    holds_instance_lock = _acquire_primary_worker_lock()
 
     # Schema first, on every worker. create_all_tables holds the migration
     # lock, so the second worker waits instead of racing the first start.
@@ -481,8 +490,14 @@ async def start_background_services():
     except Exception as e:
         print(f"✗ Code-task startup failed (continuing without rehydration): {e}")
 
-    if not is_primary:
-        print("⏭ Secondary worker — skipping singleton background services")
+    if not _should_start_primary_jobs(holds_instance_lock):
+        if is_family_edition():
+            print(
+                "⏭ Family edition — skipping Workroom primary jobs "
+                "(Telegram, Gmail/email polling, OpenClaw, schedulers, growth)"
+            )
+        else:
+            print("⏭ Secondary worker — skipping singleton background services")
         return
 
     print("★ Primary worker — starting singleton background services")

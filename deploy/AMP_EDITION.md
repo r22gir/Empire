@@ -46,7 +46,7 @@ npx next build --webpack
 systemctl --user restart empire-amp-frontend.service
 ```
 
-Workroom primary lock: Max-e must not flock Workroom's lock. The unit sets `EMPIRE_WORKER_LOCK=/data/amp/run/empire_primary_worker.lock` and `ExecStartPre=deploy/workroom_primary_ready.sh` (same script as Maxine). That guard never creates or flocks `/tmp/empire_primary_worker.lock` or `/home/rg/empire-data/run/empire_primary_worker.lock`. If the Workroom lock name was unlinked (tmp cleanup, Oct 23 2026), `http://127.0.0.1:8000/health` is enough to start. This family branch does not change Workroom's default lock path. Ports **8000 / 3000 / 3005** stay untouched.
+Workroom primary lock: Max-e must not flock Workroom's lock and must not become the Workroom primary worker. The unit sets `EMPIRE_WORKER_LOCK=/data/amp/run/empire_primary_worker.lock` and `ExecStartPre=deploy/workroom_primary_ready.sh` (same script as Maxine). That guard never creates or flocks `/tmp/empire_primary_worker.lock` or `/home/rg/empire-data/run/empire_primary_worker.lock`. It does **not** wait on Workroom's lock or `http://127.0.0.1:8000/health` — Max-e starts when Workroom is down. Primary-only jobs (email/Gmail polling, Telegram, OpenClaw worker, schedulers, growth) stay hard-disabled. This family branch does not change Workroom's default lock path. Ports **8000 / 3000 / 3005** stay untouched.
 
 Check:
 
