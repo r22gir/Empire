@@ -90,6 +90,11 @@ def test_amp_unit_uses_empire_amp_not_workroom_checkout():
     assert "ExecStart=/home/rg/empire-repo" not in text
     assert "127.0.0.1 --port 8011" in text
     assert "EnvironmentFile=/home/rg/empire-amp.env" in text
+    assert "Environment=EMPIRE_WORKER_LOCK=/data/amp/run/empire_primary_worker.lock" in text
+    assert "ExecStartPre=/home/rg/empire-amp/deploy/workroom_primary_ready.sh" in text
+    assert "Environment=EMPIRE_WORKER_LOCK=/tmp/empire_primary_worker.lock" not in text
+    assert "--port 8000" not in text
+    assert "--port 3005" not in text
 
 
 def test_maxine_unit_uses_its_tree_lock_and_secondary_worker():
@@ -99,9 +104,11 @@ def test_maxine_unit_uses_its_tree_lock_and_secondary_worker():
     assert "/home/rg/empire-repo" not in text
     assert "Environment=EMPIRE_WORKER_LOCK=/data/maxine/run/empire_primary_worker.lock" in text
     assert "/tmp/empire_primary_worker.lock" in text
-    assert "ExecStartPre=" in text
+    assert "ExecStartPre=/home/rg/empire-maxine/deploy/workroom_primary_ready.sh" in text
     assert "--workers 2" in text
     assert "Environment=EMPIRE_WORKER_LOCK=/tmp/empire_primary_worker.lock" not in text
+    assert "--port 8000" not in text
+    assert "--port 3005" not in text
 
 
 def _client():

@@ -77,6 +77,9 @@ def primary_worker_lock_path() -> Path:
     Workroom (no ``EMPIRE_DATA_DIR`` and no ``EMPIRE_WORKER_LOCK``) keeps
     ``/tmp/empire_primary_worker.lock``. AMP sets ``EMPIRE_DATA_DIR`` so the
     lock lives under that root and the two processes do not share ``/tmp``.
+    Family editions must never set ``EMPIRE_WORKER_LOCK`` to a Workroom path
+    (``/tmp/empire_primary_worker.lock`` or
+    ``/home/rg/empire-data/run/empire_primary_worker.lock``).
     """
     explicit = os.getenv("EMPIRE_WORKER_LOCK", "").strip()
     if explicit:

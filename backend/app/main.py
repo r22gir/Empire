@@ -18,6 +18,7 @@ _EDITION_ENV_KEYS = (
     "EMPIRE_BRAIN_DIR",
     "MAX_MEMORY_PATH",
     "EMPIRE_LOG_DIR",
+    "EMPIRE_WORKER_LOCK",
     "AMP_JWT_SECRET",
     "AMP_OWNER_EMAIL",
     "AMP_OWNER_USERNAME",
@@ -408,10 +409,8 @@ async def api_voice_transcribe(audio: UploadFile = FileParam(...), language: str
 # must only run in ONE worker, otherwise they fight over getUpdates and crash.
 # We use a simple file-lock: the first worker to acquire it becomes the
 # "primary" and starts all singleton background services.
+# Family editions refuse Workroom lock paths (see app.worker_lock).
 #
-_worker_lock_file = None  # keep reference so the lock is held for process lifetime
-
-
 def _migrate_unified_business() -> None:
     """Create unified tables before either worker serves traffic.
 
@@ -438,30 +437,12 @@ def _acquire_primary_worker_lock() -> bool:
     """Try to become the primary worker by acquiring an exclusive file lock.
 
     Returns True if this process now holds the lock (i.e. is the primary).
-    The lock is held for the lifetime of the process via the module-level
-    ``_worker_lock_file`` reference.
-
-    Workroom keeps ``/tmp/empire_primary_worker.lock``. When
-    ``EMPIRE_DATA_DIR`` or ``EMPIRE_WORKER_LOCK`` is set (the AMP edition),
-    the lock file is private to that instance.
+    Family editions refuse both Workroom lock paths and use their own file.
+    Workroom's default path is unchanged on this branch (``/tmp``).
     """
-    import fcntl
-    from app.instance_url import primary_worker_lock_path
-    global _worker_lock_file
-    lock_path = primary_worker_lock_path()
-    try:
-        lock_path.parent.mkdir(parents=True, exist_ok=True)
-        _worker_lock_file = open(lock_path, "w")
-        fcntl.flock(_worker_lock_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-        _worker_lock_file.write(str(os.getpid()))
-        _worker_lock_file.flush()
-        return True
-    except (OSError, IOError):
-        # Another worker already holds the lock
-        if _worker_lock_file:
-            _worker_lock_file.close()
-            _worker_lock_file = None
-        return False
+    from app.worker_lock import acquire_primary_worker_lock
+
+    return acquire_primary_worker_lock()
 
 
 @app.on_event("startup")
