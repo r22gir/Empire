@@ -9,28 +9,10 @@ The default string lives only in this module.
 from __future__ import annotations
 
 import os
-
-from app.worker_lock import (
-    LEGACY_WORKROOM_LOCK_PATH,
-    WORKROOM_LOCK_PATH,
-    is_workroom_lock_path,
-    primary_worker_lock_path,
-)
+from pathlib import Path
 
 WORKROOM_API_BASE = "http://localhost:8000"
-
-__all__ = [
-    "API_V1",
-    "LEGACY_WORKROOM_LOCK_PATH",
-    "WORKROOM_API_BASE",
-    "WORKROOM_LOCK_PATH",
-    "empire_api_base",
-    "empire_api_netloc",
-    "empire_api_url",
-    "empire_api_v1",
-    "is_workroom_lock_path",
-    "primary_worker_lock_path",
-]
+WORKROOM_LOCK_PATH = Path("/tmp/empire_primary_worker.lock")
 
 
 def empire_api_base() -> str:
@@ -87,3 +69,22 @@ class API_V1:
 
     def __radd__(self, other: str) -> str:
         return other + str(self)
+
+
+def primary_worker_lock_path() -> Path:
+    """Scheduler singleton lock.
+
+    Workroom (no ``EMPIRE_DATA_DIR`` and no ``EMPIRE_WORKER_LOCK``) keeps
+    ``/tmp/empire_primary_worker.lock``. AMP sets ``EMPIRE_DATA_DIR`` so the
+    lock lives under that root and the two processes do not share ``/tmp``.
+    Family editions must never set ``EMPIRE_WORKER_LOCK`` to a Workroom path
+    (``/tmp/empire_primary_worker.lock`` or
+    ``/home/rg/empire-data/run/empire_primary_worker.lock``).
+    """
+    explicit = os.getenv("EMPIRE_WORKER_LOCK", "").strip()
+    if explicit:
+        return Path(explicit).expanduser()
+    data = os.getenv("EMPIRE_DATA_DIR", "").strip()
+    if data:
+        return Path(data).expanduser() / "run" / "empire_primary_worker.lock"
+    return WORKROOM_LOCK_PATH

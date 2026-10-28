@@ -1,12 +1,15 @@
-"""Workroom primary-lock guard: durable path, deleted-inode case, family refuse.
+"""Family Workroom-ready guard: no flock steal, realpath, both Workroom paths.
 
 The Oct 23 2026 bug: tmp cleanup unlinked /tmp/empire_primary_worker.lock
 while Workroom still held flock on the old inode. The family ExecStartPre
 ran ``flock -n /tmp/empire_primary_worker.lock true``, which created a
-new unlocked file and refused every Max-e / Maxine start.
+new unlocked file and could briefly take Workroom's exclusive lock.
 
 These tests use a private lock under tmp_path and a health server on an
 ephemeral port. They never open 8000 / 8011 / 8012 / 3005.
+
+The report this file writes is a **test-only** simulation. A real-path
+check on the Dell comes later, after a backup and Rafael's OK.
 """
 from __future__ import annotations
 
@@ -57,11 +60,11 @@ def _start_health():
     return server, f"http://127.0.0.1:{port}/health"
 
 
-def _run_guard(env: dict, *extra: str) -> subprocess.CompletedProcess:
+def _run_guard(env: dict) -> subprocess.CompletedProcess:
     merged = os.environ.copy()
     merged.update(env)
     return subprocess.run(
-        [str(GUARD), *extra],
+        [str(GUARD)],
         capture_output=True,
         text=True,
         env=merged,
@@ -88,21 +91,27 @@ def lock_env(tmp_path, monkeypatch):
     reset_worker_lock_for_tests()
 
 
-def test_workroom_default_lock_is_not_in_tmp(lock_env, monkeypatch):
-    from app.instance_url import LEGACY_WORKROOM_LOCK_PATH, WORKROOM_LOCK_PATH, primary_worker_lock_path
-    from app.worker_lock import is_workroom_lock_path
+def test_workroom_default_lock_stays_tmp(lock_env):
+    from app.instance_url import WORKROOM_LOCK_PATH, primary_worker_lock_path
+    from app.worker_lock import (
+        DURABLE_WORKROOM_LOCK_PATH,
+        is_workroom_lock_path,
+        primary_worker_lock_path as worker_path,
+    )
 
-    assert str(WORKROOM_LOCK_PATH) == "/home/rg/empire-data/run/empire_primary_worker.lock"
-    assert str(LEGACY_WORKROOM_LOCK_PATH) == "/tmp/empire_primary_worker.lock"
-    assert str(primary_worker_lock_path()) == str(WORKROOM_LOCK_PATH)
+    assert str(WORKROOM_LOCK_PATH) == "/tmp/empire_primary_worker.lock"
+    assert str(primary_worker_lock_path()) == "/tmp/empire_primary_worker.lock"
+    assert str(worker_path()) == "/tmp/empire_primary_worker.lock"
     assert is_workroom_lock_path("/tmp/empire_primary_worker.lock")
-    assert is_workroom_lock_path(WORKROOM_LOCK_PATH)
+    assert is_workroom_lock_path("/tmp//empire_primary_worker.lock")
+    assert is_workroom_lock_path(DURABLE_WORKROOM_LOCK_PATH)
+    assert is_workroom_lock_path("/home/rg/empire-data/run/../run/empire_primary_worker.lock")
     assert not is_workroom_lock_path(lock_env["family"])
 
 
-def test_family_acquire_refuses_workroom_lock(lock_env, monkeypatch):
+def test_family_acquire_refuses_both_workroom_paths(lock_env, monkeypatch):
     monkeypatch.setenv("EMPIRE_EDITION", "amp")
-    monkeypatch.setenv("EMPIRE_WORKER_LOCK", "/tmp/empire_primary_worker.lock")
+    monkeypatch.setenv("EMPIRE_WORKER_LOCK", "/tmp//empire_primary_worker.lock")
     from app.worker_lock import acquire_primary_worker_lock, family_must_refuse_workroom_lock
 
     assert family_must_refuse_workroom_lock() is True
@@ -112,24 +121,6 @@ def test_family_acquire_refuses_workroom_lock(lock_env, monkeypatch):
     monkeypatch.setenv("EMPIRE_WORKER_LOCK", "/home/rg/empire-data/run/empire_primary_worker.lock")
     assert family_must_refuse_workroom_lock() is True
     assert acquire_primary_worker_lock() is False
-
-
-def test_workroom_acquire_holds_and_blocks_second(lock_env, monkeypatch):
-    import fcntl
-
-    monkeypatch.setenv("EMPIRE_WORKER_LOCK", str(lock_env["workroom"]))
-    from app.worker_lock import acquire_primary_worker_lock, reset_worker_lock_for_tests
-
-    assert acquire_primary_worker_lock() is True
-    other = open(lock_env["workroom"], "a")
-    try:
-        with pytest.raises(OSError):
-            fcntl.flock(other.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-    finally:
-        other.close()
-    reset_worker_lock_for_tests()
-    assert acquire_primary_worker_lock() is True
-    reset_worker_lock_for_tests()
 
 
 def test_family_acquire_uses_private_lock(lock_env, monkeypatch):
@@ -146,7 +137,7 @@ def test_family_acquire_uses_private_lock(lock_env, monkeypatch):
 def test_apply_amp_paths_rewrites_workroom_lock(tmp_path, monkeypatch):
     monkeypatch.setenv("EMPIRE_EDITION", "amp")
     monkeypatch.setenv("EMPIRE_DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("EMPIRE_WORKER_LOCK", "/tmp/empire_primary_worker.lock")
+    monkeypatch.setenv("EMPIRE_WORKER_LOCK", "/tmp//empire_primary_worker.lock")
     from app.edition import apply_amp_process_paths
 
     apply_amp_process_paths()
@@ -154,63 +145,32 @@ def test_apply_amp_paths_rewrites_workroom_lock(tmp_path, monkeypatch):
     assert (tmp_path / "run").is_dir()
 
 
-def test_refresh_rebinds_after_unlink(lock_env, monkeypatch):
-    import fcntl
-
-    monkeypatch.setenv("EMPIRE_WORKER_LOCK", str(lock_env["workroom"]))
-    from app.worker_lock import (
-        acquire_primary_worker_lock,
-        held_lock_file,
-        lock_path_matches_fd,
-        refresh_primary_worker_lock,
-    )
-
-    assert acquire_primary_worker_lock() is True
-    handle = held_lock_file()
-    assert handle is not None
-    lock_env["workroom"].unlink()
-    assert not lock_env["workroom"].exists()
-    assert lock_path_matches_fd(lock_env["workroom"], handle.fileno()) is False
-
-    assert refresh_primary_worker_lock() is True
-    assert lock_env["workroom"].exists()
-    new_handle = held_lock_file()
-    assert new_handle is not None
-    assert lock_path_matches_fd(lock_env["workroom"], new_handle.fileno())
-
-    other = open(lock_env["workroom"], "a")
-    try:
-        with pytest.raises(OSError):
-            fcntl.flock(other.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-    finally:
-        other.close()
-
-
 def test_guard_script_is_executable_and_wired():
     assert os.access(GUARD, os.X_OK)
     amp = (ROOT / "deploy" / "empire-amp.service").read_text(encoding="utf-8")
     maxine = (ROOT / "deploy" / "empire-maxine.service").read_text(encoding="utf-8")
     workroom = (ROOT / "systemd" / "empire-backend.service").read_text(encoding="utf-8")
+    script = GUARD.read_text(encoding="utf-8")
     assert "workroom_primary_ready.sh" in amp
     assert "workroom_primary_ready.sh" in maxine
     assert "EMPIRE_WORKER_LOCK=/data/amp/run/empire_primary_worker.lock" in amp
     assert "EMPIRE_WORKER_LOCK=/data/maxine/run/empire_primary_worker.lock" in maxine
-    assert "EMPIRE_WORKER_LOCK=/home/rg/empire-data/run/empire_primary_worker.lock" in workroom
+    assert "EMPIRE_WORKER_LOCK=/home/rg/empire-data/run/empire_primary_worker.lock" not in workroom
     assert "--port 8000" in workroom
     assert "--port 8000" not in amp
     assert "--port 8000" not in maxine
-    script = GUARD.read_text(encoding="utf-8")
-    assert "never create" in script.lower() or "Never create" in script or "O_CREAT" in script
+    live = [ln for ln in script.splitlines() if ln.strip() and not ln.lstrip().startswith("#")]
+    assert not any("flock" in ln for ln in live)
+    assert "/proc/locks" in script
     assert "127.0.0.1:8000" in script
-    assert "flock -n /tmp/empire_primary_worker.lock true" not in amp
-    assert "flock -n /tmp/empire_primary_worker.lock true" not in maxine
+    assert "realpath" in script
 
 
 def test_guard_refuses_workroom_lock_as_ours(lock_env):
     result = _run_guard(
         {
             "EMPIRE_EDITION": "maxine",
-            "EMPIRE_WORKER_LOCK": "/tmp/empire_primary_worker.lock",
+            "EMPIRE_WORKER_LOCK": "/tmp//empire_primary_worker.lock",
             "EMPIRE_WORKROOM_LOCK": str(lock_env["workroom"]),
             "EMPIRE_WORKROOM_LOCK_LEGACY": str(lock_env["legacy"]),
             "EMPIRE_WORKROOM_HEALTH_URL": "http://127.0.0.1:9/health",
@@ -232,7 +192,7 @@ def test_guard_refuses_workroom_lock_as_ours(lock_env):
     assert "must set EMPIRE_WORKER_LOCK" in empty.stderr
 
 
-def test_guard_passes_when_lock_held_without_health(lock_env):
+def test_guard_passes_when_lock_held_without_taking_it(lock_env):
     import fcntl
 
     lock_env["workroom"].write_text("", encoding="utf-8")
@@ -249,6 +209,13 @@ def test_guard_passes_when_lock_held_without_health(lock_env):
             }
         )
         assert result.returncode == 0, result.stderr
+        # Guard must not have stolen the exclusive lock.
+        probe = open(lock_env["workroom"], "a")
+        try:
+            with pytest.raises(OSError):
+                fcntl.flock(probe.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        finally:
+            probe.close()
     finally:
         holder.close()
 
@@ -266,7 +233,7 @@ def test_guard_uses_health_when_lock_name_is_gone(lock_env):
             }
         )
         assert result.returncode == 0, result.stderr
-        assert "8000 is healthy" in result.stderr or "healthy" in result.stderr
+        assert "healthy" in result.stderr
         assert not lock_env["workroom"].exists()
         assert not lock_env["legacy"].exists()
     finally:
@@ -288,111 +255,86 @@ def test_guard_fails_when_lock_missing_and_health_down(lock_env):
     assert not lock_env["workroom"].exists()
 
 
-def test_deleted_lock_inode_real_path_proof(lock_env, monkeypatch):
-    """Simulate Oct 23: unlink the name while holding the old inode."""
+def test_deleted_lock_inode_test_only_simulation(lock_env):
+    """Test-only Oct 23 simulation. Not a Dell real-path check."""
+    lock_path = lock_env["workroom"]
+    lock_path.write_text("held", encoding="utf-8")
     import fcntl
 
-    from app.worker_lock import (
-        acquire_primary_worker_lock,
-        held_lock_file,
-        refresh_primary_worker_lock,
-        reset_worker_lock_for_tests,
-    )
-
-    lock_path = lock_env["workroom"]
-    monkeypatch.setenv("EMPIRE_WORKER_LOCK", str(lock_path))
-    assert acquire_primary_worker_lock() is True
-    handle = held_lock_file()
-    assert handle is not None
-    old_inode = os.fstat(handle.fileno()).st_ino
-
-    lock_path.unlink()
-    assert not lock_path.exists()
-
-    naive = subprocess.run(
-        ["flock", "-n", str(lock_path), "true"],
-        capture_output=True,
-        text=True,
-    )
-    naive_created = lock_path.exists()
-    naive_ok = naive.returncode == 0
-    if naive_created:
-        lock_path.unlink()
-
-    server, url = _start_health()
+    holder = open(lock_path, "a")
+    fcntl.flock(holder.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
     try:
-        health_pass = _run_guard(
-            {
-                "EMPIRE_EDITION": "amp",
-                "EMPIRE_WORKER_LOCK": str(lock_env["family"]),
-                "EMPIRE_WORKROOM_LOCK": str(lock_path),
-                "EMPIRE_WORKROOM_LOCK_LEGACY": str(lock_env["legacy"]),
-                "EMPIRE_WORKROOM_HEALTH_URL": url,
-            }
+        lock_path.unlink()
+        assert not lock_path.exists()
+        naive = subprocess.run(
+            ["flock", "-n", str(lock_path), "true"],
+            capture_output=True,
+            text=True,
         )
-        health_fail = _run_guard(
-            {
-                "EMPIRE_EDITION": "amp",
-                "EMPIRE_WORKER_LOCK": str(lock_env["family"]),
-                "EMPIRE_WORKROOM_LOCK": str(lock_path),
-                "EMPIRE_WORKROOM_LOCK_LEGACY": str(lock_env["legacy"]),
-                "EMPIRE_WORKROOM_HEALTH_URL": "http://127.0.0.1:9/health",
-            }
-        )
-        rebound = refresh_primary_worker_lock()
-        new_handle = held_lock_file()
-        new_inode = os.fstat(new_handle.fileno()).st_ino if new_handle else None
-        path_back = lock_path.exists()
-        still_held = False
-        if path_back:
-            probe = open(lock_path, "a")
-            try:
-                fcntl.flock(probe.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-            except OSError:
-                still_held = True
-            finally:
-                probe.close()
-    finally:
-        server.shutdown()
-        reset_worker_lock_for_tests()
+        naive_created = lock_path.exists()
+        if naive_created:
+            lock_path.unlink()
 
-    assert naive_ok, "naive flock must reproduce the Oct 23 create-and-succeed bug"
-    assert naive_created, "naive flock created a new unlocked inode"
+        server, url = _start_health()
+        try:
+            health_pass = _run_guard(
+                {
+                    "EMPIRE_EDITION": "amp",
+                    "EMPIRE_WORKER_LOCK": str(lock_env["family"]),
+                    "EMPIRE_WORKROOM_LOCK": str(lock_path),
+                    "EMPIRE_WORKROOM_LOCK_LEGACY": str(lock_env["legacy"]),
+                    "EMPIRE_WORKROOM_HEALTH_URL": url,
+                }
+            )
+            health_fail = _run_guard(
+                {
+                    "EMPIRE_EDITION": "amp",
+                    "EMPIRE_WORKER_LOCK": str(lock_env["family"]),
+                    "EMPIRE_WORKROOM_LOCK": str(lock_path),
+                    "EMPIRE_WORKROOM_LOCK_LEGACY": str(lock_env["legacy"]),
+                    "EMPIRE_WORKROOM_HEALTH_URL": "http://127.0.0.1:9/health",
+                }
+            )
+        finally:
+            server.shutdown()
+    finally:
+        holder.close()
+
+    assert naive.returncode == 0
+    assert naive_created
     assert health_pass.returncode == 0, health_pass.stderr
-    assert not Path(str(lock_path) + ".should-not-exist").exists()
     assert health_fail.returncode == 1
-    assert rebound is True
-    assert path_back
-    assert still_held
-    assert new_inode is not None and new_inode != old_inode
+    assert not lock_path.exists()
 
     PROOF.parent.mkdir(parents=True, exist_ok=True)
     PROOF.write_text(
         "\n".join(
             [
-                "# Workroom lock — deleted-inode proof",
+                "# Workroom lock — deleted-inode simulation (TEST ONLY)",
+                "",
+                "This file is a **pytest simulation**, not a real-path check on",
+                "EmpireDell. A Dell real-path check comes later, after a backup",
+                "and Rafael's OK.",
                 "",
                 "Simulates Oct 23 2026: tmp cleanup unlinked the lock name",
                 "while the holder kept flock on the old inode.",
                 "",
-                f"- old inode (held after unlink): `{old_inode}`",
                 f"- naive `flock -n PATH true`: exit `{naive.returncode}` (created new file: `{naive_created}`)",
                 f"- new guard + health up: exit `{health_pass.returncode}` (stderr: {health_pass.stderr.strip()!r})",
                 f"- new guard + health down: exit `{health_fail.returncode}` (stderr: {health_fail.stderr.strip()!r})",
-                f"- Workroom refresh rebound path: `{rebound}` new inode `{new_inode}` held `{still_held}`",
                 "",
-                "Naive flock creates a new unlocked file and would refuse family start.",
-                "The new guard does not create the Workroom lock. Health on loopback",
-                "is enough. Workroom re-takes the path so later flock checks see a holder.",
+                "Naive flock creates a new unlocked file and can steal Workroom's",
+                "exclusive lock. The family guard never flocks Workroom's file.",
+                "Health on loopback is enough when the name is gone.",
                 "",
                 json.dumps(
                     {
+                        "test_only": True,
+                        "not_dell_real_path": True,
                         "naive_flock_exit": naive.returncode,
                         "naive_created_file": naive_created,
                         "guard_health_up": health_pass.returncode,
                         "guard_health_down": health_fail.returncode,
-                        "refresh_rebound": rebound,
-                        "lock_held_after_refresh": still_held,
                     },
                     indent=2,
                 ),
@@ -402,6 +344,8 @@ def test_deleted_lock_inode_real_path_proof(lock_env, monkeypatch):
         encoding="utf-8",
     )
     text = PROOF.read_text(encoding="utf-8")
+    assert "TEST ONLY" in text
+    assert "not a real-path check" in text
     assert "naive `flock -n PATH true`: exit `0`" in text
     assert "new guard + health up: exit `0`" in text
     assert "new guard + health down: exit `1`" in text

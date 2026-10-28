@@ -407,9 +407,9 @@ async def api_voice_transcribe(audio: UploadFile = FileParam(...), language: str
 # When running with multiple uvicorn workers (--workers N), each worker fires
 # its own "startup" event.  Singleton services like the Telegram polling loop
 # must only run in ONE worker, otherwise they fight over getUpdates and crash.
-# We use a file-lock (durable path, not /tmp): the first worker to
-# acquire it becomes the "primary" and starts singleton services.
-# If the lock name is unlinked, the primary re-creates and re-flocks it.
+# We use a simple file-lock: the first worker to acquire it becomes the
+# "primary" and starts all singleton background services.
+# Family editions refuse Workroom lock paths (see app.worker_lock).
 #
 def _migrate_unified_business() -> None:
     """Create unified tables before either worker serves traffic.
@@ -437,28 +437,12 @@ def _acquire_primary_worker_lock() -> bool:
     """Try to become the primary worker by acquiring an exclusive file lock.
 
     Returns True if this process now holds the lock (i.e. is the primary).
-    The lock is held for the lifetime of the process via worker_lock.
-
-    Workroom uses ``/home/rg/empire-data/run/empire_primary_worker.lock``
-    (not /tmp). Family editions must never take that path; they set
-    ``EMPIRE_WORKER_LOCK`` / ``EMPIRE_DATA_DIR`` to a private file.
+    Family editions refuse both Workroom lock paths and use their own file.
+    Workroom's default path is unchanged on this branch (``/tmp``).
     """
     from app.worker_lock import acquire_primary_worker_lock
 
     return acquire_primary_worker_lock()
-
-
-async def _primary_lock_refresh_loop() -> None:
-    """Recreate the lock path if tmp cleanup (or anything) unlinked it."""
-    import asyncio
-    from app.worker_lock import refresh_primary_worker_lock
-
-    while True:
-        await asyncio.sleep(30)
-        try:
-            refresh_primary_worker_lock()
-        except Exception as exc:
-            print(f"✗ Primary lock refresh: {exc}")
 
 
 @app.on_event("startup")
@@ -466,8 +450,6 @@ async def start_background_services():
     import asyncio
 
     is_primary = _acquire_primary_worker_lock()
-    if is_primary:
-        asyncio.create_task(_primary_lock_refresh_loop())
 
     # Schema first, on every worker. create_all_tables holds the migration
     # lock, so the second worker waits instead of racing the first start.

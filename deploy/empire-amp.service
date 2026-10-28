@@ -20,9 +20,10 @@
 # WorkingDirectory=/home/rg/empire-amp/empire-command-center.
 #
 # ExecStartPre is the shared Workroom-ready guard (same script as Maxine).
-# It never creates /tmp/empire_primary_worker.lock. Workroom health on
-# 127.0.0.1:8000 is enough when the lock name was unlinked. This process
-# must not use the Workroom lock. Ports 8000 / 3000 / 3005 stay untouched.
+# It never creates or flocks Workroom's lock. /proc/locks or
+# 127.0.0.1:8000/health is enough when the lock name was unlinked.
+# This process must not use the Workroom lock. Ports 8000 / 3000 / 3005
+# stay untouched.
 
 [Unit]
 Description=EmpireBox Max-e command center (AMP edition)
