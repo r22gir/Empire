@@ -346,34 +346,34 @@ async def api_voice_transcribe(audio: UploadFile = FileParam(...), language: str
 # When running with multiple uvicorn workers (--workers N), each worker fires
 # its own "startup" event.  Singleton services like the Telegram polling loop
 # must only run in ONE worker, otherwise they fight over getUpdates and crash.
-# We use a simple file-lock: the first worker to acquire it becomes the
-# "primary" and starts all singleton background services.
+# Durable file-lock (not /tmp): the first worker to acquire it becomes
+# the "primary". If tmp cleanup (or anything) unlinks the name, a 30s
+# loop re-creates and re-flocks it. Between unlink and a successful
+# re-lock another worker can become a second primary.
 #
-_WORKER_LOCK_PATH = Path("/tmp/empire_primary_worker.lock")
-_worker_lock_file = None  # keep reference so the lock is held for process lifetime
-
-
 def _acquire_primary_worker_lock() -> bool:
-    """Try to become the primary worker by acquiring an exclusive file lock.
+    """Try to become the primary worker by acquiring an exclusive file lock."""
+    from app.worker_lock import acquire_primary_worker_lock
 
-    Returns True if this process now holds the lock (i.e. is the primary).
-    The lock is held for the lifetime of the process via the module-level
-    ``_worker_lock_file`` reference.
+    return acquire_primary_worker_lock()
+
+
+async def _primary_lock_refresh_loop() -> None:
+    """Re-bind the lock path if it was unlinked. Interval is ~30s.
+
+    That interval is the window where two primaries can run if the
+    directory entry vanished and another process created the new name
+    before this refresh succeeds. A failed re-lock logs CRITICAL.
     """
-    import fcntl
-    global _worker_lock_file
-    try:
-        _worker_lock_file = open(_WORKER_LOCK_PATH, "w")
-        fcntl.flock(_worker_lock_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-        _worker_lock_file.write(str(os.getpid()))
-        _worker_lock_file.flush()
-        return True
-    except (OSError, IOError):
-        # Another worker already holds the lock
-        if _worker_lock_file:
-            _worker_lock_file.close()
-            _worker_lock_file = None
-        return False
+    import asyncio
+    from app.worker_lock import refresh_primary_worker_lock
+
+    while True:
+        await asyncio.sleep(30)
+        try:
+            refresh_primary_worker_lock()
+        except Exception as exc:
+            print(f"CRITICAL: Primary lock refresh loop: {exc}", flush=True)
 
 
 @app.on_event("startup")
@@ -381,6 +381,8 @@ async def start_background_services():
     import asyncio
 
     is_primary = _acquire_primary_worker_lock()
+    if is_primary:
+        asyncio.create_task(_primary_lock_refresh_loop())
 
     try:
         from app.services.max.startup_health import write_startup_health_record

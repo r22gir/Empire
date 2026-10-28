@@ -9,6 +9,8 @@ User=rg
 Group=rg
 WorkingDirectory=/home/rg/empire-repo/backend
 EnvironmentFile=/home/rg/empire-repo/backend/.env
+Environment=EMPIRE_WORKER_LOCK=/home/rg/empire-data/run/empire_primary_worker.lock
+ExecStartPre=/bin/mkdir -p /home/rg/empire-data/run
 ExecStart=/home/rg/empire-repo/backend/venv/bin/python3 -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --timeout-keep-alive 65 --limit-concurrency 100
 Restart=on-failure
 RestartSec=5
