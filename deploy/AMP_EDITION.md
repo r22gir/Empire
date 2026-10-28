@@ -46,6 +46,8 @@ npx next build --webpack
 systemctl --user restart empire-amp-frontend.service
 ```
 
+Workroom primary lock: Max-e must not flock Workroom's lock. The unit sets `EMPIRE_WORKER_LOCK=/data/amp/run/empire_primary_worker.lock` and `ExecStartPre=deploy/workroom_primary_ready.sh` (same script as Maxine). That guard never creates `/tmp/empire_primary_worker.lock`. If the Workroom lock name was unlinked (tmp cleanup, Oct 23 2026), `http://127.0.0.1:8000/health` is enough to start. Workroom's lock lives at `/home/rg/empire-data/run/empire_primary_worker.lock`, not `/tmp`. Ports **8000 / 3000 / 3005** stay untouched.
+
 Check:
 
 ```bash

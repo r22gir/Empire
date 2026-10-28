@@ -815,7 +815,7 @@ def test_workroom_api_base_and_lock_stay_default(monkeypatch, tmp_path):
 
     assert empire_api_base() == "http://localhost:8000"
     assert empire_api_url("/api/v1/health") == "http://localhost:8000/api/v1/health"
-    assert str(primary_worker_lock_path()) == "/tmp/empire_primary_worker.lock"
+    assert str(primary_worker_lock_path()) == "/home/rg/empire-data/run/empire_primary_worker.lock"
 
     monkeypatch.setenv("EMPIRE_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("EMPIRE_API_BASE", "http://127.0.0.1:8011")

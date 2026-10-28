@@ -989,6 +989,12 @@ def apply_amp_process_paths() -> None:
     os.environ["MAX_SELECTED_PROVIDER"] = "minimax"
     os.environ["MAX_SELECTED_MODEL"] = os.getenv("MINIMAX_MODEL", "").strip() or "MiniMax-M3"
     os.environ.setdefault("INSTANCE_USAGE_CAP_PCT", "20")
+    from app.worker_lock import is_workroom_lock_path
+    family_lock = root / "run" / "empire_primary_worker.lock"
+    current_lock = os.getenv("EMPIRE_WORKER_LOCK", "").strip()
+    if not current_lock or is_workroom_lock_path(current_lock):
+        os.environ["EMPIRE_WORKER_LOCK"] = str(family_lock)
+    (root / "run").mkdir(parents=True, exist_ok=True)
     brain.mkdir(parents=True, exist_ok=True)
     hermes.mkdir(parents=True, exist_ok=True)
     (root / "logs").mkdir(parents=True, exist_ok=True)

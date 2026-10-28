@@ -18,6 +18,7 @@ _EDITION_ENV_KEYS = (
     "EMPIRE_BRAIN_DIR",
     "MAX_MEMORY_PATH",
     "EMPIRE_LOG_DIR",
+    "EMPIRE_WORKER_LOCK",
     "AMP_JWT_SECRET",
     "AMP_OWNER_EMAIL",
     "AMP_OWNER_USERNAME",
@@ -406,12 +407,10 @@ async def api_voice_transcribe(audio: UploadFile = FileParam(...), language: str
 # When running with multiple uvicorn workers (--workers N), each worker fires
 # its own "startup" event.  Singleton services like the Telegram polling loop
 # must only run in ONE worker, otherwise they fight over getUpdates and crash.
-# We use a simple file-lock: the first worker to acquire it becomes the
-# "primary" and starts all singleton background services.
+# We use a file-lock (durable path, not /tmp): the first worker to
+# acquire it becomes the "primary" and starts singleton services.
+# If the lock name is unlinked, the primary re-creates and re-flocks it.
 #
-_worker_lock_file = None  # keep reference so the lock is held for process lifetime
-
-
 def _migrate_unified_business() -> None:
     """Create unified tables before either worker serves traffic.
 
@@ -438,30 +437,28 @@ def _acquire_primary_worker_lock() -> bool:
     """Try to become the primary worker by acquiring an exclusive file lock.
 
     Returns True if this process now holds the lock (i.e. is the primary).
-    The lock is held for the lifetime of the process via the module-level
-    ``_worker_lock_file`` reference.
+    The lock is held for the lifetime of the process via worker_lock.
 
-    Workroom keeps ``/tmp/empire_primary_worker.lock``. When
-    ``EMPIRE_DATA_DIR`` or ``EMPIRE_WORKER_LOCK`` is set (the AMP edition),
-    the lock file is private to that instance.
+    Workroom uses ``/home/rg/empire-data/run/empire_primary_worker.lock``
+    (not /tmp). Family editions must never take that path; they set
+    ``EMPIRE_WORKER_LOCK`` / ``EMPIRE_DATA_DIR`` to a private file.
     """
-    import fcntl
-    from app.instance_url import primary_worker_lock_path
-    global _worker_lock_file
-    lock_path = primary_worker_lock_path()
-    try:
-        lock_path.parent.mkdir(parents=True, exist_ok=True)
-        _worker_lock_file = open(lock_path, "w")
-        fcntl.flock(_worker_lock_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-        _worker_lock_file.write(str(os.getpid()))
-        _worker_lock_file.flush()
-        return True
-    except (OSError, IOError):
-        # Another worker already holds the lock
-        if _worker_lock_file:
-            _worker_lock_file.close()
-            _worker_lock_file = None
-        return False
+    from app.worker_lock import acquire_primary_worker_lock
+
+    return acquire_primary_worker_lock()
+
+
+async def _primary_lock_refresh_loop() -> None:
+    """Recreate the lock path if tmp cleanup (or anything) unlinked it."""
+    import asyncio
+    from app.worker_lock import refresh_primary_worker_lock
+
+    while True:
+        await asyncio.sleep(30)
+        try:
+            refresh_primary_worker_lock()
+        except Exception as exc:
+            print(f"✗ Primary lock refresh: {exc}")
 
 
 @app.on_event("startup")
@@ -469,6 +466,8 @@ async def start_background_services():
     import asyncio
 
     is_primary = _acquire_primary_worker_lock()
+    if is_primary:
+        asyncio.create_task(_primary_lock_refresh_loop())
 
     # Schema first, on every worker. create_all_tables holds the migration
     # lock, so the second worker waits instead of racing the first start.

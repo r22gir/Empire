@@ -27,6 +27,8 @@ EMPIRE_EDITION=maxine EMPIRE_DATA_DIR=/data/maxine \
 
 Suggested ports: backend **8012**, frontend **3012**. Host: `maxine.empirebox.store`. Data: `/data/maxine`. Do not point this process at `/data/amp` or the Workroom database, and do not restart those services.
 
+Maxine must not use the Workroom lock. The unit sets `EMPIRE_WORKER_LOCK=/data/maxine/run/empire_primary_worker.lock` and the same `deploy/workroom_primary_ready.sh` ExecStartPre as Max-e: never create Workroom's lock file; `http://127.0.0.1:8000/health` is an alternative if the lock name was unlinked. Ports **8000 / 3000 / 3005** stay untouched.
+
 ```bash
 mkdir -p /data/maxine
 cp deploy/empire-maxine.env.example /home/rg/empire-maxine.env

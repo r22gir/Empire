@@ -18,6 +18,11 @@
 #
 # Frontend is a separate unit: empire-amp-frontend.service on :3011,
 # WorkingDirectory=/home/rg/empire-amp/empire-command-center.
+#
+# ExecStartPre is the shared Workroom-ready guard (same script as Maxine).
+# It never creates /tmp/empire_primary_worker.lock. Workroom health on
+# 127.0.0.1:8000 is enough when the lock name was unlinked. This process
+# must not use the Workroom lock. Ports 8000 / 3000 / 3005 stay untouched.
 
 [Unit]
 Description=EmpireBox Max-e command center (AMP edition)
@@ -27,6 +32,8 @@ After=network.target
 Type=simple
 WorkingDirectory=/home/rg/empire-amp/backend
 EnvironmentFile=/home/rg/empire-amp.env
+Environment=EMPIRE_WORKER_LOCK=/data/amp/run/empire_primary_worker.lock
+ExecStartPre=/home/rg/empire-amp/deploy/workroom_primary_ready.sh
 ExecStart=/home/rg/empire-amp/backend/venv/bin/python3 -m uvicorn app.main:app --host 127.0.0.1 --port 8011 --timeout-keep-alive 65
 Restart=on-failure
 RestartSec=5
