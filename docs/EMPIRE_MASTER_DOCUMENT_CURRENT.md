@@ -50,7 +50,7 @@ The **empire-ecosystem-report.md** (March 18, 2026) documented:
 
 ### Backend (FastAPI, port 8000)
 - **Entry**: `backend/app/main.py` — loads 70 routers via `load_router()` helper (see router count distinction below)
-- **Startup**: File-lock at `/tmp/empire_primary_worker.lock` — singleton background services only on primary worker
+- **Startup**: File-lock at `/home/rg/empire-data/run/empire_primary_worker.lock` (not `/tmp`) — singleton background services only on primary worker. If the name is unlinked, a 30s loop re-locks; a failed re-lock logs CRITICAL (two primaries possible in that window).
 - **Router count**: 80 Python files present in `backend/app/routers/`; 70 loaded via `load_router()` in `main.py`; the difference (10 files) includes `__init__.py`, `marketplace/` package, and routers not yet loaded (e.g., some stubs)
 - **Background services** (primary worker only):
   - Telegram Bot (webhook mode)

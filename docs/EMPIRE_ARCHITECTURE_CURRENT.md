@@ -78,7 +78,7 @@
 `backend/app/main.py` — FastAPI app, loads 70 routers via `load_router()` helper; 80 Python files present in `backend/app/routers/` (the difference: `__init__.py`, `marketplace/` subpackage, and any unloaded stubs)
 
 ### Primary Worker Lock
-File lock at `/tmp/empire_primary_worker.lock` — singleton services (Telegram, schedulers, workers) run on primary worker only to prevent conflicts.
+File lock at `/home/rg/empire-data/run/empire_primary_worker.lock` (not `/tmp` — tmp cleanup can unlink the name while the holder keeps the old inode). A 30s refresh re-creates the path; between unlink and a successful re-lock another worker can briefly become a second primary. Singleton services (Telegram, schedulers, workers) run on primary worker only.
 
 ### Router Categories
 
