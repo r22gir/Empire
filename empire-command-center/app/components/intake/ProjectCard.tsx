@@ -18,7 +18,7 @@ export default function ProjectCard({ project }: { project: any }) {
 
   return (
     <Link href={`/intake/project/${project.id}`}>
-      <div className="bg-[#faf9f7] border border-[#ece8e0] rounded-[14px] p-4 hover:border-[#d5d0c8] hover:shadow-[0_2px_12px_rgba(0,0,0,0.04)] hover:-translate-y-[1px] transition-all cursor-pointer group">
+      <div className="intake-card hover:border-[#d4af37] transition-all cursor-pointer group" style={{ padding: 18 }}>
         <div className="flex items-start justify-between">
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2 mb-1">
@@ -27,7 +27,7 @@ export default function ProjectCard({ project }: { project: any }) {
               </span>
               <span className="text-[9px] text-[#c5c0b8] font-medium">{project.intake_code}</span>
             </div>
-            <h3 className="text-[13px] font-semibold text-[#1a1a1a] truncate">{project.name}</h3>
+            <h3 className="text-lg font-semibold truncate">{project.name}</h3>
             {project.address && (
               <div className="flex items-center gap-1 text-[11px] text-[#888] mt-1">
                 <MapPin size={11} /> {project.address}

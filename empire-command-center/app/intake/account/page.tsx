@@ -64,16 +64,16 @@ export default function AccountPage() {
   };
 
   if (loading) return (
-    <div data-intake-page className="min-h-screen bg-[#f5f2ed]">
+    <div data-intake-page className="min-h-screen">
       <IntakeNav />
-      <div className="flex items-center justify-center h-[60vh] text-[#888]">Loading...</div>
+      <div className="flex items-center justify-center h-[60vh]" style={{ color: '#4f4a40' }}>Loading...</div>
     </div>
   );
 
   return (
-    <div data-intake-page className="min-h-screen bg-[#f5f2ed]">
+    <div data-intake-page className="min-h-screen">
       <IntakeNav user={user} />
-      <div className="max-w-xl mx-auto px-4 py-8">
+      <div className="intake-shell">
         <button onClick={() => router.push('/intake/dashboard')}
           className="flex items-center gap-2 text-sm text-[#888] hover:text-[#b8960c] mb-6 transition-colors cursor-pointer">
           <ArrowLeft size={14} /> Back to Dashboard
