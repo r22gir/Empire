@@ -30,7 +30,7 @@ export default function MeasurementInput({
   return (
     <div className="space-y-3">
       {measurements.map((m, i) => (
-        <div key={i} className="flex items-start gap-2 p-3 rounded-[10px] bg-[#f5f2ed] border border-[#ece8e0]">
+        <div key={i} className="flex items-start gap-2 p-3 rounded-[12px] bg-[#f5f3ef] border border-[#e5e0d8]">
           <div className="flex-1 grid grid-cols-2 sm:grid-cols-4 gap-2">
             <input
               placeholder="Room / Window"
@@ -74,7 +74,8 @@ export default function MeasurementInput({
       <button
         type="button"
         onClick={addWindow}
-        className="w-full py-2 text-[11px] font-semibold text-[#b8960c] border border-dashed border-[#b8960c]/30 rounded-[10px] hover:bg-[#fdf8eb] transition-colors flex items-center justify-center gap-1.5"
+        className="w-full py-3 text-sm font-semibold border border-dashed rounded-[10px] transition-colors flex items-center justify-center gap-1.5"
+        style={{ color: '#6b5408', borderColor: '#d4af37', minHeight: 48 }}
       >
         <Plus size={13} /> Add Window / Area
       </button>

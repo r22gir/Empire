@@ -168,8 +168,8 @@ export default function ProjectDetail() {
 
   if (loading || !project) {
     return (
-      <div data-intake-page className="min-h-screen bg-[#f5f2ed] flex items-center justify-center">
-        <div className="text-[12px] text-[#999]">Loading...</div>
+      <div data-intake-page className="min-h-screen flex items-center justify-center">
+        <div className="text-sm" style={{ color: '#4f4a40' }}>Loading...</div>
       </div>
     );
   }
@@ -183,10 +183,10 @@ export default function ProjectDetail() {
   const allFiles = [...photos, ...scans];
 
   return (
-    <div data-intake-page className="min-h-screen bg-[#f5f2ed]">
+    <div data-intake-page className="min-h-screen">
       <IntakeNav user={user} />
 
-      <div className="max-w-3xl mx-auto px-4 sm:px-6 py-8">
+      <div className="intake-shell intake-shell-wide">
         {/* Header */}
         <button
           onClick={() => router.push('/intake/dashboard')}
@@ -206,7 +206,7 @@ export default function ProjectDetail() {
               </span>
               <span className="text-[9px] text-[#c5c0b8] font-medium">{project.intake_code}</span>
             </div>
-            <h1 className="text-lg font-bold text-[#1a1a1a]">{project.name}</h1>
+            <h1 className="text-3xl font-semibold">{project.name}</h1>
             {project.address && (
               <div className="flex items-center gap-1 text-[11px] text-[#888] mt-1">
                 <MapPin size={11} /> {project.address}
@@ -265,10 +265,10 @@ export default function ProjectDetail() {
         )}
 
         {/* Photos, drawings & scans section */}
-        <div className="bg-[#faf9f7] border border-[#ece8e0] rounded-[14px] p-5 mb-4">
+        <div className="intake-card mb-4">
           <div className="flex items-center gap-2 mb-4">
-            <Camera size={14} className="text-[#b8960c]" />
-            <h2 className="text-[13px] font-bold text-[#1a1a1a]">Photos, Drawings &amp; Scans</h2>
+            <Camera size={16} style={{ color: '#6b5408' }} />
+            <h2 className="text-2xl font-semibold">Photos, Drawings &amp; Scans</h2>
           </div>
           {canEdit ? (
             <PhotoUploader projectId={projectId} photos={photos} scans={scans} onUpload={loadProject} />

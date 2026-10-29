@@ -1,9 +1,10 @@
 'use client';
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Crown, Eye, EyeOff } from 'lucide-react';
+import { Eye, EyeOff } from 'lucide-react';
 import Link from 'next/link';
 import { login, intakeFetch } from '../../lib/intake-auth';
+import { IntakeFooter, IntakePublicHeader, IntakeStepper } from '../../components/intake/IntakeChrome';
 
 export default function IntakeLogin() {
   const router = useRouter();
@@ -56,40 +57,31 @@ export default function IntakeLogin() {
   };
 
   return (
-    <div data-intake-page className="min-h-screen bg-[#f5f2ed] flex flex-col">
-      <nav className="bg-[#1a1a1a] border-b border-[#2a2a2a]">
-        <div className="max-w-5xl mx-auto px-4 sm:px-6 flex items-center h-12">
-          <Link href="/intake" className="flex items-center gap-2.5">
-            <div className="w-7 h-7 rounded-lg bg-[#b8960c] flex items-center justify-center">
-              <Crown size={13} className="text-white" />
-            </div>
-            <span className="font-bold text-[13px] text-white tracking-wide">Empire</span>
-            <span className="text-[9px] text-[#888] font-medium tracking-wider uppercase">LuxeForge</span>
-          </Link>
-        </div>
-      </nav>
+    <div data-intake-page className="min-h-screen flex flex-col">
+      <IntakePublicHeader />
 
-      <div className="flex-1 flex items-center justify-center px-4">
-        <div className="w-full max-w-sm">
-          <div className="bg-[#faf9f7] border border-[#ece8e0] rounded-[14px] p-6 shadow-[0_2px_12px_rgba(0,0,0,0.04)]">
+      <div className="flex-1 flex items-center justify-center px-4 py-8">
+        <div className="w-full max-w-md">
+          <IntakeStepper current="signup" />
+          <div className="intake-card">
             {!resetMode ? (
               <>
-                <h1 className="text-xl font-bold text-[#1a1a1a] text-center mb-1">Welcome Back</h1>
-                <p className="text-[12px] text-[#888] text-center mb-6">Sign in to your design portal</p>
+                <h1 className="text-3xl font-semibold text-center mb-1">Welcome Back</h1>
+                <p className="text-sm text-center mb-6" style={{ color: '#4f4a40' }}>Sign in to your design portal</p>
 
                 <form onSubmit={handleSubmit} className="space-y-4">
                   {error && (
-                    <div className="text-sm text-[#dc2626] bg-[#fef2f2] border border-[#fecaca] rounded-[10px] px-3 py-2.5">
+                    <div className="text-sm text-[#9b1c1c] bg-[#fef2f2] border border-[#fecaca] rounded-[10px] px-3 py-2.5" role="alert">
                       {error}
                     </div>
                   )}
                   {success && (
-                    <div className="text-sm text-[#16a34a] bg-[#f0fdf4] border border-[#bbf7d0] rounded-[10px] px-3 py-2.5">
+                    <div className="text-sm text-[#14532d] bg-[#f0fdf4] border border-[#bbf7d0] rounded-[10px] px-3 py-2.5" role="status">
                       {success}
                     </div>
                   )}
                   <div>
-                    <label className="block text-xs font-semibold text-[#999] uppercase tracking-[0.5px] mb-1.5">Email</label>
+                    <label className="intake-label block mb-1.5">Email</label>
                     <input
                       type="email"
                       required
@@ -100,7 +92,7 @@ export default function IntakeLogin() {
                     />
                   </div>
                   <div>
-                    <label className="block text-xs font-semibold text-[#999] uppercase tracking-[0.5px] mb-1.5">Password</label>
+                    <label className="intake-label block mb-1.5">Password</label>
                     <div className="relative">
                       <input
                         type={showPassword ? 'text' : 'password'}
@@ -114,7 +106,9 @@ export default function IntakeLogin() {
                       <button
                         type="button"
                         onClick={() => setShowPassword(!showPassword)}
-                        className="absolute right-0 top-0 h-full px-3 flex items-center text-[#999] hover:text-[#666] transition-colors"
+                        className="absolute right-0 top-0 h-full px-3 flex items-center"
+                        style={{ color: '#4f4a40' }}
+                        aria-label={showPassword ? 'Hide password' : 'Show password'}
                         tabIndex={-1}
                       >
                         {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
@@ -124,7 +118,7 @@ export default function IntakeLogin() {
                   <button
                     type="submit"
                     disabled={loading}
-                    className="w-full py-3 min-h-[44px] text-sm font-bold bg-[#1a1a1a] text-white rounded-[10px] hover:bg-[#333] transition-colors disabled:opacity-50"
+                    className="intake-btn intake-btn-charcoal w-full"
                   >
                     {loading ? 'Signing in...' : 'Sign In'}
                   </button>
@@ -132,24 +126,25 @@ export default function IntakeLogin() {
 
                 <button
                   onClick={() => { setResetMode(true); setResetEmail(email); setError(''); setSuccess(''); }}
-                  className="w-full text-[12px] text-[#b8960c] font-semibold mt-4 hover:underline"
+                  className="w-full text-sm font-semibold mt-4"
+                  style={{ color: '#6b5408', background: 'none', border: 'none', cursor: 'pointer' }}
                 >
                   Forgot password?
                 </button>
               </>
             ) : (
               <>
-                <h1 className="text-xl font-bold text-[#1a1a1a] text-center mb-1">Reset Password</h1>
-                <p className="text-[12px] text-[#888] text-center mb-6">Enter your email and a new password</p>
+                <h1 className="text-3xl font-semibold text-center mb-1">Reset Password</h1>
+                <p className="text-sm text-center mb-6" style={{ color: '#4f4a40' }}>Enter your email and a new password</p>
 
                 <form onSubmit={handleReset} className="space-y-4">
                   {error && (
-                    <div className="text-sm text-[#dc2626] bg-[#fef2f2] border border-[#fecaca] rounded-[10px] px-3 py-2.5">
+                    <div className="text-sm text-[#9b1c1c] bg-[#fef2f2] border border-[#fecaca] rounded-[10px] px-3 py-2.5" role="alert">
                       {error}
                     </div>
                   )}
                   <div>
-                    <label className="block text-xs font-semibold text-[#999] uppercase tracking-[0.5px] mb-1.5">Email</label>
+                    <label className="intake-label block mb-1.5">Email</label>
                     <input
                       type="email"
                       required
@@ -160,7 +155,7 @@ export default function IntakeLogin() {
                     />
                   </div>
                   <div>
-                    <label className="block text-xs font-semibold text-[#999] uppercase tracking-[0.5px] mb-1.5">New Password</label>
+                    <label className="intake-label block mb-1.5">New Password</label>
                     <div className="relative">
                       <input
                         type={showNewPassword ? 'text' : 'password'}
@@ -174,7 +169,9 @@ export default function IntakeLogin() {
                       <button
                         type="button"
                         onClick={() => setShowNewPassword(!showNewPassword)}
-                        className="absolute right-0 top-0 h-full px-3 flex items-center text-[#999] hover:text-[#666] transition-colors"
+                        className="absolute right-0 top-0 h-full px-3 flex items-center"
+                        style={{ color: '#4f4a40' }}
+                        aria-label={showNewPassword ? 'Hide password' : 'Show password'}
                         tabIndex={-1}
                       >
                         {showNewPassword ? <EyeOff size={16} /> : <Eye size={16} />}
@@ -184,7 +181,7 @@ export default function IntakeLogin() {
                   <button
                     type="submit"
                     disabled={resetLoading}
-                    className="w-full py-3 min-h-[44px] text-sm font-bold bg-[#1a1a1a] text-white rounded-[10px] hover:bg-[#333] transition-colors disabled:opacity-50"
+                    className="intake-btn intake-btn-charcoal w-full"
                   >
                     {resetLoading ? 'Resetting...' : 'Reset Password'}
                   </button>
@@ -192,7 +189,8 @@ export default function IntakeLogin() {
 
                 <button
                   onClick={() => { setResetMode(false); setError(''); }}
-                  className="w-full text-[12px] text-[#b8960c] font-semibold mt-4 hover:underline"
+                  className="w-full text-sm font-semibold mt-4"
+                  style={{ color: '#6b5408', background: 'none', border: 'none', cursor: 'pointer' }}
                 >
                   Back to sign in
                 </button>
@@ -200,14 +198,15 @@ export default function IntakeLogin() {
             )}
           </div>
 
-          <p className="text-sm text-[#888] text-center mt-5">
+          <p className="text-sm text-center mt-5" style={{ color: '#4f4a40' }}>
             Don&apos;t have an account?{' '}
-            <Link href="/intake/signup" className="text-[#b8960c] font-semibold hover:underline">
+            <Link href="/intake/signup" className="font-semibold" style={{ color: '#6b5408' }}>
               Create one free
             </Link>
           </p>
         </div>
       </div>
+      <IntakeFooter />
     </div>
   );
 }
