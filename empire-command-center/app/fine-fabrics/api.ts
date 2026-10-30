@@ -1,4 +1,11 @@
-import type { FabricProduct, ShippingEstimate } from './types';
+import type {
+  FabricProduct,
+  ShippingEstimate,
+  ShippingLedgerItem,
+  ShippingLedgerRow,
+  ShippingRule,
+  UnsortedProduct,
+} from './types';
 
 export function apiBase(): string {
   if (typeof window === 'undefined') {
@@ -77,7 +84,7 @@ export const fabricsApi = {
     }),
   admin: {
     products: () => readJson<{ products: FabricProduct[] }>('/fine-fabrics/admin/products'),
-    unsorted: () => readJson<{ products: Array<FabricProduct & { vendor_name?: string; is_unsorted?: boolean }> }>('/fine-fabrics/admin/unsorted'),
+    unsorted: () => readJson<{ products: UnsortedProduct[] }>('/fine-fabrics/admin/unsorted'),
     importFiles: () => readJson<{ files: Array<{ name: string; bytes: number }> }>('/fine-fabrics/admin/import-files'),
     importDir: (filename?: string) =>
       readJson<Record<string, unknown>>('/fine-fabrics/admin/import-dir', {
@@ -96,17 +103,17 @@ export const fabricsApi = {
         method: 'PUT',
         body: JSON.stringify({ category }),
       }),
-    shippingRules: () => readJson<{ rules: Array<Record<string, unknown>> }>('/fine-fabrics/admin/shipping-rules'),
+    shippingRules: () => readJson<{ rules: ShippingRule[] }>('/fine-fabrics/admin/shipping-rules'),
     updateShippingRules: (vendorId: number, body: Record<string, number>) =>
-      readJson<{ rules: Array<Record<string, unknown>> }>(`/fine-fabrics/admin/shipping-rules/${vendorId}`, {
+      readJson<{ rules: ShippingRule[] }>(`/fine-fabrics/admin/shipping-rules/${vendorId}`, {
         method: 'PUT',
         body: JSON.stringify(body),
       }),
     orders: () =>
-      readJson<{ orders: Array<Record<string, unknown>>; samples: Array<Record<string, unknown>> }>(
+      readJson<{ orders: ShippingLedgerRow[]; samples: ShippingLedgerRow[] }>(
         '/fine-fabrics/admin/orders',
       ),
-    shortfalls: () => readJson<{ shortfalls: Array<Record<string, unknown>> }>('/fine-fabrics/admin/shortfalls'),
+    shortfalls: () => readJson<{ shortfalls: ShippingLedgerItem[] }>('/fine-fabrics/admin/shortfalls'),
     recordOrderShipping: (id: number, actual: number) =>
       readJson<Record<string, unknown>>(`/fine-fabrics/admin/orders/${id}/shipping`, {
         method: 'PUT',

@@ -3,20 +3,35 @@
 import { useEffect, useState } from 'react';
 import { fabricsApi } from '../api';
 import { money } from '../cartStore';
+import type {
+  ShippingLedgerItem,
+  ShippingLedgerRow,
+  ShippingRule,
+  UnsortedProduct,
+} from '../types';
 
-const CATS = ['Upholstery', 'Drapery', 'Outdoor', 'Other'];
+const CATS = ['Upholstery', 'Drapery', 'Outdoor', 'Other'] as const;
+
+function withKind(row: ShippingLedgerRow, kind: ShippingLedgerItem['kind']): ShippingLedgerItem {
+  return { ...row, kind };
+}
 
 export default function AdminClient() {
   const [message, setMessage] = useState('');
   const [files, setFiles] = useState<Array<{ name: string; bytes: number }>>([]);
-  const [unsorted, setUnsorted] = useState<Array<Record<string, unknown>>>([]);
-  const [rules, setRules] = useState<Array<Record<string, unknown>>>([]);
-  const [orders, setOrders] = useState<Array<Record<string, unknown>>>([]);
-  const [samples, setSamples] = useState<Array<Record<string, unknown>>>([]);
-  const [shortfalls, setShortfalls] = useState<Array<Record<string, unknown>>>([]);
+  const [unsorted, setUnsorted] = useState<UnsortedProduct[]>([]);
+  const [rules, setRules] = useState<ShippingRule[]>([]);
+  const [orders, setOrders] = useState<ShippingLedgerRow[]>([]);
+  const [samples, setSamples] = useState<ShippingLedgerRow[]>([]);
+  const [shortfalls, setShortfalls] = useState<ShippingLedgerItem[]>([]);
+
+  const ledger: ShippingLedgerItem[] = [
+    ...orders.map((row) => withKind(row, 'order')),
+    ...samples.map((row) => withKind(row, 'sample')),
+  ];
 
   const reload = async () => {
-    const [fileData, queue, ship, ledger, bills] = await Promise.all([
+    const [fileData, queue, ship, ledgerData, bills] = await Promise.all([
       fabricsApi.admin.importFiles(),
       fabricsApi.admin.unsorted(),
       fabricsApi.admin.shippingRules(),
@@ -26,8 +41,8 @@ export default function AdminClient() {
     setFiles(fileData.files);
     setUnsorted(queue.products);
     setRules(ship.rules);
-    setOrders(ledger.orders);
-    setSamples(ledger.samples);
+    setOrders(ledgerData.orders);
+    setSamples(ledgerData.samples);
     setShortfalls(bills.shortfalls);
   };
 
@@ -107,16 +122,16 @@ export default function AdminClient() {
         <p className="ff-note">Blank or unknown categories stay here — they are never public.</p>
         {unsorted.length === 0 ? <p className="ff-note">Queue is empty.</p> : null}
         {unsorted.map((row) => (
-          <div className="ff-line" key={String(row.id)}>
+          <div className="ff-line" key={row.id}>
             <div>
-              <strong>{String(row.pattern)}</strong>
-              <div className="ff-note">{String(row.vendor_name || '')} · {String(row.sku || row.sku_range || '')}</div>
+              <strong>{row.pattern}</strong>
+              <div className="ff-note">{row.vendor_name || ''} · {row.sku || row.sku_range || ''}</div>
             </div>
             <select
               defaultValue=""
               onChange={async (event) => {
                 if (!event.target.value) return;
-                await fabricsApi.admin.assignCategory(Number(row.id), event.target.value);
+                await fabricsApi.admin.assignCategory(row.id, event.target.value);
                 await reload();
               }}
             >
@@ -135,12 +150,12 @@ export default function AdminClient() {
         </p>
         {rules.map((rule) => (
           <form
-            key={String(rule.vendor_id)}
+            key={rule.vendor_id}
             className="ff-form"
             onSubmit={async (event) => {
               event.preventDefault();
               const data = new FormData(event.currentTarget);
-              await fabricsApi.admin.updateShippingRules(Number(rule.vendor_id), {
+              await fabricsApi.admin.updateShippingRules(rule.vendor_id, {
                 ship_per_yard: Number(data.get('ship_per_yard')),
                 ship_per_sample: Number(data.get('ship_per_sample')),
                 ship_minimum: Number(data.get('ship_minimum')),
@@ -150,11 +165,11 @@ export default function AdminClient() {
               await reload();
             }}
           >
-            <strong>{String(rule.name)}</strong>
-            <label>Per yard<input name="ship_per_yard" type="number" step="0.01" defaultValue={Number(rule.ship_per_yard)} /></label>
-            <label>Per sample<input name="ship_per_sample" type="number" step="0.01" defaultValue={Number(rule.ship_per_sample)} /></label>
-            <label>Minimum<input name="ship_minimum" type="number" step="0.01" defaultValue={Number(rule.ship_minimum)} /></label>
-            <label>Handling<input name="handling_fee" type="number" step="0.01" defaultValue={Number(rule.handling_fee)} /></label>
+            <strong>{rule.name}</strong>
+            <label>Per yard<input name="ship_per_yard" type="number" step="0.01" defaultValue={rule.ship_per_yard} /></label>
+            <label>Per sample<input name="ship_per_sample" type="number" step="0.01" defaultValue={rule.ship_per_sample} /></label>
+            <label>Minimum<input name="ship_minimum" type="number" step="0.01" defaultValue={rule.ship_minimum} /></label>
+            <label>Handling<input name="handling_fee" type="number" step="0.01" defaultValue={rule.handling_fee} /></label>
             <button className="ff-btn" type="submit">Save estimates</button>
           </form>
         ))}
@@ -166,22 +181,22 @@ export default function AdminClient() {
         {shortfalls.length ? (
           <p className="ff-banner">{shortfalls.length} shortfall{shortfalls.length === 1 ? '' : 's'} to bill.</p>
         ) : null}
-        {[...orders.map((row) => ({ ...row, kind: 'order' })), ...samples.map((row) => ({ ...row, kind: 'sample' }))].map((row) => (
+        {ledger.map((row) => (
           <form
             key={`${row.kind}-${row.id}`}
             className="ff-line"
             onSubmit={async (event) => {
               event.preventDefault();
               const actual = Number(new FormData(event.currentTarget).get('actual'));
-              if (row.kind === 'order') await fabricsApi.admin.recordOrderShipping(Number(row.id), actual);
-              else await fabricsApi.admin.recordSampleShipping(Number(row.id), actual);
+              if (row.kind === 'order') await fabricsApi.admin.recordOrderShipping(row.id, actual);
+              else await fabricsApi.admin.recordSampleShipping(row.id, actual);
               await reload();
             }}
           >
             <div>
-              <strong>{String(row.kind)} #{String(row.id)}</strong>
+              <strong>{row.kind} #{row.id}</strong>
               <div className="ff-note">
-                {String(row.customer_name || '')} · collected {money(Number(row.shipping_total || 0))}
+                {row.customer_name || ''} · collected {money(Number(row.shipping_total || 0))}
                 {row.actual_vendor_shipping != null ? ` · actual ${money(Number(row.actual_vendor_shipping))}` : ''}
                 {row.shipping_flag === 'shortfall' ? ` · BILL ${money(Number(row.shipping_shortfall || 0))}` : ''}
               </div>
