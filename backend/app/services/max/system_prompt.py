@@ -108,7 +108,10 @@ def _family_system_prompt(dynamic_sections: str) -> str:
                 "\n=== EASY SETUPS ===\n"
                 "Guía a Juan paso a paso, en español simple, una pregunta a la vez.\n"
                 "Empresas: list_companies para leer; save_company solo después de que Juan confirme.\n"
-                "WhatsApp: whatsapp_setup_guide. Nunca pidas tokens, App Secret ni verify token en el chat.\n"
+                "WhatsApp: llama whatsapp_setup_guide SOLO si pide explícitamente activar, "
+                "configurar o conectar WhatsApp (su número / Meta / WhatsApp Business). "
+                "Preguntas normales (Workroom, Rafael, empresa, agenda, memoria) NO usan esta guía.\n"
+                "Nunca pidas tokens, App Secret ni verify token en el chat. "
                 "Las llaves se pegan en /amp/whatsapp. El WhatsApp de Juan no envía avisos a Rafael.\n"
             )
     except Exception:

@@ -1,14 +1,64 @@
-"""Easy step-by-step Max-e chat guides. Spanish, one question at a time.
+"""Easy step-by-step family chat guides. Spanish, one question at a time.
 
-Secrets never belong in chat. WhatsApp tokens go to /amp/whatsapp.
+Secrets never belong in chat. WhatsApp tokens go to the instance secure screen.
+The WhatsApp setup guide fires only on explicit setup intent — never on
+greetings, first-turn questions, or empty history.
 """
 from __future__ import annotations
 
 import re
+import unicodedata
 from typing import Optional
 
 DEFAULT_PENDING_WHATSAPP_KEY = "pendiente_whatsapp_famp"
 _PENDING_WHATSAPP_KEY_RE = re.compile(r"(?i)^pendiente_.*whatsapp")
+_WHATSAPP_RE = r"whats?\s*app"
+# Stem + ending, then \b so "conect" does not eat "conectividad" / "conectado".
+_SETUP_VERB_RE = (
+    r"(?:activ(?:ar|o|a|e|ando)\b"
+    r"|configur(?:ar|o|a|e|ando)\b"
+    r"|conect(?:ar|o|a|e|ando)\b"
+    r"|habilit(?:ar|o|a|e|ando)\b"
+    r"|instal(?:ar|o|a|e|ando)\b"
+    r"|vincul(?:ar|o|a|e|ando)\b"
+    r"|pon(?:er|go|e|ga|iendo)?\b"
+    r"|registr(?:ar|o|a|e|ando)\b"
+    r"|setup\b|set\s*up\b"
+    r"|enable\b|enabling\b"
+    r"|install(?:ing|s)?\b"
+    r"|create\b|creating\b"
+    r"|connect(?:ing|s)?\b"
+    r"|link(?:ing|s)?\b"
+    r"|activate(?:s|ing)?\b)"
+)
+_SEND_RE = re.compile(
+    r"\b(?:envia(?:r|me|nos)?|manda(?:r|me|nos)?|send|message|mensaje|escribe|escribir)\b"
+)
+_SEND_WHATSAPP_RE = re.compile(
+    rf"\b(?:envia(?:r|me|nos)?|manda(?:r|me|nos)?|send(?:\s+me)?)\s+{_WHATSAPP_RE}"
+)
+_GUIDE_RE = r"(?:guia|guide|tutorial|pasos|instrucciones)"
+_NUMBER_RE = r"(?:numero|number|linea)"
+_ACCOUNT_RE = r"(?:cuenta|account|app\b)"
+_META_RE = r"(?:meta|facebook)"
+_STATUS_RE = re.compile(
+    r"(?:"
+    r"(?:esta|estan|is|are)\s+(?:ya\s+)?"
+    r"(?:activo|activa|conectado|conectada|configurado|habilitado|"
+    r"active|connected|enabled|configured|setup|set\s+up)"
+    r"|(?:no\s+esta|no\s+estan|isn'?t|is\s+not|are\s+not)\s+"
+    r"(?:activo|activa|conectado|conectada|configurado|habilitado|"
+    r"active|connected|enabled|configured)"
+    r")"
+)
+_CHANNEL_RE = re.compile(
+    rf"\b(?:por|via|en|through|over|on)\s+(?:el\s+|la\s+|my\s+|the\s+)?{_WHATSAPP_RE}"
+)
+# Determiners / number-account words allowed between a setup verb and WhatsApp.
+_LINKER = (
+    r"(?:\s+(?:mi|mis|el|la|los|las|un|una|uno|my|the|a|an|tu|su|your|me|to|"
+    r"para|de|of|con|with|numero|number|cuenta|account|linea|line))*"
+)
 
 COMPANY_STEPS = (
     ("name", "¿Cómo se llama la empresa?"),
@@ -47,7 +97,7 @@ WHATSAPP_STEPS = (
     ),
     (
         "secure_screen",
-        "Ahora abre /amp/whatsapp y pega Phone Number ID, token y App Secret en la pantalla segura. "
+        "Ahora abre la pantalla segura y pega Phone Number ID, token y App Secret. "
         "Nunca los escribas en este chat. Cuando los hayas pegado, dime “ya los pegué”.",
     ),
 )
@@ -82,9 +132,75 @@ def looks_like_secret(text: str) -> bool:
     return False
 
 
+def _fold(text: str) -> str:
+    raw = unicodedata.normalize("NFD", text or "")
+    return "".join(ch for ch in raw if unicodedata.category(ch) != "Mn").lower()
+
+
+def whatsapp_setup_path() -> str:
+    try:
+        from app.edition import is_maxine
+
+        if is_maxine():
+            return "/ayuda/whatsapp"
+    except Exception:
+        pass
+    return "/amp/whatsapp"
+
+
+def default_pending_whatsapp_key() -> str:
+    try:
+        from app.edition import is_maxine
+
+        if is_maxine():
+            return "pendiente_whatsapp_maxine"
+    except Exception:
+        pass
+    return DEFAULT_PENDING_WHATSAPP_KEY
+
+
+def _setup_verb_targets_whatsapp(text: str) -> bool:
+    """Setup verb whose object is WhatsApp (or its number / account), not a later clause."""
+    verb = rf"\b{_SETUP_VERB_RE}"
+    wa = _WHATSAPP_RE
+    if re.search(rf"{verb}{_LINKER}\s+{wa}", text):
+        return True
+    if re.search(rf"{wa}{_LINKER}\s+{verb}", text):
+        return True
+    if re.search(rf"{verb}{_LINKER}\s+{_NUMBER_RE}{_LINKER}\s+{wa}", text):
+        return True
+    return False
+
+
+def is_whatsapp_setup_intent(message: str) -> bool:
+    """True only when the owner asks to activate / configure / connect WhatsApp."""
+    text = _fold(message)
+    if not text:
+        return False
+    if _STATUS_RE.search(text):
+        return False
+    if _setup_verb_targets_whatsapp(text):
+        return True
+    if re.search(rf"\b{_GUIDE_RE}\b{_LINKER}\s+{_WHATSAPP_RE}", text):
+        return True
+    if re.search(rf"{_WHATSAPP_RE}{_LINKER}\s+{_GUIDE_RE}\b", text):
+        return True
+    if re.search(
+        rf"\b(?:crear|create|creating)\b{_LINKER}\s+{_ACCOUNT_RE}{_LINKER}\s+(?:{_META_RE}|{_WHATSAPP_RE})",
+        text,
+    ):
+        return True
+    if _SEND_WHATSAPP_RE.search(text) or _SEND_RE.search(text):
+        return False
+    if _CHANNEL_RE.search(text) and not _setup_verb_targets_whatsapp(text):
+        return False
+    return False
+
+
 def secret_refusal() -> str:
+    path = whatsapp_setup_path()
     return (
-        "Manito, no pongas llaves aquí. Ábreme /amp/whatsapp y pégalas en la pantalla segura. "
+        f"Manito, no pongas llaves aquí. Ábreme {path} y pégalas en la pantalla segura. "
         "Yo no las leo ni las repito."
     )
 
@@ -139,12 +255,18 @@ def whatsapp_guide_next(step: str = "") -> dict:
         current = keys[0]
     index = keys.index(current)
     key, question = WHATSAPP_STEPS[index]
+    path = whatsapp_setup_path()
+    if key == "secure_screen":
+        question = (
+            f"Ahora abre {path} y pega Phone Number ID, token y App Secret en la pantalla segura. "
+            "Nunca los escribas en este chat. Cuando los hayas pegado, dime “ya los pegué”."
+        )
     return {
         "flow": "whatsapp",
         "step": key,
         "question": question,
         "next_step": keys[index + 1] if index + 1 < len(keys) else None,
-        "setup_path": "/amp/whatsapp",
+        "setup_path": path,
         "secrets_in_chat": False,
         "juan_number_not_rafael": True,
         "done": index == len(keys) - 1,
@@ -152,13 +274,14 @@ def whatsapp_guide_next(step: str = "") -> dict:
 
 
 def format_whatsapp_guide_message(guide: dict, webhook_url: str = "") -> str:
-    """One Spanish question. Keys stay on /amp/whatsapp, never in chat."""
+    """One Spanish question. Keys stay on the secure screen, never in chat."""
     question = str((guide or {}).get("question") or "").strip()
     webhook = (webhook_url or str((guide or {}).get("webhook_url") or "")).strip()
+    path = str((guide or {}).get("setup_path") or "").strip() or whatsapp_setup_path()
     parts = [question] if question else []
     if webhook and str((guide or {}).get("step") or "") == "webhook":
         parts.append(f"Webhook: {webhook}.")
-    parts.append("Pantalla segura: /amp/whatsapp. Nunca pegues el token aquí.")
+    parts.append(f"Pantalla segura: {path}. Nunca pegues el token aquí.")
     return " ".join(parts)
 
 
@@ -167,11 +290,11 @@ def is_pending_whatsapp_key(key: str) -> bool:
 
 
 def pending_whatsapp_facts() -> list[dict]:
-    """Juan's pending WhatsApp items from this instance facts.json only."""
+    """Pending WhatsApp items from this instance facts.json only."""
     try:
-        from app.edition import is_amp
+        from app.edition import is_family_edition
 
-        if not is_amp():
+        if not is_family_edition():
             return []
         from app.services.edition_facts import list_facts
 
@@ -209,10 +332,10 @@ def persist_whatsapp_guide_step(step: str, key: Optional[str] = None) -> dict:
         current = keys[0]
     existing = pending_whatsapp_facts()
     fact_key = (key or "").strip() or (
-        str(existing[0].get("key") or "").strip() if existing else DEFAULT_PENDING_WHATSAPP_KEY
+        str(existing[0].get("key") or "").strip() if existing else default_pending_whatsapp_key()
     )
     if not is_pending_whatsapp_key(fact_key):
-        fact_key = DEFAULT_PENDING_WHATSAPP_KEY
+        fact_key = default_pending_whatsapp_key()
     label = ""
     if existing:
         label = str(existing[0].get("label") or "")
@@ -258,11 +381,15 @@ def run_whatsapp_setup_guide(step: str = "", *, persist: bool = True) -> dict:
 
 
 def pending_whatsapp_guide(*, persist: bool = False) -> Optional[dict]:
-    """If facts have pendiente_* WhatsApp and the channel is off, resume."""
-    try:
-        from app.edition import is_amp
+    """If facts have pendiente_* WhatsApp and the channel is off, the saved step.
 
-        if not is_amp():
+    This does not answer chat. Chat uses maybe_resume_whatsapp_guide, which
+    requires explicit WhatsApp setup intent.
+    """
+    try:
+        from app.edition import is_family_edition
+
+        if not is_family_edition():
             return None
     except Exception:
         return None
@@ -305,7 +432,16 @@ def maybe_resume_whatsapp_guide(
     *,
     persist: bool = True,
 ) -> Optional[dict]:
-    """First reply of a new Max-e session: the saved Spanish step question."""
-    if not is_new_chat_first_turn(message, history):
+    """Return the Spanish WhatsApp guide only on explicit setup intent."""
+    if not is_whatsapp_setup_intent(message):
         return None
-    return pending_whatsapp_guide(persist=persist)
+    try:
+        from app.edition import is_family_edition
+
+        if not is_family_edition():
+            return None
+    except Exception:
+        return None
+    if not whatsapp_channel_is_disabled():
+        return None
+    return run_whatsapp_setup_guide(saved_whatsapp_guide_step(), persist=persist)
