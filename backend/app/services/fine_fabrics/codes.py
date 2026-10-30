@@ -32,6 +32,7 @@ CATEGORY_PREFIX = {
     "Drapery": "F",
     "Outdoor": "L",
     "Other": "F",
+    "Unsorted": "F",
 }
 
 _COLOR_RE = re.compile(r"[^A-Za-z0-9]+")

@@ -7,6 +7,20 @@ from typing import Iterable
 from app.db.database import get_db
 
 CATEGORIES = ("Upholstery", "Drapery", "Outdoor", "Other")
+PUBLIC_CATEGORIES = CATEGORIES
+ADMIN_CATEGORIES = CATEGORIES + ("Unsorted",)
+UNSORTED_CATEGORY = "Unsorted"
+PRODUCT_TYPES = ("sku", "collection")
+UNITS = ("yard", "sq_ft", "roll", "box")
+
+# Pass-through shipping defaults. Customer always pays an estimate of
+# vendor freight + handling. Never zero — no free-shipping threshold.
+DEFAULT_SHIPPING = {
+    "ship_per_yard": 1.50,
+    "ship_per_sample": 8.00,
+    "ship_minimum": 12.00,
+    "handling_fee": 3.50,
+}
 
 # online_sale_allowed defaults false. Sunbrella is the only starter vendor
 # allowed on the public catalog. Brand names stay hidden unless the
@@ -130,7 +144,44 @@ CREATE TABLE IF NOT EXISTS ff_orders (
     business TEXT NOT NULL DEFAULT 'workroom',
     created_at TEXT DEFAULT (datetime('now'))
 );
+
+CREATE TABLE IF NOT EXISTS ff_shipping_rules (
+    vendor_id INTEGER PRIMARY KEY,
+    ship_per_yard REAL NOT NULL DEFAULT 1.50,
+    ship_per_sample REAL NOT NULL DEFAULT 8.00,
+    ship_minimum REAL NOT NULL DEFAULT 12.00,
+    handling_fee REAL NOT NULL DEFAULT 3.50,
+    FOREIGN KEY (vendor_id) REFERENCES ff_vendors(id)
+);
 """
+
+PRODUCT_EXTRA_COLUMNS = (
+    ("product_type", "TEXT NOT NULL DEFAULT 'sku'"),
+    ("unit", "TEXT NOT NULL DEFAULT 'yard'"),
+    ("color_family", "TEXT"),
+    ("is_unsorted", "INTEGER NOT NULL DEFAULT 0"),
+    ("sku_range", "TEXT"),
+)
+
+ORDER_EXTRA_COLUMNS = (
+    ("shipping_estimate", "REAL NOT NULL DEFAULT 0"),
+    ("handling_total", "REAL NOT NULL DEFAULT 0"),
+    ("shipping_total", "REAL NOT NULL DEFAULT 0"),
+    ("shipping_breakdown", "TEXT"),
+    ("actual_vendor_shipping", "REAL"),
+    ("shipping_shortfall", "REAL NOT NULL DEFAULT 0"),
+    ("shipping_flag", "TEXT NOT NULL DEFAULT ''"),
+)
+
+SAMPLE_EXTRA_COLUMNS = (
+    ("shipping_estimate", "REAL NOT NULL DEFAULT 0"),
+    ("handling_total", "REAL NOT NULL DEFAULT 0"),
+    ("shipping_total", "REAL NOT NULL DEFAULT 0"),
+    ("shipping_breakdown", "TEXT"),
+    ("actual_vendor_shipping", "REAL"),
+    ("shipping_shortfall", "REAL NOT NULL DEFAULT 0"),
+    ("shipping_flag", "TEXT NOT NULL DEFAULT ''"),
+)
 
 
 def ensure_fine_fabrics_schema(conn=None) -> None:
@@ -140,10 +191,41 @@ def ensure_fine_fabrics_schema(conn=None) -> None:
         conn = ctx.__enter__()
     try:
         conn.executescript(SCHEMA_SQL)
+        _ensure_columns(conn, "ff_products", PRODUCT_EXTRA_COLUMNS)
+        _ensure_columns(conn, "ff_orders", ORDER_EXTRA_COLUMNS)
+        _ensure_columns(conn, "ff_sample_requests", SAMPLE_EXTRA_COLUMNS)
         _seed_vendors(conn)
+        _seed_shipping_rules(conn)
     finally:
         if own:
             ctx.__exit__(None, None, None)
+
+
+def _ensure_columns(conn, table: str, columns: tuple[tuple[str, str], ...]) -> None:
+    existing = {row[1] for row in conn.execute(f"PRAGMA table_info({table})").fetchall()}
+    for name, decl in columns:
+        if name not in existing:
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN {name} {decl}")
+
+
+def _seed_shipping_rules(conn) -> None:
+    for row in conn.execute("SELECT id FROM ff_vendors").fetchall():
+        vid = row["id"] if isinstance(row, dict) or hasattr(row, "keys") else row[0]
+        found = conn.execute("SELECT vendor_id FROM ff_shipping_rules WHERE vendor_id = ?", (vid,)).fetchone()
+        if found:
+            continue
+        conn.execute(
+            """INSERT INTO ff_shipping_rules
+               (vendor_id, ship_per_yard, ship_per_sample, ship_minimum, handling_fee)
+               VALUES (?, ?, ?, ?, ?)""",
+            (
+                vid,
+                DEFAULT_SHIPPING["ship_per_yard"],
+                DEFAULT_SHIPPING["ship_per_sample"],
+                DEFAULT_SHIPPING["ship_minimum"],
+                DEFAULT_SHIPPING["handling_fee"],
+            ),
+        )
 
 
 def _seed_vendors(conn) -> None:

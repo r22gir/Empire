@@ -10,10 +10,20 @@ export type FabricProduct = {
   durability: string;
   care: string;
   price_per_yard: number;
+  price_per_unit?: number;
+  unit?: string;
+  unit_label?: string;
+  product_type?: string;
   image_url: string | null;
   has_owner_photo: boolean;
   placeholder: boolean;
   brand?: string;
+  seo?: {
+    title: string;
+    description: string;
+    canonical: string;
+    json_ld: Record<string, unknown>;
+  };
 };
 
 export type CartLine = {
@@ -23,5 +33,26 @@ export type CartLine = {
   color: string;
   empire_code: string;
   price_per_yard: number;
+  unit?: string;
+  unit_label?: string;
   image_url: string | null;
+};
+
+export type ShippingEstimate = {
+  pass_through: boolean;
+  never_free: boolean;
+  free_shipping: boolean;
+  freight: number;
+  handling_total: number;
+  shipping_total: number;
+  floor_applied: boolean;
+  shipments?: Array<{
+    label: string;
+    yards: number;
+    samples: number;
+    freight: number;
+    handling_fee: number;
+    total: number;
+  }>;
+  note: string;
 };

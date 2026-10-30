@@ -1,0 +1,4 @@
+vendor,pattern,color,sku,category,width,content,repeat,net_price,list_price,product_url,notes
+Charlotte,Cuaderno Book,,V422-V475,Upholstery,54,Vinyl,,12.00,24.00,https://example.invalid/charlotte-cuaderno,MOCK collection-level book/collection unit per yard
+Charlotte,Hearth Tile,,HT-100,Other,12x12,Ceramic,,8.50,17.00,https://example.invalid/charlotte-hearth,MOCK collection-level unit per sq ft
+Charlotte,Mystery Book,,MB-1,,,,,8.00,16.00,,MOCK collection-level unit per roll

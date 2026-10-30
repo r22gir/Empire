@@ -121,3 +121,15 @@
   display: flex; flex-wrap: wrap; justify-content: space-between; gap: 10px;
 }
 .ff-qty { width: 88px; }
+.ff-totals { margin: 0 0 22px; }
+.ff-totals p { margin: 4px 0; }
+.ff-admin-block { margin: 36px 0; max-width: 720px; }
+.ff-admin-block h2 {
+  font-family: "Cormorant Garamond", Palatino, serif;
+  font-size: 1.6rem; margin: 0 0 10px;
+}
+.ff-admin-list { list-style: none; padding: 0; margin: 16px 0; }
+.ff-admin-list li {
+  display: flex; justify-content: space-between; gap: 12px; align-items: center;
+  padding: 8px 0; border-bottom: 1px solid var(--ff-line);
+}

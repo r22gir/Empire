@@ -94,3 +94,7 @@ reference/recovered/r6_woodwork/out/
 # was hiding it, so rate changes needed a force-add to land at all.
 !backend/app/data/
 backend/app/data/generated/
+
+# Live mill price books dropped for Fine Fabrics import — never commit
+fine_fabrics_vendor/
+**/fine_fabrics_vendor/

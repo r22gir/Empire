@@ -23,9 +23,13 @@ _PUBLIC_GET_EXACT = frozenset(
     {
         "/favicon.ico",
         "/robots.txt",
+        "/sitemap.xml",
+        "/merchant.xml",
         "/api/v1/fine-fabrics/catalog",
         "/api/v1/fine-fabrics/categories",
         "/api/v1/fine-fabrics/health",
+        "/api/v1/fine-fabrics/sitemap.xml",
+        "/api/v1/fine-fabrics/merchant.xml",
     }
 )
 
@@ -41,6 +45,7 @@ _PUBLIC_POST_EXACT = frozenset(
         "/api/v1/fine-fabrics/checkout",
         "/api/v1/fine-fabrics/samples",
         "/api/v1/fine-fabrics/preview",
+        "/api/v1/fine-fabrics/shipping/estimate",
     }
 )
 

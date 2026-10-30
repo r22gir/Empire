@@ -28,6 +28,8 @@ test('store pages, assets, and the fine-fabrics API pass through', () => {
     '/fine-fabrics/cart',
     '/fine-fabrics/checkout',
     '/fine-fabrics/samples',
+    '/fine-fabrics/sitemap.xml',
+    '/fine-fabrics/merchant.xml',
     '/_next/static/chunks/main.js',
     '/favicon.ico',
     '/ff-placeholder-swatch.svg',
@@ -37,6 +39,10 @@ test('store pages, assets, and the fine-fabrics API pass through', () => {
     assert.deepEqual(fabricsHostDecision(HOST, 'GET', path), { action: 'next' }, path);
   }
   assert.deepEqual(fabricsHostDecision(HOST, 'POST', '/api/v1/fine-fabrics/checkout'), { action: 'next' });
+  assert.deepEqual(fabricsHostDecision(HOST, 'GET', '/sitemap.xml'), {
+    action: 'rewrite',
+    pathname: '/fine-fabrics/sitemap.xml',
+  });
 });
 
 test('operator screens and other APIs are not reachable on the fabrics host', () => {
@@ -49,6 +55,8 @@ test('operator screens and other APIs are not reachable on the fabrics host', ()
     '/api/v1/quotes',
     '/api/v1/finance/invoices',
     '/api/v1/leadforge/intake',
+    '/fine-fabrics/admin',
+    '/fine-fabrics/admin/import',
     '/fine-fabrics/../api/v1/quotes',
   ]) {
     assert.deepEqual(fabricsHostDecision(HOST, 'GET', path), { action: 'not-found' }, path);

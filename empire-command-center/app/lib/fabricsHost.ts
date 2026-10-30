@@ -16,6 +16,8 @@ export const FABRICS_STORE_INDEX = "/fine-fabrics";
 const FABRICS_ALLOWLIST_EXACT: ReadonlySet<string> = new Set([
   "/favicon.ico",
   "/robots.txt",
+  "/sitemap.xml",
+  "/merchant.xml",
   "/ff-placeholder-swatch.svg",
 ]);
 
@@ -23,6 +25,10 @@ const FABRICS_ALLOWLIST_PREFIXES = [
   "/fine-fabrics",
   "/_next/",
   "/api/v1/fine-fabrics",
+];
+
+const FABRICS_DENY_PREFIXES = [
+  "/fine-fabrics/admin",
 ];
 
 export type FabricsHostDecision =
@@ -51,6 +57,11 @@ export function fabricsHostDecision(
     return { action: "not-found" };
   }
   if (path === "/") return { action: "rewrite", pathname: FABRICS_STORE_INDEX };
+  if (path === "/sitemap.xml") return { action: "rewrite", pathname: "/fine-fabrics/sitemap.xml" };
+  if (path === "/merchant.xml") return { action: "rewrite", pathname: "/fine-fabrics/merchant.xml" };
+  if (FABRICS_DENY_PREFIXES.some((prefix) => path === prefix || path.startsWith(`${prefix}/`))) {
+    return { action: "not-found" };
+  }
   if (FABRICS_ALLOWLIST_EXACT.has(path)) return { action: "next" };
   if (FABRICS_ALLOWLIST_PREFIXES.some((prefix) => path === prefix || path.startsWith(prefix))) {
     return { action: "next" };

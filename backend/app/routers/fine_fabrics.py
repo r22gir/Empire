@@ -3,29 +3,45 @@
 Customer endpoints never return net cost or vendor name unless the
 vendor's brand_display_allowed flag is true. Vendors with
 online_sale_allowed=false are omitted from the public catalog.
+Unsorted rows stay in the admin queue. Shipping is a pass-through of
+vendor freight plus handling and is never free.
 """
 
 from __future__ import annotations
 
-import json
 import os
 from typing import List, Optional
 
 from fastapi import APIRouter, File, HTTPException, Request, UploadFile
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel, Field
 
-from app.db.database import get_db
+from app.db.database import dict_rows, get_db
 from app.services.fine_fabrics.catalog import (
     CATEGORIES,
+    assign_category,
     get_product,
     list_catalog,
+    list_unsorted,
     list_vendors,
 )
-from app.services.fine_fabrics.importer import import_csv_text
+from app.services.fine_fabrics.importer import (
+    import_csv_text,
+    import_from_dir,
+    list_import_files,
+)
 from app.services.fine_fabrics.photos import photos_dir, read_photo, save_owner_photo
 from app.services.fine_fabrics.preview import preview_fabric
 from app.services.fine_fabrics.schema import ensure_fine_fabrics_schema
+from app.services.fine_fabrics.seo import get_public_product, merchant_xml, sitemap_xml
+from app.services.fine_fabrics.shipping import (
+    customer_shipping_view,
+    estimate_shipping,
+    list_shipping_rules,
+    list_shortfalls,
+    record_actual_shipping,
+    update_shipping_rules,
+)
 
 router = APIRouter(prefix="/fine-fabrics", tags=["fine-fabrics"])
 
@@ -71,6 +87,30 @@ class MarkupIn(BaseModel):
     markup: float = Field(gt=0)
 
 
+class ShippingEstimateIn(BaseModel):
+    items: List[CartItemIn] = []
+    sample_ids: List[int] = []
+
+
+class ShippingRulesIn(BaseModel):
+    ship_per_yard: Optional[float] = None
+    ship_per_sample: Optional[float] = None
+    ship_minimum: Optional[float] = None
+    handling_fee: Optional[float] = None
+
+
+class ActualShippingIn(BaseModel):
+    actual_vendor_shipping: float = Field(ge=0)
+
+
+class CategoryIn(BaseModel):
+    category: str
+
+
+class DirImportIn(BaseModel):
+    filename: Optional[str] = None
+
+
 def _owner_host(request: Request) -> bool:
     host = (request.headers.get("host") or "").split(":")[0].lower()
     return host not in {"fabrics.empirebox.store", "test-fabrics.empirebox.store"}
@@ -83,7 +123,7 @@ def _require_owner(request: Request) -> None:
 
 @router.get("/health")
 def health():
-    return {"ok": True, "store": "Empire Fine Fabrics", "stripe_mode": "test"}
+    return {"ok": True, "store": "Empire Fine Fabrics", "stripe_mode": "test", "shipping": "pass_through"}
 
 
 @router.get("/categories")
@@ -98,7 +138,7 @@ def catalog(category: Optional[str] = None, search: Optional[str] = None):
 
 @router.get("/products/{product_id}")
 def product_page(product_id: int):
-    product = get_product(product_id, owner=False, allow_hidden=False)
+    product = get_public_product(product_id)
     if not product:
         raise HTTPException(404, "Fabric not found")
     return product
@@ -114,12 +154,25 @@ def product_photo(product_id: int):
         raise HTTPException(404, "No owner photo for this fabric")
     path = read_photo(stored)
     if path is None:
-        # image_path may be stored as a relative name
         candidate = photos_dir() / stored
         if not candidate.is_file():
             raise HTTPException(404, "Photo file missing")
         path = candidate
     return FileResponse(path)
+
+
+@router.post("/shipping/estimate")
+def shipping_estimate(payload: ShippingEstimateIn):
+    try:
+        estimate = estimate_shipping(
+            [item.model_dump() for item in payload.items],
+            payload.sample_ids,
+        )
+    except PermissionError as exc:
+        raise HTTPException(403, str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    return customer_shipping_view(estimate)
 
 
 @router.post("/checkout")
@@ -146,34 +199,20 @@ def checkout(payload: CheckoutIn):
 
 @router.post("/samples")
 def request_samples(payload: SampleIn):
+    from app.services.fine_fabrics.checkout import request_samples as create_sample_request
+
     if not payload.product_ids:
         raise HTTPException(400, "Select at least one fabric")
-    visible = []
-    for pid in payload.product_ids:
-        product = get_product(pid, owner=False, allow_hidden=False)
-        if not product:
-            raise HTTPException(404, f"Fabric {pid} is not available for samples")
-        visible.append(product["id"])
-    with get_db() as conn:
-        conn.execute(
-            """INSERT INTO ff_sample_requests
-               (customer_name, customer_email, customer_phone, product_ids, notes, business)
-               VALUES (?, ?, ?, ?, ?, 'workroom')""",
-            (
-                payload.name,
-                payload.email,
-                payload.phone,
-                json.dumps(visible),
-                payload.notes,
-            ),
+    try:
+        return create_sample_request(
+            {"name": payload.name, "email": payload.email, "phone": payload.phone},
+            payload.product_ids,
+            payload.notes,
         )
-        request_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
-    return {
-        "id": request_id,
-        "status": "new",
-        "product_ids": visible,
-        "message": "Sample request received. Empire will confirm by email — no client email is sent automatically.",
-    }
+    except PermissionError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
 
 
 @router.post("/preview")
@@ -182,6 +221,16 @@ def preview(payload: PreviewIn):
         return preview_fabric(payload.product_id, item_type=payload.item_type)
     except LookupError as exc:
         raise HTTPException(404, str(exc)) from exc
+
+
+@router.get("/sitemap.xml")
+def sitemap():
+    return Response(content=sitemap_xml(), media_type="application/xml")
+
+
+@router.get("/merchant.xml")
+def merchant_feed():
+    return Response(content=merchant_xml(), media_type="application/xml")
 
 
 @router.get("/vendors")
@@ -233,6 +282,109 @@ def set_markup(vendor_id: int, payload: MarkupIn, request: Request):
     return {"vendors": list_vendors()}
 
 
+@router.get("/admin/shipping-rules")
+def admin_shipping_rules(request: Request):
+    _require_owner(request)
+    return {"rules": list_shipping_rules(), "pass_through": True, "never_free": True}
+
+
+@router.put("/admin/shipping-rules/{vendor_id}")
+def admin_update_shipping_rules(vendor_id: int, payload: ShippingRulesIn, request: Request):
+    _require_owner(request)
+    try:
+        rules = update_shipping_rules(vendor_id, payload.model_dump(exclude_none=True))
+    except LookupError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    return {"rules": rules}
+
+
+@router.get("/admin/shortfalls")
+def admin_shortfalls(request: Request):
+    _require_owner(request)
+    return {"shortfalls": list_shortfalls()}
+
+
+@router.get("/admin/orders")
+def admin_orders(request: Request):
+    _require_owner(request)
+    with get_db() as conn:
+        orders = dict_rows(
+            conn.execute(
+                """SELECT id, quote_id, customer_name, customer_email, subtotal,
+                          shipping_total, actual_vendor_shipping, shipping_shortfall,
+                          shipping_flag, status, created_at
+                   FROM ff_orders ORDER BY id DESC LIMIT 100"""
+            ).fetchall()
+        )
+        samples = dict_rows(
+            conn.execute(
+                """SELECT id, customer_name, customer_email, product_ids,
+                          shipping_total, actual_vendor_shipping, shipping_shortfall,
+                          shipping_flag, status, created_at
+                   FROM ff_sample_requests ORDER BY id DESC LIMIT 100"""
+            ).fetchall()
+        )
+    return {"orders": orders, "samples": samples}
+
+
+@router.put("/admin/orders/{order_id}/shipping")
+def admin_order_actual_shipping(order_id: int, payload: ActualShippingIn, request: Request):
+    _require_owner(request)
+    try:
+        return record_actual_shipping("order", order_id, payload.actual_vendor_shipping)
+    except LookupError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+@router.put("/admin/samples/{sample_id}/shipping")
+def admin_sample_actual_shipping(sample_id: int, payload: ActualShippingIn, request: Request):
+    _require_owner(request)
+    try:
+        return record_actual_shipping("sample", sample_id, payload.actual_vendor_shipping)
+    except LookupError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+@router.get("/admin/unsorted")
+def admin_unsorted(request: Request):
+    _require_owner(request)
+    return {"products": list_unsorted(), "queue": "Unsorted"}
+
+
+@router.put("/admin/products/{product_id}/category")
+def admin_assign_category(product_id: int, payload: CategoryIn, request: Request):
+    _require_owner(request)
+    try:
+        return assign_category(product_id, payload.category)
+    except LookupError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+@router.get("/admin/import-files")
+def admin_import_files(request: Request):
+    _require_owner(request)
+    return {"files": list_import_files()}
+
+
+@router.post("/admin/import-dir")
+def admin_import_dir(payload: DirImportIn, request: Request):
+    _require_owner(request)
+    try:
+        return import_from_dir(filename=payload.filename)
+    except FileNotFoundError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
 @router.post("/import")
 async def import_csv(request: Request, file: UploadFile = File(...)):
     _require_owner(request)
@@ -242,7 +394,7 @@ async def import_csv(request: Request, file: UploadFile = File(...)):
     except UnicodeDecodeError as exc:
         raise HTTPException(400, "CSV must be UTF-8") from exc
     try:
-        result = import_csv_text(text)
+        result = import_csv_text(text, filename=file.filename)
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
     return result
@@ -289,7 +441,7 @@ def seed_demo_catalog() -> dict | None:
     if not os.path.isfile(path):
         return None
     with open(path, encoding="utf-8") as handle:
-        return import_csv_text(handle.read())
+        return import_csv_text(handle.read(), filename="example_import.csv")
 
 
 try:

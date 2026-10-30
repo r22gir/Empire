@@ -3,13 +3,15 @@
 import { useSearchParams } from 'next/navigation';
 import { Suspense, useEffect, useState } from 'react';
 import { fabricsApi } from '../api';
-import type { FabricProduct } from '../types';
+import { money } from '../cartStore';
+import type { FabricProduct, ShippingEstimate } from '../types';
 
 function SamplesBody() {
   const params = useSearchParams();
   const preset = params.get('id');
   const [products, setProducts] = useState<FabricProduct[]>([]);
   const [selected, setSelected] = useState<number[]>([]);
+  const [shipping, setShipping] = useState<ShippingEstimate | null>(null);
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [phone, setPhone] = useState('');
@@ -23,11 +25,25 @@ function SamplesBody() {
     }).catch(() => setMessage('Catalog unavailable'));
   }, [preset]);
 
+  useEffect(() => {
+    if (!selected.length) {
+      setShipping(null);
+      return;
+    }
+    fabricsApi
+      .estimateShipping({ sample_ids: selected })
+      .then(setShipping)
+      .catch(() => setShipping(null));
+  }, [selected]);
+
   return (
     <main className="ff-main" id="cloth" style={{ paddingTop: 36 }}>
       <p className="ff-eyebrow">Samples</p>
       <h1>A clip of the cloth</h1>
-      <p className="ff-note">Request cuttings. Empire confirms by hand — no customer email is sent automatically.</p>
+      <p className="ff-note">
+        Request cuttings. Sample shipping is a pass-through of vendor freight plus
+        handling — never free. Empire confirms by hand — no customer email is sent automatically.
+      </p>
       <form
         className="ff-form"
         onSubmit={async (event) => {
@@ -59,6 +75,12 @@ function SamplesBody() {
             </label>
           ))}
         </fieldset>
+        {shipping ? (
+          <div className="ff-totals">
+            <p>Sample shipping {money(shipping.shipping_total)}</p>
+            <p className="ff-note">{shipping.note}</p>
+          </div>
+        ) : null}
         <label>Name<input required value={name} onChange={(e) => setName(e.target.value)} /></label>
         <label>Email<input required type="email" value={email} onChange={(e) => setEmail(e.target.value)} /></label>
         <label>Phone<input value={phone} onChange={(e) => setPhone(e.target.value)} /></label>

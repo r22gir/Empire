@@ -39,6 +39,8 @@ export function addToCart(product: FabricProduct, yards: number) {
       color: product.color,
       empire_code: product.empire_code,
       price_per_yard: product.price_per_yard,
+      unit: product.unit,
+      unit_label: product.unit_label || 'yard',
       image_url: product.image_url,
     });
   }

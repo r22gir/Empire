@@ -5,7 +5,18 @@ from __future__ import annotations
 from typing import Any, Optional
 
 from app.db.database import dict_row, dict_rows, get_db
-from app.services.fine_fabrics.schema import CATEGORIES, ensure_fine_fabrics_schema
+from app.services.fine_fabrics.schema import (
+    CATEGORIES,
+    UNSORTED_CATEGORY,
+    UNITS,
+    ensure_fine_fabrics_schema,
+)
+
+UNIT_LABELS = {"yard": "yard", "sq_ft": "sq ft", "roll": "roll", "box": "box"}
+
+
+def unit_label(unit: str) -> str:
+    return UNIT_LABELS.get((unit or "yard").strip() or "yard", "yard")
 
 OWNER_ONLY_FIELDS = (
     "net_price",
@@ -29,6 +40,10 @@ CUSTOMER_FIELDS = (
     "durability",
     "care",
     "price_per_yard",
+    "price_per_unit",
+    "unit",
+    "unit_label",
+    "product_type",
     "image_url",
     "has_owner_photo",
 )
@@ -57,6 +72,9 @@ def retail_price(net_price: float, markup: float) -> float:
 def customer_product(row: dict, vendor: dict | None = None, conn=None) -> dict:
     """Public card. Cost and supplier never leave unless brand_display_allowed."""
     vendor = vendor or _vendor_for(row, conn)
+    unit = (row.get("unit") or "yard").strip() or "yard"
+    if unit not in UNITS:
+        unit = "yard"
     price = retail_price(row.get("net_price") or 0, markup_for(vendor, row.get("category") or "Other", conn))
     image_path = (row.get("image_path") or "").strip()
     payload = {
@@ -70,6 +88,10 @@ def customer_product(row: dict, vendor: dict | None = None, conn=None) -> dict:
         "repeat": row.get("repeat") or "",
         "durability": row.get("durability") or "",
         "care": row.get("care") or "",
+        "unit": unit,
+        "unit_label": unit_label(unit),
+        "product_type": row.get("product_type") or "sku",
+        "price_per_unit": price,
         "price_per_yard": price,
         "image_url": f"/api/v1/fine-fabrics/photos/{row['id']}" if image_path else None,
         "has_owner_photo": bool(image_path),
@@ -96,6 +118,9 @@ def owner_product(row: dict, vendor: dict | None = None, conn=None) -> dict:
             "brand_display_allowed": bool(vendor.get("brand_display_allowed")) if vendor else False,
             "markup": markup_for(vendor, row.get("category") or "Other", conn) if vendor else None,
             "image_path": row.get("image_path"),
+            "color_family": row.get("color_family"),
+            "is_unsorted": bool(row.get("is_unsorted") or row.get("category") == UNSORTED_CATEGORY),
+            "sku_range": row.get("sku_range"),
         }
     )
     return public
@@ -130,6 +155,9 @@ def list_catalog(
         params: list[Any] = []
         if not include_hidden:
             sql += " AND v.online_sale_allowed = 1"
+        if not owner:
+            sql += " AND IFNULL(p.is_unsorted, 0) = 0 AND p.category != ?"
+            params.append(UNSORTED_CATEGORY)
         if category:
             sql += " AND p.category = ?"
             params.append(category)
@@ -167,6 +195,9 @@ def get_product(product_id: int, *, owner: bool = False, allow_hidden: bool = Fa
         if not row:
             return None
         row = dict_row(row)
+        unsorted = int(row.get("is_unsorted") or 0) or row.get("category") == UNSORTED_CATEGORY
+        if unsorted and not owner:
+            return None
         if not allow_hidden and not int(row.get("online_sale_allowed") or 0):
             return None
         vendor = {
@@ -178,6 +209,56 @@ def get_product(product_id: int, *, owner: bool = False, allow_hidden: bool = Fa
             "default_markup": row["default_markup"],
         }
         return owner_product(row, vendor, conn) if owner else customer_product(row, vendor, conn)
+
+
+def list_unsorted() -> list[dict]:
+    """Admin queue: blank or unknown category, never shown on the public catalog."""
+    ensure_fine_fabrics_schema()
+    with get_db() as conn:
+        rows = dict_rows(
+            conn.execute(
+                """SELECT p.*, v.slug AS vendor_slug, v.name AS vendor_name,
+                          v.online_sale_allowed, v.brand_display_allowed, v.default_markup
+                   FROM ff_products p
+                   JOIN ff_vendors v ON v.id = p.vendor_id
+                   WHERE p.is_active = 1
+                     AND (IFNULL(p.is_unsorted, 0) = 1 OR p.category = ?)
+                   ORDER BY p.pattern, p.color""",
+                (UNSORTED_CATEGORY,),
+            ).fetchall()
+        )
+        out = []
+        for row in rows:
+            vendor = {
+                "id": row["vendor_id"],
+                "slug": row["vendor_slug"],
+                "name": row["vendor_name"],
+                "online_sale_allowed": row["online_sale_allowed"],
+                "brand_display_allowed": row["brand_display_allowed"],
+                "default_markup": row["default_markup"],
+            }
+            out.append(owner_product(row, vendor, conn))
+        return out
+
+
+def assign_category(product_id: int, category: str) -> dict:
+    if category not in CATEGORIES:
+        raise ValueError(f"category must be one of {CATEGORIES}")
+    ensure_fine_fabrics_schema()
+    with get_db() as conn:
+        found = conn.execute("SELECT id FROM ff_products WHERE id = ?", (product_id,)).fetchone()
+        if not found:
+            raise LookupError("Fabric not found")
+        conn.execute(
+            """UPDATE ff_products
+               SET category = ?, is_unsorted = 0, updated_at=datetime('now')
+               WHERE id = ?""",
+            (category, product_id),
+        )
+    product = get_product(product_id, owner=True, allow_hidden=True)
+    if not product:
+        raise LookupError("Fabric not found")
+    return product
 
 
 def list_vendors() -> list[dict]:

@@ -1,6 +1,6 @@
-import type { FabricProduct } from './types';
+import type { FabricProduct, ShippingEstimate } from './types';
 
-function apiBase(): string {
+export function apiBase(): string {
   if (typeof window === 'undefined') {
     return process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:8000/api/v1';
   }
@@ -12,9 +12,13 @@ function apiBase(): string {
 }
 
 async function readJson<T>(path: string, init?: RequestInit): Promise<T> {
+  const headers: Record<string, string> = { ...(init?.headers as Record<string, string> || {}) };
+  if (init?.body && !(init.body instanceof FormData)) {
+    headers['Content-Type'] = headers['Content-Type'] || 'application/json';
+  }
   const res = await fetch(`${apiBase()}${path}`, {
     ...init,
-    headers: { 'Content-Type': 'application/json', ...(init?.headers || {}) },
+    headers,
     cache: 'no-store',
   });
   if (!res.ok) {
@@ -39,6 +43,11 @@ export const fabricsApi = {
       `/fine-fabrics/catalog${category ? `?category=${encodeURIComponent(category)}` : ''}`,
     ),
   product: (id: string | number) => readJson<FabricProduct>(`/fine-fabrics/products/${id}`),
+  estimateShipping: (body: { items?: Array<{ product_id: number; yards: number }>; sample_ids?: number[] }) =>
+    readJson<ShippingEstimate>('/fine-fabrics/shipping/estimate', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
   checkout: (body: Record<string, unknown>) =>
     readJson<Record<string, unknown>>('/fine-fabrics/checkout', {
       method: 'POST',
@@ -54,4 +63,47 @@ export const fabricsApi = {
       method: 'POST',
       body: JSON.stringify({ product_id: productId }),
     }),
+  admin: {
+    products: () => readJson<{ products: FabricProduct[] }>('/fine-fabrics/admin/products'),
+    unsorted: () => readJson<{ products: Array<FabricProduct & { vendor_name?: string; is_unsorted?: boolean }> }>('/fine-fabrics/admin/unsorted'),
+    importFiles: () => readJson<{ files: Array<{ name: string; bytes: number }> }>('/fine-fabrics/admin/import-files'),
+    importDir: (filename?: string) =>
+      readJson<Record<string, unknown>>('/fine-fabrics/admin/import-dir', {
+        method: 'POST',
+        body: JSON.stringify({ filename: filename || null }),
+      }),
+    importCsv: async (file: File) => {
+      const data = new FormData();
+      data.append('file', file);
+      const res = await fetch(`${apiBase()}/fine-fabrics/import`, { method: 'POST', body: data });
+      if (!res.ok) throw new Error(await res.text());
+      return res.json();
+    },
+    assignCategory: (id: number, category: string) =>
+      readJson<Record<string, unknown>>(`/fine-fabrics/admin/products/${id}/category`, {
+        method: 'PUT',
+        body: JSON.stringify({ category }),
+      }),
+    shippingRules: () => readJson<{ rules: Array<Record<string, unknown>> }>('/fine-fabrics/admin/shipping-rules'),
+    updateShippingRules: (vendorId: number, body: Record<string, number>) =>
+      readJson<{ rules: Array<Record<string, unknown>> }>(`/fine-fabrics/admin/shipping-rules/${vendorId}`, {
+        method: 'PUT',
+        body: JSON.stringify(body),
+      }),
+    orders: () =>
+      readJson<{ orders: Array<Record<string, unknown>>; samples: Array<Record<string, unknown>> }>(
+        '/fine-fabrics/admin/orders',
+      ),
+    shortfalls: () => readJson<{ shortfalls: Array<Record<string, unknown>> }>('/fine-fabrics/admin/shortfalls'),
+    recordOrderShipping: (id: number, actual: number) =>
+      readJson<Record<string, unknown>>(`/fine-fabrics/admin/orders/${id}/shipping`, {
+        method: 'PUT',
+        body: JSON.stringify({ actual_vendor_shipping: actual }),
+      }),
+    recordSampleShipping: (id: number, actual: number) =>
+      readJson<Record<string, unknown>>(`/fine-fabrics/admin/samples/${id}/shipping`, {
+        method: 'PUT',
+        body: JSON.stringify({ actual_vendor_shipping: actual }),
+      }),
+  },
 };

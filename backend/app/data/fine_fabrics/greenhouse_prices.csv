@@ -1,4 +1,4 @@
-vendor,pattern,color,sku,category,width,content,repeat,net_price,list_price,product_url,notes
-Greenhouse,Botanical Vine,Sage,GH-BV-SAGE,Drapery,54,100% Linen,27x25,42.00,84.00,https://example.invalid/gh-bv-sage,MOCK vendor price file — format example only
-Greenhouse,Quiet Check,Ivory,GH-QC-IVORY,Drapery,54,55% Linen 45% Cotton,4x4,28.00,56.00,https://example.invalid/gh-qc-ivory,MOCK vendor price file — format example only
-Greenhouse,River Silk,Mist,GH-RS-MIST,Drapery,118,100% Polyester,0,16.50,33.00,https://example.invalid/gh-rs-mist,MOCK vendor price file — format example only
+sku,name_color,category,width,content,repeat,color_family,net_price_per_yd,list_price
+S8090,S8090 BRINDLE,Upholstery,54,100% Polyester,,Brown,18.00,
+GH-BV-SAGE,GH-BV-SAGE SAGE,Drapery,54,100% Linen,27x25,Green,42.00,84.00
+GH-QC-IVORY,GH-QC-IVORY IVORY,Drapery,54,55% Linen 45% Cotton,4x4,Ivory,28.00,56.00

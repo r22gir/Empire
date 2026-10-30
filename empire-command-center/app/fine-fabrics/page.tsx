@@ -56,7 +56,7 @@ function CatalogBody() {
                 <strong>{product.pattern}</strong>
                 <div className="meta">{product.color} · {product.empire_code}</div>
                 <div className="meta">{product.category}{product.brand ? ` · ${product.brand}` : ''}</div>
-                <div className="price">{money(product.price_per_yard)} / yd</div>
+                <div className="price">{money(product.price_per_unit || product.price_per_yard)} / {product.unit_label || 'yd'}</div>
               </figcaption>
             </Link>
           ))}

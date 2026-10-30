@@ -14,6 +14,7 @@ from starlette.requests import Request
 
 EXAMPLE_CSV = Path(__file__).resolve().parents[1] / "app" / "data" / "fine_fabrics" / "example_import.csv"
 GREENHOUSE_CSV = Path(__file__).resolve().parents[1] / "app" / "data" / "fine_fabrics" / "greenhouse_prices.csv"
+CHARLOTTE_CSV = Path(__file__).resolve().parents[1] / "app" / "data" / "fine_fabrics" / "charlotte_prices.csv"
 
 MOCK_CSV = """vendor,pattern,color,sku,category,width,content,repeat,net_price,list_price,product_url,notes,durability,care
 Sunbrella,Canvas,Navy,5408-0000,Outdoor,54,100% Acrylic,,18.50,36.00,https://example.invalid/navy,mock,15000h,Spot clean
@@ -39,9 +40,9 @@ def ff_db(monkeypatch, tmp_path):
     from app.db import database
     importlib.reload(database)
 
-    from app.services.fine_fabrics import schema, catalog, importer, checkout, photos as photo_mod, preview
+    from app.services.fine_fabrics import schema, catalog, importer, checkout, photos as photo_mod, preview, shipping, seo
 
-    for mod in (schema, catalog, importer, checkout, photo_mod, preview):
+    for mod in (schema, catalog, importer, checkout, photo_mod, preview, shipping, seo):
         importlib.reload(mod)
 
     schema.ensure_fine_fabrics_schema()
@@ -58,6 +59,8 @@ def ff_db(monkeypatch, tmp_path):
         "checkout": checkout,
         "photos_mod": photo_mod,
         "preview": preview,
+        "shipping": shipping,
+        "seo": seo,
         "router": router_mod,
     }
 
@@ -86,7 +89,13 @@ def test_example_csv_has_required_columns():
         "notes",
     ):
         assert col in header
-    assert "Greenhouse" in GREENHOUSE_CSV.read_text(encoding="utf-8")
+    greenhouse = GREENHOUSE_CSV.read_text(encoding="utf-8")
+    assert "name_color" in greenhouse.splitlines()[0]
+    assert "net_price_per_yd" in greenhouse
+    charlotte = CHARLOTTE_CSV.read_text(encoding="utf-8")
+    assert "Charlotte" in charlotte
+    assert "unit per" in charlotte
+    assert "collection-level" in charlotte
 
 
 def test_vendor_seed_flags(ff_db):
@@ -182,6 +191,7 @@ def test_csv_import_rejects_hand_entry_shape(ff_db):
     )
     assert ok.status_code == 200
     assert ok.json()["created"] == 3
+    assert ok.json()["format"] == "greenhouse"
     # Greenhouse stays hidden on the customer catalog.
     assert client.get("/api/v1/fine-fabrics/catalog").json()["products"] == []
 
@@ -233,7 +243,13 @@ def test_samples_and_preview_stub(ff_db, monkeypatch):
         json={"name": "Ada", "email": "ada@example.com", "product_ids": [navy["id"]], "notes": "two clips"},
     )
     assert samples.status_code == 200
-    assert samples.json()["product_ids"] == [navy["id"]]
+    body = samples.json()
+    assert body["product_ids"] == [navy["id"]]
+    assert body["shipping_total"] >= 1
+    assert body["shipping"]["never_free"] is True
+    assert body["shipping"]["free_shipping"] is False
+    assert "Charlotte" not in str(body)
+    assert "Greenhouse" not in str(body)
 
 
 def test_checkout_uses_quote_deposit_path_test_mode_only(ff_db, monkeypatch):
@@ -274,8 +290,14 @@ def test_checkout_uses_quote_deposit_path_test_mode_only(ff_db, monkeypatch):
     assert "cs_test_ff" in result["pay_link"]["checkout_url"]
     assert result["stripe_mode"] == "test"
     assert result["subtotal"] == round(3 * navy["price_per_yard"], 2)
+    assert result["shipping_total"] >= 1
+    assert result["total"] == round(result["subtotal"] + result["shipping_total"], 2)
+    assert result["shipping"]["pass_through"] is True
+    assert result["shipping"]["never_free"] is True
+    assert result["shipping"]["free_shipping"] is False
     assert "18.50" not in captured["quote"]  # net cost must not ride the quote lines
     assert navy["empire_code"] in captured["quote"]
+    assert "never free" in captured["quote"]
 
     monkeypatch.setenv("STRIPE_SECRET_KEY", "sk_live_not_allowed")
     with pytest.raises(PermissionError, match="live"):
@@ -299,7 +321,12 @@ def test_public_edge_blocks_owner_and_finance(ff_db):
 
     assert is_public_fabrics_path_allowed("GET", "/api/v1/fine-fabrics/catalog")
     assert is_public_fabrics_path_allowed("POST", "/api/v1/fine-fabrics/checkout")
+    assert is_public_fabrics_path_allowed("POST", "/api/v1/fine-fabrics/shipping/estimate")
+    assert is_public_fabrics_path_allowed("GET", "/api/v1/fine-fabrics/sitemap.xml")
+    assert is_public_fabrics_path_allowed("GET", "/api/v1/fine-fabrics/merchant.xml")
     assert not is_public_fabrics_path_allowed("POST", "/api/v1/fine-fabrics/import")
+    assert not is_public_fabrics_path_allowed("GET", "/api/v1/fine-fabrics/admin/unsorted")
+    assert not is_public_fabrics_path_allowed("PUT", "/api/v1/fine-fabrics/admin/orders/1/shipping")
     assert not is_public_fabrics_path_allowed("GET", "/api/v1/finance/invoices")
     assert not is_public_fabrics_path_allowed("GET", "/api/v1/max/status")
 
@@ -332,3 +359,217 @@ def test_main_loads_fine_fabrics_router():
     src = text.read_text(encoding="utf-8")
     assert 'load_router("app.routers.fine_fabrics", "/api/v1", ["fine-fabrics"])' in src
     assert "fabrics_public_edge_response" in src
+
+
+def test_greenhouse_native_mapping(ff_db):
+    fmt, rows = ff_db["importer"].parse_csv(GREENHOUSE_CSV.read_text(encoding="utf-8"), filename="greenhouse_prices.csv")
+    assert fmt == "greenhouse"
+    brindled = next(r for r in rows if r["sku"] == "S8090")
+    assert brindled["pattern"] == "S8090"
+    assert brindled["color"] == "BRINDLE"
+    assert brindled["vendor"] == "Greenhouse"
+    assert brindled["net_price"] == "18.00"
+    result = ff_db["importer"].import_csv_text(GREENHOUSE_CSV.read_text(encoding="utf-8"), filename="greenhouse_prices.csv")
+    assert result["created"] == 3
+    hidden = ff_db["catalog"].list_catalog(include_hidden=True, owner=True)
+    row = next(p for p in hidden if p["sku"] == "S8090")
+    assert row["pattern"] == "S8090"
+    assert row["color"] == "BRINDLE"
+    assert row["vendor_slug"] == "greenhouse"
+    assert ff_db["catalog"].list_catalog() == []
+
+
+def test_charlotte_collection_unit_and_unsorted(ff_db):
+    result = ff_db["importer"].import_csv_text(CHARLOTTE_CSV.read_text(encoding="utf-8"), filename="charlotte_prices.csv")
+    assert result["format"] == "charlotte"
+    assert result["created"] == 3
+    assert result["unsorted"] == 1
+    hidden = ff_db["catalog"].list_catalog(include_hidden=True, owner=True)
+    book = next(p for p in hidden if p["pattern"] == "Cuaderno Book")
+    assert book["product_type"] == "collection"
+    assert book["unit"] == "yard"
+    assert book["color"] == ""
+    tile = next(p for p in hidden if p["pattern"] == "Hearth Tile")
+    assert tile["unit"] == "sq_ft"
+    assert tile["unit_label"] == "sq ft"
+    mystery = next(p for p in hidden if p["pattern"] == "Mystery Book")
+    assert mystery["is_unsorted"] is True
+    assert mystery["category"] == "Unsorted"
+    assert mystery["unit"] == "roll"
+    public = ff_db["catalog"].list_catalog()
+    assert public == []
+    queue = ff_db["catalog"].list_unsorted()
+    assert [p["pattern"] for p in queue] == ["Mystery Book"]
+
+
+def test_unsorted_never_public_even_for_open_vendor(ff_db):
+    csv = """vendor,pattern,color,sku,category,width,content,repeat,net_price,list_price,product_url,notes
+Sunbrella,Lost Cloth,Fog,LOST-1,,54,Acrylic,,19.00,38.00,,blank category
+Sunbrella,Canvas,Navy,5408-0000,Outdoor,54,Acrylic,,18.50,36.00,,ok
+"""
+    ff_db["importer"].import_csv_text(csv)
+    public = ff_db["catalog"].list_catalog()
+    assert [p["pattern"] for p in public] == ["Canvas"]
+    lost = next(p for p in ff_db["catalog"].list_unsorted() if p["pattern"] == "Lost Cloth")
+    assert ff_db["catalog"].get_product(lost["id"], owner=False) is None
+    client = _client(ff_db["router"])
+    assert client.get(f"/api/v1/fine-fabrics/products/{lost['id']}").status_code == 404
+    assigned = ff_db["catalog"].assign_category(lost["id"], "Outdoor")
+    assert assigned["is_unsorted"] is False
+    assert assigned["category"] == "Outdoor"
+    assert ff_db["catalog"].get_product(lost["id"], owner=False)["pattern"] == "Lost Cloth"
+
+
+def test_import_from_configurable_data_dir(ff_db, tmp_path, monkeypatch):
+    drop = tmp_path / "fine_fabrics_vendor"
+    drop.mkdir()
+    (drop / "greenhouse_prices.csv").write_text(GREENHOUSE_CSV.read_text(encoding="utf-8"), encoding="utf-8")
+    (drop / "charlotte_prices.csv").write_text(CHARLOTTE_CSV.read_text(encoding="utf-8"), encoding="utf-8")
+    monkeypatch.setenv("FINE_FABRICS_DATA_DIR", str(drop))
+    import importlib
+
+    importlib.reload(ff_db["importer"])
+    listed = ff_db["importer"].list_import_files()
+    assert {f["name"] for f in listed} == {"greenhouse_prices.csv", "charlotte_prices.csv"}
+    report = ff_db["importer"].import_from_dir()
+    created = sum(item["created"] for item in report["files"])
+    assert created == 6
+    assert ff_db["catalog"].list_unsorted()
+
+
+def test_pass_through_shipping_never_free(ff_db):
+    ff_db["importer"].import_csv_text(MOCK_CSV)
+    navy = next(p for p in ff_db["catalog"].list_catalog() if p["color"] == "Navy")
+    estimate = ff_db["shipping"].estimate_shipping([{"product_id": navy["id"], "yards": 3}])
+    assert estimate["pass_through"] is True
+    assert estimate["never_free"] is True
+    assert estimate["free_shipping"] is False
+    assert estimate["shipping_total"] == 15.50  # min 12 freight + 3.50 handling
+    assert estimate["shipping_total"] > 0
+    big = ff_db["shipping"].estimate_shipping([{"product_id": navy["id"], "yards": 100}])
+    assert big["shipping_total"] == round(100 * 1.50 + 3.50, 2)
+    assert big["free_shipping"] is False
+    vendors = {v["slug"]: v for v in ff_db["catalog"].list_vendors()}
+    ff_db["shipping"].update_shipping_rules(
+        vendors["sunbrella"]["id"],
+        {"ship_per_yard": 0, "ship_per_sample": 0, "ship_minimum": 0, "handling_fee": 0},
+    )
+    floored = ff_db["shipping"].estimate_shipping([{"product_id": navy["id"], "yards": 2}])
+    assert floored["shipping_total"] == 1.0
+    assert floored["floor_applied"] is True
+    public = ff_db["shipping"].customer_shipping_view(estimate)
+    assert "vendor_id" not in public
+    assert "Charlotte" not in str(public)
+    assert "Greenhouse" not in str(public)
+    assert public["shipments"][0]["label"] == "Shipment 1"
+
+
+def test_sample_and_checkout_shipping_and_shortfall(ff_db, monkeypatch):
+    ff_db["importer"].import_csv_text(MOCK_CSV)
+    navy = next(p for p in ff_db["catalog"].list_catalog() if p["color"] == "Navy")
+    samples = ff_db["checkout"].request_samples(
+        {"name": "Ada", "email": "ada@example.com"},
+        [navy["id"]],
+    )
+    assert samples["shipping_total"] == 15.50
+    monkeypatch.setattr(ff_db["checkout"], "_quotes_dir", lambda: ff_db["quotes"])
+    monkeypatch.setitem(
+        __import__("sys").modules,
+        "app.routers.finance",
+        SimpleNamespace(
+            create_quote_deposit_pay_link=lambda *a, **k: {
+                "invoice": {"id": "inv-ship"},
+                "pay_link": {"checkout_url": "https://checkout.stripe.com/c/pay/cs_test_ship"},
+                "payment_status": "link_ready",
+            },
+            QUOTES_DIR=ff_db["quotes"],
+        ),
+    )
+    order = ff_db["checkout"].checkout_cart(
+        {"name": "Ada", "email": "ada@example.com"},
+        [{"product_id": navy["id"], "yards": 3}],
+    )
+    billed = ff_db["shipping"].record_actual_shipping("order", order["order_id"], 40.00)
+    assert billed["bill_shortfall"] is True
+    assert billed["shipping_flag"] == "shortfall"
+    assert billed["shipping_shortfall"] == round(40.00 - order["shipping_total"], 2)
+    ok = ff_db["shipping"].record_actual_shipping("order", order["order_id"], order["shipping_total"])
+    assert ok["bill_shortfall"] is False
+    assert ff_db["shipping"].list_shortfalls() == []
+    ff_db["shipping"].record_actual_shipping("sample", samples["id"], 99.00)
+    flags = ff_db["shipping"].list_shortfalls()
+    assert any(row["kind"] == "sample" and row["id"] == samples["id"] for row in flags)
+
+
+def test_sitemap_and_merchant_exclude_hidden_and_unsorted(ff_db):
+    ff_db["importer"].import_csv_text(MOCK_CSV)
+    extra = """vendor,pattern,color,sku,category,width,content,repeat,net_price,list_price,product_url,notes
+Sunbrella,Lost Cloth,Fog,LOST-1,,54,Acrylic,,19.00,38.00,,blank category
+"""
+    ff_db["importer"].import_csv_text(extra)
+    navy = next(p for p in ff_db["catalog"].list_catalog() if p["color"] == "Navy")
+    sitemap = ff_db["seo"].sitemap_xml()
+    merchant = ff_db["seo"].merchant_xml()
+    assert f"/fine-fabrics/{navy['id']}" in sitemap
+    assert navy["empire_code"] in merchant
+    assert "Cuaderno" not in sitemap
+    assert "Cuaderno" not in merchant
+    assert "Lost Cloth" not in sitemap
+    assert "Lost Cloth" not in merchant
+    assert "Charlotte" not in merchant
+    assert "Greenhouse" not in merchant
+    public = ff_db["seo"].get_public_product(navy["id"])
+    assert public["seo"]["json_ld"]["@type"] == "Product"
+    assert "net_price" not in public
+    client = _client(ff_db["router"])
+    sm = client.get("/api/v1/fine-fabrics/sitemap.xml")
+    assert sm.status_code == 200
+    assert "urlset" in sm.text
+    feed = client.get("/api/v1/fine-fabrics/merchant.xml")
+    assert feed.status_code == 200
+    assert "g:price" in feed.text
+    est = client.post(
+        "/api/v1/fine-fabrics/shipping/estimate",
+        json={"items": [{"product_id": navy["id"], "yards": 2}]},
+    )
+    assert est.status_code == 200
+    assert est.json()["shipping_total"] >= 1
+    assert "vendor_id" not in est.json()
+
+
+def test_admin_actual_shipping_endpoint(ff_db, monkeypatch):
+    ff_db["importer"].import_csv_text(MOCK_CSV)
+    navy = next(p for p in ff_db["catalog"].list_catalog() if p["color"] == "Navy")
+    monkeypatch.setattr(ff_db["checkout"], "_quotes_dir", lambda: ff_db["quotes"])
+    monkeypatch.setitem(
+        __import__("sys").modules,
+        "app.routers.finance",
+        SimpleNamespace(
+            create_quote_deposit_pay_link=lambda *a, **k: {
+                "invoice": {"id": "inv-admin"},
+                "pay_link": {"checkout_url": "https://checkout.stripe.com/c/pay/cs_test_admin"},
+                "payment_status": "link_ready",
+            },
+            QUOTES_DIR=ff_db["quotes"],
+        ),
+    )
+    order = ff_db["checkout"].checkout_cart(
+        {"name": "Ada", "email": "ada@example.com"},
+        [{"product_id": navy["id"], "yards": 1}],
+    )
+    client = _client(ff_db["router"])
+    denied = client.put(
+        f"/api/v1/fine-fabrics/admin/orders/{order['order_id']}/shipping",
+        json={"actual_vendor_shipping": 50},
+        headers={"host": "fabrics.empirebox.store"},
+    )
+    assert denied.status_code == 401
+    ok = client.put(
+        f"/api/v1/fine-fabrics/admin/orders/{order['order_id']}/shipping",
+        json={"actual_vendor_shipping": 50},
+        headers={"host": "127.0.0.1:8000"},
+    )
+    assert ok.status_code == 200
+    assert ok.json()["bill_shortfall"] is True
+    shorts = client.get("/api/v1/fine-fabrics/admin/shortfalls", headers={"host": "127.0.0.1:8000"})
+    assert shorts.json()["shortfalls"]
