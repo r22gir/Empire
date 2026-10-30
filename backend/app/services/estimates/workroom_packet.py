@@ -248,6 +248,7 @@ def build_packet(spec: dict) -> dict:
         "total": total,
         "deposit_percent": deposit_pct,
         "deposit": deposit,
+        "balance": round(total - deposit, 2),
         "payment_line": "Pay deposit online: [Square payment link]",
         "terms": spec.get("terms") or (
             "50% deposit to begin · balance due on completion. "
