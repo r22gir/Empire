@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 import { workroomHostDecision } from "./app/lib/workroomHost";
+import { fabricsHostDecision } from "./app/lib/fabricsHost";
 import { applyTailscaleHeaderPolicy } from "./app/lib/tailscaleProxy";
 
 function continueWith(request: NextRequest) {
@@ -155,6 +156,27 @@ export function middleware(request: NextRequest) {
     });
   }
   if (workroom.action === "next") {
+    return continueWith(request);
+  }
+
+  // --- FABRICS store host: Empire Fine Fabrics (catalog + test-mode cart) ---
+  // fabrics.empirebox.store rewrites "/" to /fine-fabrics. Only the store
+  // routes, Next assets, and /api/v1/fine-fabrics/* are reachable.
+  // See app/lib/fabricsHost.ts (+ fabricsHost.test.ts) and
+  // docs/FABRICS_STORE_DNS.md (tunnel/DNS is founder-only; not this PR).
+  const fabrics = fabricsHostDecision(host, request.method, pathname);
+  if (fabrics.action === "rewrite") {
+    const url = request.nextUrl.clone();
+    url.pathname = fabrics.pathname;
+    return NextResponse.rewrite(url);
+  }
+  if (fabrics.action === "not-found") {
+    return new NextResponse("Not Found", {
+      status: 404,
+      headers: { "content-type": "text/plain; charset=utf-8" },
+    });
+  }
+  if (fabrics.action === "next") {
     return continueWith(request);
   }
 

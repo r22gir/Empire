@@ -1,0 +1,13 @@
+vendor,pattern,color,sku,category,width,content,repeat,net_price,list_price,product_url,notes,durability,care
+Sunbrella,Canvas,Navy,5408-0000,Outdoor,54 in,100% Solution-Dyed Acrylic,,18.50,36.00,https://example.invalid/sunbrella-canvas-navy,MOCK — do not scrape,15000 hours,Spot clean; air dry
+Sunbrella,Canvas,Natural,5403-0000,Outdoor,54 in,100% Solution-Dyed Acrylic,,18.50,36.00,https://example.invalid/sunbrella-canvas-natural,MOCK — do not scrape,15000 hours,Spot clean; air dry
+Sunbrella,Heritage,Charcoal,8305-0000,Upholstery,54 in,100% Solution-Dyed Acrylic,0,22.00,44.00,https://example.invalid/sunbrella-heritage-charcoal,MOCK — do not scrape,30000 double rubs,Mild soap
+Sunbrella,Frequency,Sand,83000-0004,Outdoor,54 in,100% Solution-Dyed Acrylic,13.5 x 13.25,24.75,49.50,https://example.invalid/sunbrella-frequency-sand,MOCK — do not scrape,15000 hours,Hose rinse
+Sunbrella,Sailcloth,Shade,83000-0012,Drapery,54 in,100% Solution-Dyed Acrylic,,21.00,42.00,https://example.invalid/sunbrella-sailcloth-shade,MOCK — do not scrape,,Machine wash cold
+Greenhouse,Botanical Vine,Sage,GH-BV-SAGE,Drapery,54 in,100% Linen,27 x 25,42.00,84.00,https://example.invalid/gh-botanical-sage,MOCK — online_sale_allowed false,,Dry clean
+Greenhouse,Quiet Check,Ivory,GH-QC-IVORY,Drapery,54 in,55% Linen 45% Cotton,4 x 4,28.00,56.00,https://example.invalid/gh-quiet-check,MOCK — online_sale_allowed false,,Dry clean
+Charlotte,Cuaderno,Spruce,V639,Upholstery,54 in,Vinyl,,12.00,24.00,https://example.invalid/charlotte-v639,MOCK — online_sale_allowed false,2000000 rubs,Wipe clean
+Charlotte,Cuaderno,Teak,V638,Upholstery,54 in,Vinyl,,12.00,24.00,https://example.invalid/charlotte-v638,MOCK — online_sale_allowed false,2000000 rubs,Wipe clean
+Kravet,Damask Court,Ivory,K-DC-IVORY,Drapery,54 in,Silk blend,25 x 27,68.00,136.00,https://example.invalid/kravet-damask,MOCK — online_sale_allowed false,,Dry clean
+Keyston,Vintage Ale,Saddle,SVI001,Upholstery,54 in,Vinyl,,9.75,19.50,https://example.invalid/keyston-vintage-ale,MOCK — online_sale_allowed false,100000 rubs,Wipe clean
+Sunbrella,Pebble,Fog,83000-0099,Other,54 in,100% Solution-Dyed Acrylic,,19.25,38.50,https://example.invalid/sunbrella-pebble-fog,MOCK — do not scrape,,Spot clean

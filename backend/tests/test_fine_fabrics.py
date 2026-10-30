@@ -1,0 +1,334 @@
+"""Empire Fine Fabrics — mock-data only. Never hits live vendors or Stripe live."""
+
+from __future__ import annotations
+
+import importlib
+import io
+from pathlib import Path
+from types import SimpleNamespace
+
+import pytest
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
+from starlette.requests import Request
+
+EXAMPLE_CSV = Path(__file__).resolve().parents[1] / "app" / "data" / "fine_fabrics" / "example_import.csv"
+GREENHOUSE_CSV = Path(__file__).resolve().parents[1] / "app" / "data" / "fine_fabrics" / "greenhouse_prices.csv"
+
+MOCK_CSV = """vendor,pattern,color,sku,category,width,content,repeat,net_price,list_price,product_url,notes,durability,care
+Sunbrella,Canvas,Navy,5408-0000,Outdoor,54,100% Acrylic,,18.50,36.00,https://example.invalid/navy,mock,15000h,Spot clean
+Sunbrella,Heritage,Charcoal,8305-0000,Upholstery,54,100% Acrylic,,22.00,44.00,https://example.invalid/charcoal,mock,30000 rubs,Mild soap
+Charlotte,Cuaderno,Spruce,V639,Upholstery,54,Vinyl,,12.00,24.00,https://example.invalid/v639,mock,2M rubs,Wipe
+Greenhouse,Botanical Vine,Sage,GH-BV-SAGE,Drapery,54,Linen,27x25,42.00,84.00,https://example.invalid/sage,mock,,Dry clean
+"""
+
+
+@pytest.fixture
+def ff_db(monkeypatch, tmp_path):
+    db = tmp_path / "empire.db"
+    photos = tmp_path / "photos"
+    photos.mkdir()
+    quotes = tmp_path / "quotes"
+    quotes.mkdir()
+    monkeypatch.setenv("EMPIRE_TASK_DB", str(db))
+    monkeypatch.setenv("EMPIRE_DB_PATH", str(db))
+    monkeypatch.setenv("FINE_FABRICS_PHOTOS_DIR", str(photos))
+    monkeypatch.setenv("FINE_FABRICS_SEED_DEMO", "0")
+    monkeypatch.delenv("STRIPE_SECRET_KEY", raising=False)
+
+    from app.db import database
+    importlib.reload(database)
+
+    from app.services.fine_fabrics import schema, catalog, importer, checkout, photos as photo_mod, preview
+
+    for mod in (schema, catalog, importer, checkout, photo_mod, preview):
+        importlib.reload(mod)
+
+    schema.ensure_fine_fabrics_schema()
+    from app.routers import fine_fabrics as router_mod
+
+    importlib.reload(router_mod)
+    yield {
+        "db": db,
+        "photos": photos,
+        "quotes": quotes,
+        "schema": schema,
+        "catalog": catalog,
+        "importer": importer,
+        "checkout": checkout,
+        "photos_mod": photo_mod,
+        "preview": preview,
+        "router": router_mod,
+    }
+
+
+def _client(router_mod) -> TestClient:
+    app = FastAPI()
+    app.include_router(router_mod.router, prefix="/api/v1")
+    return TestClient(app)
+
+
+def test_example_csv_has_required_columns():
+    text = EXAMPLE_CSV.read_text(encoding="utf-8")
+    header = text.splitlines()[0]
+    for col in (
+        "vendor",
+        "pattern",
+        "color",
+        "sku",
+        "category",
+        "width",
+        "content",
+        "repeat",
+        "net_price",
+        "list_price",
+        "product_url",
+        "notes",
+    ):
+        assert col in header
+    assert "Greenhouse" in GREENHOUSE_CSV.read_text(encoding="utf-8")
+
+
+def test_vendor_seed_flags(ff_db):
+    vendors = {v["slug"]: v for v in ff_db["catalog"].list_vendors()}
+    assert vendors["charlotte"]["online_sale_allowed"] is False
+    assert vendors["greenhouse"]["online_sale_allowed"] is False
+    assert vendors["kravet"]["online_sale_allowed"] is False
+    assert vendors["keyston"]["online_sale_allowed"] is False
+    assert vendors["sunbrella"]["online_sale_allowed"] is True
+    assert vendors["charlotte"]["brand_display_allowed"] is False
+    assert vendors["sunbrella"]["brand_display_allowed"] is True
+
+
+def test_import_and_public_catalog_hides_blocked_vendors(ff_db):
+    result = ff_db["importer"].import_csv_text(MOCK_CSV)
+    assert result["created"] == 4
+    public = ff_db["catalog"].list_catalog()
+    codes = {p["empire_code"] for p in public}
+    assert any(p["pattern"] == "Canvas" for p in public)
+    assert all(p["category"] in ff_db["schema"].CATEGORIES for p in public)
+    assert not any(p["pattern"] == "Cuaderno" for p in public)
+    assert not any(p["pattern"] == "Botanical Vine" for p in public)
+    hidden = ff_db["catalog"].list_catalog(include_hidden=True, owner=True)
+    assert len(hidden) == 4
+    spruce = next(p for p in hidden if p["sku"] == "V639")
+    assert spruce["empire_code"] == "V639-Spruce"
+    assert "V639-Spruce" not in codes
+
+
+def test_customer_payload_never_leaks_cost_or_vendor(ff_db):
+    ff_db["importer"].import_csv_text(MOCK_CSV)
+    public = ff_db["catalog"].list_catalog()
+    leaks = ff_db["catalog"].leaks_cost_or_vendor(public)
+    assert leaks == []
+    navy = next(p for p in public if p["color"] == "Navy")
+    assert navy["price_per_yard"] == round(18.50 * 1.85, 2)
+    assert navy["brand"] == "Sunbrella"
+    assert "net_price" not in navy
+    assert "vendor_name" not in navy
+    assert navy["empire_code"].startswith("L") or navy["empire_code"] == "L001-Navy"
+
+    hidden = ff_db["catalog"].list_catalog(include_hidden=True, owner=True)
+    spruce = next(p for p in hidden if p["color"] == "Spruce")
+    public_spruce = ff_db["catalog"].get_product(spruce["id"], owner=False, allow_hidden=True)
+    # Hidden vendor + brand_display_allowed false: no brand key, still no cost.
+    assert "brand" not in public_spruce
+    assert "net_price" not in public_spruce
+    assert public_spruce["price_per_yard"] == round(12.00 * 2.2, 2)
+
+
+def test_per_category_markup_override(ff_db):
+    ff_db["importer"].import_csv_text(MOCK_CSV)
+    vendors = {v["slug"]: v for v in ff_db["catalog"].list_vendors()}
+    from app.db.database import get_db
+
+    with get_db() as conn:
+        conn.execute(
+            "INSERT INTO ff_markups (vendor_id, category, markup) VALUES (?, 'Outdoor', 3.0)",
+            (vendors["sunbrella"]["id"],),
+        )
+    navy = next(p for p in ff_db["catalog"].list_catalog() if p["color"] == "Navy")
+    charcoal = next(p for p in ff_db["catalog"].list_catalog() if p["color"] == "Charcoal")
+    assert navy["price_per_yard"] == round(18.50 * 3.0, 2)
+    assert charcoal["price_per_yard"] == round(22.00 * 1.85, 2)
+
+
+def test_router_catalog_and_hidden_product_404(ff_db):
+    ff_db["importer"].import_csv_text(MOCK_CSV)
+    client = _client(ff_db["router"])
+    catalog = client.get("/api/v1/fine-fabrics/catalog").json()["products"]
+    assert len(catalog) == 2
+    hidden = ff_db["catalog"].list_catalog(include_hidden=True, owner=True)
+    spruce_id = next(p["id"] for p in hidden if p["color"] == "Spruce")
+    assert client.get(f"/api/v1/fine-fabrics/products/{spruce_id}").status_code == 404
+    navy_id = next(p["id"] for p in catalog if p["color"] == "Navy")
+    body = client.get(f"/api/v1/fine-fabrics/products/{navy_id}").json()
+    assert body["empire_code"]
+    assert "net_price" not in body
+    assert "Charlotte" not in str(body)
+    assert "Greenhouse" not in str(catalog)
+
+
+def test_csv_import_rejects_hand_entry_shape(ff_db):
+    client = _client(ff_db["router"])
+    bad = client.post(
+        "/api/v1/fine-fabrics/import",
+        files={"file": ("bad.csv", b"name,price\nFoo,1\n", "text/csv")},
+    )
+    assert bad.status_code == 400
+    ok = client.post(
+        "/api/v1/fine-fabrics/import",
+        files={"file": ("greenhouse_prices.csv", GREENHOUSE_CSV.read_bytes(), "text/csv")},
+    )
+    assert ok.status_code == 200
+    assert ok.json()["created"] == 3
+    # Greenhouse stays hidden on the customer catalog.
+    assert client.get("/api/v1/fine-fabrics/catalog").json()["products"] == []
+
+
+def test_owner_photo_slot_not_vendor_url(ff_db):
+    ff_db["importer"].import_csv_text(MOCK_CSV)
+    public = ff_db["catalog"].list_catalog()
+    navy = next(p for p in public if p["color"] == "Navy")
+    assert navy["placeholder"] is True
+    assert navy["image_url"] is None
+    client = _client(ff_db["router"])
+    png = (
+        b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01"
+        b"\x08\x02\x00\x00\x00\x90wS\xde\x00\x00\x00\x0cIDATx\x9cc``\x00\x00"
+        b"\x00\x04\x00\x01\xf6\x178U\x00\x00\x00\x00IEND\xaeB`\x82"
+    )
+    up = client.post(
+        f"/api/v1/fine-fabrics/products/{navy['id']}/photos",
+        files={"file": ("owner-swatch.png", png, "image/png")},
+    )
+    assert up.status_code == 200
+    assert up.json()["has_owner_photo"] is True
+    photo = client.get(f"/api/v1/fine-fabrics/photos/{navy['id']}")
+    assert photo.status_code == 200
+    assert photo.content[:8] == b"\x89PNG\r\n\x1a\n"
+
+
+def test_samples_and_preview_stub(ff_db, monkeypatch):
+    ff_db["importer"].import_csv_text(MOCK_CSV)
+    navy = next(p for p in ff_db["catalog"].list_catalog() if p["color"] == "Navy")
+    client = _client(ff_db["router"])
+
+    class Boom:
+        def __getattr__(self, name):
+            raise RuntimeError("no drawing engine")
+
+    import sys
+
+    monkeypatch.setitem(sys.modules, "app.routers.drawings", Boom())
+    preview = client.post("/api/v1/fine-fabrics/preview", json={"product_id": navy["id"]})
+    assert preview.status_code == 200
+    body = preview.json()
+    assert body["stub"] is True
+    assert "TODO" in body["todo"]
+    assert body["fabric"]["empire_code"] == navy["empire_code"]
+
+    samples = client.post(
+        "/api/v1/fine-fabrics/samples",
+        json={"name": "Ada", "email": "ada@example.com", "product_ids": [navy["id"]], "notes": "two clips"},
+    )
+    assert samples.status_code == 200
+    assert samples.json()["product_ids"] == [navy["id"]]
+
+
+def test_checkout_uses_quote_deposit_path_test_mode_only(ff_db, monkeypatch):
+    ff_db["importer"].import_csv_text(MOCK_CSV)
+    navy = next(p for p in ff_db["catalog"].list_catalog() if p["color"] == "Navy")
+    monkeypatch.setattr(ff_db["checkout"], "_quotes_dir", lambda: ff_db["quotes"])
+
+    captured = {}
+
+    def fake_link(quote_id, percent=None, success_url=None, cancel_url=None):
+        captured["quote_id"] = quote_id
+        captured["percent"] = percent
+        quote = (ff_db["quotes"] / f"{quote_id}.json").read_text()
+        captured["quote"] = quote
+        return {
+            "invoice": {"id": "inv-ff", "invoice_stage": "deposit"},
+            "pay_link": {
+                "checkout_url": "https://checkout.stripe.com/c/pay/cs_test_ff",
+                "stripe_configured": True,
+                "payment_status": "link_ready",
+            },
+            "payment_status": "link_ready",
+        }
+
+    import sys
+
+    monkeypatch.setitem(
+        sys.modules,
+        "app.routers.finance",
+        SimpleNamespace(create_quote_deposit_pay_link=fake_link, QUOTES_DIR=ff_db["quotes"]),
+    )
+
+    result = ff_db["checkout"].checkout_cart(
+        {"name": "Ada", "email": "ada@example.com", "phone": "555", "address": "10 Yard St"},
+        [{"product_id": navy["id"], "yards": 3}],
+    )
+    assert captured["percent"] == 100
+    assert "cs_test_ff" in result["pay_link"]["checkout_url"]
+    assert result["stripe_mode"] == "test"
+    assert result["subtotal"] == round(3 * navy["price_per_yard"], 2)
+    assert "18.50" not in captured["quote"]  # net cost must not ride the quote lines
+    assert navy["empire_code"] in captured["quote"]
+
+    monkeypatch.setenv("STRIPE_SECRET_KEY", "sk_live_not_allowed")
+    with pytest.raises(PermissionError, match="live"):
+        ff_db["checkout"].assert_test_mode()
+
+
+def test_checkout_refuses_hidden_vendor(ff_db):
+    ff_db["importer"].import_csv_text(MOCK_CSV)
+    hidden = ff_db["catalog"].list_catalog(include_hidden=True, owner=True)
+    spruce = next(p for p in hidden if p["color"] == "Spruce")
+    with pytest.raises(PermissionError):
+        ff_db["checkout"].resolve_cart_items([{"product_id": spruce["id"], "yards": 2}])
+
+
+def test_public_edge_blocks_owner_and_finance(ff_db):
+    from app.security.fabrics_public_edge import (
+        DENIAL_ERROR,
+        fabrics_public_edge_response,
+        is_public_fabrics_path_allowed,
+    )
+
+    assert is_public_fabrics_path_allowed("GET", "/api/v1/fine-fabrics/catalog")
+    assert is_public_fabrics_path_allowed("POST", "/api/v1/fine-fabrics/checkout")
+    assert not is_public_fabrics_path_allowed("POST", "/api/v1/fine-fabrics/import")
+    assert not is_public_fabrics_path_allowed("GET", "/api/v1/finance/invoices")
+    assert not is_public_fabrics_path_allowed("GET", "/api/v1/max/status")
+
+    request = Request(
+        {
+            "type": "http",
+            "method": "GET",
+            "path": "/api/v1/finance/invoices",
+            "headers": [(b"host", b"fabrics.empirebox.store")],
+        }
+    )
+    denied = fabrics_public_edge_response(request)
+    assert denied.status_code == 401
+    assert denied.body  # JSONResponse
+
+    local = Request(
+        {
+            "type": "http",
+            "method": "GET",
+            "path": "/api/v1/finance/invoices",
+            "headers": [(b"host", b"127.0.0.1:8000")],
+        }
+    )
+    assert fabrics_public_edge_response(local) is None
+    assert DENIAL_ERROR == "fabrics_public_edge_denied"
+
+
+def test_main_loads_fine_fabrics_router():
+    text = Path(__file__).resolve().parents[1] / "app" / "main.py"
+    src = text.read_text(encoding="utf-8")
+    assert 'load_router("app.routers.fine_fabrics", "/api/v1", ["fine-fabrics"])' in src
+    assert "fabrics_public_edge_response" in src

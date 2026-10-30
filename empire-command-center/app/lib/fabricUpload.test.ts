@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import { FABRIC_MAX_BYTES, fabricTooLarge, fabricUploadKind, isFabricImage } from './fabricUpload.ts';
-import { COMMAND_CENTER_DOCUMENT_TITLE, LUXE_DOCUMENT_TITLE, documentTitleForHost } from './luxeDocumentTitle.ts';
+import { COMMAND_CENTER_DOCUMENT_TITLE, FABRICS_DOCUMENT_TITLE, LUXE_DOCUMENT_TITLE, documentTitleForHost } from './luxeDocumentTitle.ts';
 
 test('fabric photos include HEIC and any other file goes to scans', () => {
   assert.equal(isFabricImage({ name: 'IMG_1.HEIC', type: '' }), true);
@@ -31,7 +31,9 @@ test('luxe host tab title is the designer intake title', () => {
   assert.equal(documentTitleForHost('Luxe.EmpireBox.Store:443'), LUXE_DOCUMENT_TITLE);
   assert.equal(documentTitleForHost('test-luxe.empirebox.store'), LUXE_DOCUMENT_TITLE);
   assert.equal(documentTitleForHost('studio.empirebox.store'), COMMAND_CENTER_DOCUMENT_TITLE);
+  assert.equal(documentTitleForHost('fabrics.empirebox.store'), FABRICS_DOCUMENT_TITLE);
   assert.equal(LUXE_DOCUMENT_TITLE, 'Empire Workroom · Designer Intake');
+  assert.equal(FABRICS_DOCUMENT_TITLE, 'Empire Fine Fabrics');
   const page = readFileSync(new URL('../intake/project/new/page.tsx', import.meta.url), 'utf8');
   assert.equal(page.includes('analyze the photos'), false);
 });

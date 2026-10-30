@@ -64,6 +64,7 @@ test('apex, www, luxe, studio, and forge are untouched by the workroom rule', ()
     'test-luxe.empirebox.store',
     'studio.empirebox.store',
     'forge.empirebox.store',
+    'fabrics.empirebox.store',
     'localhost:3005',
     '',
   ]) {
