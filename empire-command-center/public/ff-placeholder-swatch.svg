@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 480" role="img" aria-label="Fabric swatch placeholder">
+  <defs>
+    <pattern id="weave" width="20" height="20" patternUnits="userSpaceOnUse">
+      <rect width="20" height="20" fill="#efe6d6"/>
+      <path d="M0 20 L20 0 M-4 4 L4 -4 M16 24 L24 16" stroke="#d7c9ae" stroke-width="1"/>
+    </pattern>
+  </defs>
+  <rect width="400" height="480" fill="url(#weave)"/>
+  <rect x="24" y="24" width="352" height="432" fill="none" stroke="#b8912f" stroke-width="1.2" opacity=".7"/>
+  <text x="200" y="236" text-anchor="middle" font-family="Georgia, serif" font-size="22" fill="#5c5346" letter-spacing="4">SWATCH</text>
+  <text x="200" y="264" text-anchor="middle" font-family="Georgia, serif" font-size="12" fill="#8a7d6b" letter-spacing="3">OWNER PHOTO</text>
+</svg>

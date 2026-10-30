@@ -53,11 +53,20 @@ app.add_middleware(
 # Public Luxe edge — registered before no-cache so denial responses still
 # receive the cache headers. See app.security.luxe_public_edge.
 from app.security.luxe_public_edge import luxe_public_edge_response
+from app.security.fabrics_public_edge import fabrics_public_edge_response
 
 
 @app.middleware("http")
 async def luxe_public_edge_middleware(request: Request, call_next):
     denied = luxe_public_edge_response(request)
+    if denied is not None:
+        return denied
+    return await call_next(request)
+
+
+@app.middleware("http")
+async def fabrics_public_edge_middleware(request: Request, call_next):
+    denied = fabrics_public_edge_response(request)
     if denied is not None:
         return denied
     return await call_next(request)
@@ -237,6 +246,9 @@ load_router("app.routers.whatsapp", "/api/v1", ["whatsapp"])
 
 # Fabric Library
 load_router("app.routers.fabrics", "/api/v1/fabrics", ["fabrics"])
+
+# Empire Fine Fabrics public store (fabrics.empirebox.store)
+load_router("app.routers.fine_fabrics", "/api/v1", ["fine-fabrics"])
 
 # Unified Photo Storage
 load_router("app.routers.photos", "/api/v1", ["photos"])
