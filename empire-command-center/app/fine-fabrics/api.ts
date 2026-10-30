@@ -28,20 +28,27 @@ async function readJson<T>(path: string, init?: RequestInit): Promise<T> {
   return res.json();
 }
 
-export function swatchSrc(product: Pick<FabricProduct, 'image_url' | 'has_owner_photo'>): string {
-  if (product.has_owner_photo && product.image_url) {
-    if (product.image_url.startsWith('http')) return product.image_url;
-    if (typeof window === 'undefined') return product.image_url;
+export function swatchSrc(product: Pick<FabricProduct, 'image_url' | 'has_owner_photo' | 'has_vendor_image' | 'placeholder'>): string {
+  if (product.image_url) {
     return product.image_url;
   }
   return '/ff-placeholder-swatch.svg';
 }
 
+export function productTitle(product: Pick<FabricProduct, 'display_title' | 'brand' | 'sku' | 'pattern' | 'color' | 'empire_code'>): string {
+  if (product.display_title) return product.display_title;
+  const bits = [product.brand, product.sku, product.pattern, product.color].filter(Boolean);
+  return bits.join(' ') || product.empire_code || 'Fabric';
+}
+
 export const fabricsApi = {
-  catalog: (category?: string) =>
-    readJson<{ products: FabricProduct[] }>(
-      `/fine-fabrics/catalog${category ? `?category=${encodeURIComponent(category)}` : ''}`,
-    ),
+  catalog: (category?: string, search?: string) => {
+    const q = new URLSearchParams();
+    if (category) q.set('category', category);
+    if (search) q.set('search', search);
+    const suffix = q.toString() ? `?${q.toString()}` : '';
+    return readJson<{ products: FabricProduct[] }>(`/fine-fabrics/catalog${suffix}`);
+  },
   product: (id: string | number) => readJson<FabricProduct>(`/fine-fabrics/products/${id}`),
   estimateShipping: (body: { items?: Array<{ product_id: number; yards: number }>; sample_ids?: number[] }) =>
     readJson<ShippingEstimate>('/fine-fabrics/shipping/estimate', {
@@ -58,10 +65,15 @@ export const fabricsApi = {
       method: 'POST',
       body: JSON.stringify(body),
     }),
-  preview: (productId: number) =>
+  preview: (productId: number, itemType?: string) =>
     readJson<Record<string, unknown>>('/fine-fabrics/preview', {
       method: 'POST',
-      body: JSON.stringify({ product_id: productId }),
+      body: JSON.stringify({ product_id: productId, item_type: itemType || 'roman_shade' }),
+    }),
+  itemQuote: (body: Record<string, unknown>) =>
+    readJson<Record<string, unknown>>('/fine-fabrics/quote', {
+      method: 'POST',
+      body: JSON.stringify(body),
     }),
   admin: {
     products: () => readJson<{ products: FabricProduct[] }>('/fine-fabrics/admin/products'),

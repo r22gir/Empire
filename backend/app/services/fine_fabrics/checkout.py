@@ -250,3 +250,83 @@ def request_samples(customer: dict, product_ids: Iterable[int], notes: str = "")
             "Empire will confirm by email — no client email is sent automatically."
         ),
     }
+
+
+MOCKUP_JOB_TYPES = {
+    "pillow": "soft_seating",
+    "drapery_panel": "drapery_romans",
+    "roman_shade": "drapery_romans",
+    "sofa": "soft_seating",
+    "accent_chair": "soft_seating",
+    "bench": "soft_seating",
+}
+
+
+def request_item_quote(customer: dict, *, product_id: int, item_type: str) -> dict:
+    """Get a quote for this item — Workroom/LeadForge intake when available, else a stub."""
+    ensure_fine_fabrics_schema()
+    product = get_product(int(product_id), owner=False, allow_hidden=False)
+    if not product:
+        raise PermissionError(f"Product {product_id} is not for online sale")
+    if not (customer.get("name") or "").strip() or not (customer.get("email") or "").strip():
+        raise ValueError("Name and email are required")
+    item_type = (item_type or "pillow").strip() or "pillow"
+    message = (customer.get("message") or "").strip() or (
+        f"Fine Fabrics quote for {item_type.replace('_', ' ')} in "
+        f"{product['pattern']} {product['color']} {product['empire_code']}"
+    )
+    lead_id = None
+    engine = "stub"
+    try:
+        from app.services.workroom_lead_intake import WorkroomIntake, submit_intake
+        import asyncio
+
+        body = WorkroomIntake(
+            full_name=customer["name"].strip(),
+            email=customer["email"].strip(),
+            phone=(customer.get("phone") or "").strip() or None,
+            job_type=MOCKUP_JOB_TYPES.get(item_type, "other"),
+            message=message,
+            source="web",
+            consent_contact=True,
+            business="workroom",
+            capture_surface="api",
+            campaign="fine_fabrics_see_on_item",
+        )
+        result = asyncio.run(submit_intake(body))
+        lead_id = result.get("lead_id")
+        engine = "leadforge"
+    except Exception:
+        engine = "stub"
+    with get_db() as conn:
+        conn.execute(
+            """INSERT INTO ff_quote_requests
+               (product_id, item_type, customer_name, customer_email, customer_phone,
+                message, lead_id, status, engine, business)
+               VALUES (?, ?, ?, ?, ?, ?, ?, 'new', ?, 'workroom')""",
+            (
+                product["id"],
+                item_type,
+                customer.get("name") or "",
+                customer.get("email") or "",
+                customer.get("phone") or "",
+                message,
+                lead_id,
+                engine,
+            ),
+        )
+        request_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+    return {
+        "id": request_id,
+        "product_id": product["id"],
+        "empire_code": product["empire_code"],
+        "item_type": item_type,
+        "lead_id": lead_id,
+        "engine": engine,
+        "stub": engine == "stub",
+        "status": "new",
+        "message": (
+            "Quote request received. Empire Workroom will follow up — "
+            "no client email is sent automatically."
+        ),
+    }

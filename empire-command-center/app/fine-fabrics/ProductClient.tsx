@@ -2,8 +2,9 @@
 
 import { useRouter } from 'next/navigation';
 import { useState } from 'react';
-import { fabricsApi, swatchSrc } from './api';
+import { fabricsApi, productTitle, swatchSrc } from './api';
 import { addToCart, money } from './cartStore';
+import SeeOnItem from './SeeOnItem';
 import type { FabricProduct } from './types';
 
 export default function ProductClient({ product }: { product: FabricProduct }) {
@@ -12,10 +13,15 @@ export default function ProductClient({ product }: { product: FabricProduct }) {
   const [preview, setPreview] = useState<string>('');
   const [busy, setBusy] = useState(false);
   const unit = product.unit_label || 'yard';
+  const title = productTitle(product);
 
-  const specs = [
-    ['Pattern', product.pattern],
-    ['Color', product.color || '—'],
+  const specs: Array<[string, string]> = [];
+  if (product.brand) specs.push(['Brand', product.brand]);
+  if (product.sku) specs.push(['Vendor SKU', product.sku]);
+  specs.push(['Pattern', product.pattern]);
+  specs.push(['Color', product.color || '—']);
+  if (product.product_type === 'collection') specs.push(['Type', 'Collection / book']);
+  specs.push(
     ['Empire code', product.empire_code],
     ['Width', product.width || '—'],
     ['Content', product.content || '—'],
@@ -23,20 +29,22 @@ export default function ProductClient({ product }: { product: FabricProduct }) {
     ['Durability', product.durability || '—'],
     ['Care', product.care || '—'],
     ['Price', `${money(product.price_per_unit || product.price_per_yard)} per ${unit}`],
-  ];
-  if (product.brand) specs.splice(3, 0, ['Brand', product.brand]);
-  if (product.product_type === 'collection') specs.splice(1, 0, ['Type', 'Collection / book']);
+  );
 
   return (
     <main className="ff-main" id="cloth" style={{ paddingTop: 36 }}>
       <div className="ff-product">
         <div className="ff-swatch">
-          <img src={swatchSrc(product)} alt={`${product.pattern} ${product.color}`} />
+          <img src={swatchSrc(product)} alt={title} />
         </div>
         <div>
           <p className="ff-eyebrow">{product.category}</p>
-          <h1>{product.pattern}</h1>
-          <p className="ff-note">{product.color} · {product.empire_code}</p>
+          <h1>{title}</h1>
+          <p className="ff-note">
+            {product.sku ? `Vendor SKU ${product.sku}` : product.color}
+            {product.empire_code ? ` · Empire ${product.empire_code}` : ''}
+          </p>
+          {product.description ? <p className="ff-note">{product.description}</p> : null}
           <p style={{ fontSize: '1.4rem', margin: '16px 0 0' }}>
             {money(product.price_per_unit || product.price_per_yard)} <span className="ff-note">/ {unit}</span>
           </p>
@@ -93,9 +101,9 @@ export default function ProductClient({ product }: { product: FabricProduct }) {
             <a className="ff-btn-ghost" href={`/fine-fabrics/samples?id=${product.id}`}>Request sample</a>
           </div>
           {preview ? <p className="ff-banner" style={{ marginTop: 18 }}>{preview}</p> : null}
-          {!product.has_owner_photo ? (
+          {product.placeholder ? (
             <p className="ff-note" style={{ marginTop: 16 }}>
-              Placeholder swatch — owner photograph has not been added. Vendor images are never used.
+              Placeholder swatch — mill or owner photograph has not been added yet.
             </p>
           ) : null}
           <p className="ff-note" style={{ marginTop: 16 }}>
@@ -103,6 +111,7 @@ export default function ProductClient({ product }: { product: FabricProduct }) {
           </p>
         </div>
       </div>
+      <SeeOnItem product={product} />
     </main>
   );
 }

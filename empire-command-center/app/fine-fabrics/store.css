@@ -41,6 +41,19 @@
   background: none; border: 0; color: inherit; cursor: pointer; padding: 0;
 }
 .ff-nav a[aria-current="page"] { color: var(--ff-gold); }
+.ff-search { display: flex; gap: 8px; align-items: center; }
+.ff-search input {
+  border: 1px solid var(--ff-line); background: var(--ff-paper); color: var(--ff-ink);
+  padding: 8px 12px; font: inherit; min-width: min(240px, 42vw);
+}
+.ff-search button {
+  border: 1px solid var(--ff-ink); background: var(--ff-ink); color: var(--ff-bg);
+  padding: 8px 12px; letter-spacing: 0.12em; text-transform: uppercase; font-size: 11px; cursor: pointer;
+}
+.ff-sr {
+  position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+  overflow: hidden; clip: rect(0, 0, 0, 0); border: 0;
+}
 .ff-hero { padding: 10vh 6vw 64px; max-width: 920px; }
 .ff-eyebrow {
   color: var(--ff-gold); letter-spacing: 0.22em; text-transform: uppercase;
@@ -132,4 +145,31 @@
 .ff-admin-list li {
   display: flex; justify-content: space-between; gap: 12px; align-items: center;
   padding: 8px 0; border-bottom: 1px solid var(--ff-line);
+}
+.ff-see { margin: 64px 0 0; padding-top: 36px; border-top: 1px solid var(--ff-line); }
+.ff-see h2 { font-size: clamp(1.8rem, 4vw, 2.6rem); margin: 0 0 10px; }
+.ff-see-modes, .ff-see-items {
+  display: flex; flex-wrap: wrap; gap: 8px; margin: 16px 0;
+}
+.ff-see-modes button, .ff-see-items button {
+  border: 1px solid var(--ff-line); background: var(--ff-paper); color: var(--ff-ink);
+  padding: 8px 12px; letter-spacing: 0.1em; text-transform: uppercase; font-size: 11px; cursor: pointer;
+}
+.ff-see-modes button.is-on, .ff-see-items button.is-on { background: var(--ff-ink); color: var(--ff-bg); }
+.ff-see-stage {
+  background: var(--ff-paper); border: 1px solid var(--ff-line); max-width: 720px;
+}
+.ff-see-stage svg { width: 100%; height: auto; display: block; cursor: crosshair; }
+.ff-see-upload { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 12px 0; }
+.ff-look { margin: 36px 0 0; }
+.ff-look-row {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  gap: 14px; margin-top: 14px;
+}
+.ff-look-card {
+  border: 1px dashed var(--ff-line); padding: 12px; background: var(--ff-paper); opacity: 0.78;
+}
+.ff-look-swatch { height: 88px; background-size: cover; background-position: center; margin-bottom: 8px; }
+@media (max-width: 640px) {
+  .ff-see-items button { flex: 1 1 calc(50% - 8px); }
 }

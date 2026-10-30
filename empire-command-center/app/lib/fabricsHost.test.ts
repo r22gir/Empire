@@ -28,6 +28,7 @@ test('store pages, assets, and the fine-fabrics API pass through', () => {
     '/fine-fabrics/cart',
     '/fine-fabrics/checkout',
     '/fine-fabrics/samples',
+    '/fine-fabrics/quote',
     '/fine-fabrics/sitemap.xml',
     '/fine-fabrics/merchant.xml',
     '/_next/static/chunks/main.js',

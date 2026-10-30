@@ -22,36 +22,35 @@ DEFAULT_SHIPPING = {
     "handling_fee": 3.50,
 }
 
-# online_sale_allowed defaults false. Sunbrella is the only starter vendor
-# allowed on the public catalog. Brand names stay hidden unless the
-# per-vendor flag is flipped.
+# Rafael: starter mills are offered online with brand names visible.
+# Admin can still toggle either flag per vendor after seed.
 SEED_VENDORS: tuple[dict, ...] = (
     {
         "slug": "charlotte",
         "name": "Charlotte",
-        "online_sale_allowed": 0,
-        "brand_display_allowed": 0,
+        "online_sale_allowed": 1,
+        "brand_display_allowed": 1,
         "default_markup": 2.2,
     },
     {
         "slug": "greenhouse",
         "name": "Greenhouse",
-        "online_sale_allowed": 0,
-        "brand_display_allowed": 0,
+        "online_sale_allowed": 1,
+        "brand_display_allowed": 1,
         "default_markup": 2.0,
     },
     {
         "slug": "kravet",
         "name": "Kravet",
-        "online_sale_allowed": 0,
-        "brand_display_allowed": 0,
+        "online_sale_allowed": 1,
+        "brand_display_allowed": 1,
         "default_markup": 2.5,
     },
     {
         "slug": "keyston",
         "name": "Keyston",
-        "online_sale_allowed": 0,
-        "brand_display_allowed": 0,
+        "online_sale_allowed": 1,
+        "brand_display_allowed": 1,
         "default_markup": 2.0,
     },
     {
@@ -153,6 +152,26 @@ CREATE TABLE IF NOT EXISTS ff_shipping_rules (
     handling_fee REAL NOT NULL DEFAULT 3.50,
     FOREIGN KEY (vendor_id) REFERENCES ff_vendors(id)
 );
+
+CREATE TABLE IF NOT EXISTS ff_quote_requests (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    product_id INTEGER,
+    item_type TEXT,
+    customer_name TEXT NOT NULL,
+    customer_email TEXT NOT NULL,
+    customer_phone TEXT,
+    message TEXT,
+    lead_id INTEGER,
+    status TEXT NOT NULL DEFAULT 'new',
+    engine TEXT NOT NULL DEFAULT 'stub',
+    business TEXT NOT NULL DEFAULT 'workroom',
+    created_at TEXT DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS ff_meta (
+    key TEXT PRIMARY KEY,
+    value TEXT
+);
 """
 
 PRODUCT_EXTRA_COLUMNS = (
@@ -161,6 +180,10 @@ PRODUCT_EXTRA_COLUMNS = (
     ("color_family", "TEXT"),
     ("is_unsorted", "INTEGER NOT NULL DEFAULT 0"),
     ("sku_range", "TEXT"),
+    ("vendor_image_url", "TEXT"),
+    ("collection", "TEXT"),
+    ("description", "TEXT"),
+    ("brand", "TEXT"),
 )
 
 ORDER_EXTRA_COLUMNS = (
@@ -195,6 +218,7 @@ def ensure_fine_fabrics_schema(conn=None) -> None:
         _ensure_columns(conn, "ff_orders", ORDER_EXTRA_COLUMNS)
         _ensure_columns(conn, "ff_sample_requests", SAMPLE_EXTRA_COLUMNS)
         _seed_vendors(conn)
+        _align_visible_brands(conn)
         _seed_shipping_rules(conn)
     finally:
         if own:
@@ -247,6 +271,25 @@ def _seed_vendors(conn) -> None:
                 vendor["default_markup"],
             ),
         )
+
+
+def _align_visible_brands(conn) -> None:
+    """One-time flip of starter mills that were seeded hidden. Admin toggles after this persist."""
+    found = conn.execute(
+        "SELECT value FROM ff_meta WHERE key = 'rafael_visible_brands_v1'"
+    ).fetchone()
+    if found:
+        return
+    for vendor in SEED_VENDORS:
+        conn.execute(
+            """UPDATE ff_vendors
+               SET online_sale_allowed = ?, brand_display_allowed = ?, updated_at=datetime('now')
+               WHERE slug = ?""",
+            (vendor["online_sale_allowed"], vendor["brand_display_allowed"], vendor["slug"]),
+        )
+    conn.execute(
+        "INSERT INTO ff_meta (key, value) VALUES ('rafael_visible_brands_v1', '1')"
+    )
 
 
 def normalize_vendor_slug(name: str) -> str:

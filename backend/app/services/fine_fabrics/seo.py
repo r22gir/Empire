@@ -10,7 +10,7 @@ from __future__ import annotations
 import os
 from xml.sax.saxutils import escape
 
-from app.services.fine_fabrics.catalog import get_product, list_catalog
+from app.services.fine_fabrics.catalog import display_title, get_product, list_catalog
 
 PUBLIC_ORIGIN = os.getenv("FINE_FABRICS_PUBLIC_ORIGIN", "https://fabrics.empirebox.store")
 STORE_BRAND = "Empire Fine Fabrics"
@@ -25,26 +25,34 @@ def product_url(product_id: int) -> str:
 
 
 def product_seo(product: dict) -> dict:
+    brand = (product.get("brand") or "").strip()
+    sku = (product.get("sku") or "").strip()
     pattern = (product.get("pattern") or "").strip()
     color = (product.get("color") or "").strip()
     code = (product.get("empire_code") or "").strip()
-    title_bits = [b for b in (pattern, color) if b]
-    title = " ".join(title_bits) or STORE_BRAND
-    if code:
-        title = f"{title} · {code} | {STORE_BRAND}"
-    else:
-        title = f"{title} | {STORE_BRAND}"
+    name = (product.get("display_title") or "").strip() or display_title(product, brand or None)
+    title = f"{name} | {STORE_BRAND}" if name else STORE_BRAND
     unit = product.get("unit_label") or "yard"
     price = product.get("price_per_unit") or product.get("price_per_yard") or 0
     parts = [
-        f"{pattern} {color}".strip(),
+        name,
+        " ".join(bit for bit in (brand, sku, pattern) if bit),
         product.get("category") or "",
         product.get("content") or "",
         f"{product.get('width')} wide" if product.get("width") else "",
         f"{price:.2f} per {unit}" if price else "",
+        f"Empire code {code}" if code else "",
     ]
-    description = ". ".join(p for p in parts if p) or f"Cloth from {STORE_BRAND}."
-    brand = product.get("brand") or STORE_BRAND
+    seen: set[str] = set()
+    description_bits = []
+    for part in parts:
+        key = part.casefold()
+        if part and key not in seen:
+            seen.add(key)
+            description_bits.append(part)
+    description = ". ".join(description_bits) or f"Cloth from {STORE_BRAND}."
+    schema_brand = brand or STORE_BRAND
+    mpn = sku or code
     image = product.get("image_url")
     if image and image.startswith("/"):
         image = f"{public_origin()}{image}"
@@ -54,10 +62,11 @@ def product_seo(product: dict) -> dict:
     json_ld = {
         "@context": "https://schema.org",
         "@type": "Product",
-        "name": f"{pattern} {color}".strip() or code,
-        "sku": code,
+        "name": name or code or STORE_BRAND,
+        "sku": mpn,
+        "mpn": mpn,
         "description": description,
-        "brand": {"@type": "Brand", "name": brand},
+        "brand": {"@type": "Brand", "name": schema_brand},
         "image": image,
         "url": url,
         "offers": {
@@ -69,6 +78,8 @@ def product_seo(product: dict) -> dict:
             "itemCondition": "https://schema.org/NewCondition",
         },
     }
+    if code and code != mpn:
+        json_ld["identifier"] = code
     return {
         "title": title,
         "description": description,
@@ -112,24 +123,25 @@ def merchant_xml() -> str:
         seo = product_seo(product)
         image = seo["json_ld"]["image"]
         brand = product.get("brand") or STORE_BRAND
+        sku = (product.get("sku") or "").strip()
+        mpn = sku or (product.get("empire_code") or "")
         price = product.get("price_per_unit") or product.get("price_per_yard") or 0
-        items.append(
-            "\n".join(
-                [
-                    "    <item>",
-                    f"      <g:id>{escape(str(product.get('empire_code') or product['id']))}</g:id>",
-                    f"      <title>{escape(seo['json_ld']['name'])}</title>",
-                    f"      <description>{escape(seo['description'])}</description>",
-                    f"      <link>{escape(seo['canonical'])}</link>",
-                    f"      <g:image_link>{escape(str(image))}</g:image_link>",
-                    f"      <g:price>{float(price):.2f} USD</g:price>",
-                    "      <g:availability>in_stock</g:availability>",
-                    "      <g:condition>new</g:condition>",
-                    f"      <g:brand>{escape(str(brand))}</g:brand>",
-                    "    </item>",
-                ]
-            )
-        )
+        item_bits = [
+            "    <item>",
+            f"      <g:id>{escape(str(product.get('empire_code') or product['id']))}</g:id>",
+            f"      <title>{escape(seo['json_ld']['name'])}</title>",
+            f"      <description>{escape(seo['description'])}</description>",
+            f"      <link>{escape(seo['canonical'])}</link>",
+            f"      <g:image_link>{escape(str(image))}</g:image_link>",
+            f"      <g:price>{float(price):.2f} USD</g:price>",
+            "      <g:availability>in_stock</g:availability>",
+            "      <g:condition>new</g:condition>",
+            f"      <g:brand>{escape(str(brand))}</g:brand>",
+        ]
+        if mpn:
+            item_bits.append(f"      <g:mpn>{escape(str(mpn))}</g:mpn>")
+        item_bits.append("    </item>")
+        items.append("\n".join(item_bits))
     return (
         '<?xml version="1.0" encoding="UTF-8"?>\n'
         '<rss version="2.0" xmlns:g="http://base.google.com/ns/1.0">\n'

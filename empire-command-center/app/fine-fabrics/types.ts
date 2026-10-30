@@ -2,6 +2,8 @@ export type FabricProduct = {
   id: number;
   pattern: string;
   color: string;
+  sku?: string;
+  display_title?: string;
   empire_code: string;
   category: string;
   width: string;
@@ -16,8 +18,11 @@ export type FabricProduct = {
   product_type?: string;
   image_url: string | null;
   has_owner_photo: boolean;
+  has_vendor_image?: boolean;
   placeholder: boolean;
   brand?: string;
+  collection?: string;
+  description?: string;
   seo?: {
     title: string;
     description: string;
@@ -31,6 +36,8 @@ export type CartLine = {
   yards: number;
   pattern: string;
   color: string;
+  sku?: string;
+  display_title?: string;
   empire_code: string;
   price_per_yard: number;
   unit?: string;

@@ -11,7 +11,17 @@ from app.services.fine_fabrics.catalog import get_product
 
 TODO = (
     "TODO: wire selected fabric into the drawing engine/mockup when the "
-    "renderer accepts a live fabric handoff (sku + color + empire_code)."
+    "renderer accepts a live fabric handoff (sku + color + empire_code). "
+    "The store page uses client-side tiled templates in the meantime."
+)
+
+MOCKUP_ITEMS = (
+    "pillow",
+    "drapery_panel",
+    "roman_shade",
+    "sofa",
+    "accent_chair",
+    "bench",
 )
 
 
@@ -29,6 +39,7 @@ def preview_fabric(product_id: int, *, item_type: str = "roman_shade") -> dict:
         "width": product["width"],
         "repeat": product["repeat"],
         "item_type": item_type,
+        "mockup_items": list(MOCKUP_ITEMS),
     }
 
     try:

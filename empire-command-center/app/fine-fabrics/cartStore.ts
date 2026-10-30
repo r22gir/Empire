@@ -37,6 +37,8 @@ export function addToCart(product: FabricProduct, yards: number) {
       yards,
       pattern: product.pattern,
       color: product.color,
+      sku: product.sku,
+      display_title: product.display_title,
       empire_code: product.empire_code,
       price_per_yard: product.price_per_yard,
       unit: product.unit,

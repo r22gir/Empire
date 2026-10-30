@@ -15,6 +15,7 @@ from starlette.requests import Request
 EXAMPLE_CSV = Path(__file__).resolve().parents[1] / "app" / "data" / "fine_fabrics" / "example_import.csv"
 GREENHOUSE_CSV = Path(__file__).resolve().parents[1] / "app" / "data" / "fine_fabrics" / "greenhouse_prices.csv"
 CHARLOTTE_CSV = Path(__file__).resolve().parents[1] / "app" / "data" / "fine_fabrics" / "charlotte_prices.csv"
+BASE_SELECTION_CSV = Path(__file__).resolve().parents[1] / "app" / "data" / "fine_fabrics" / "base_selection_import.csv"
 
 MOCK_CSV = """vendor,pattern,color,sku,category,width,content,repeat,net_price,list_price,product_url,notes,durability,care
 Sunbrella,Canvas,Navy,5408-0000,Outdoor,54,100% Acrylic,,18.50,36.00,https://example.invalid/navy,mock,15000h,Spot clean
@@ -100,29 +101,32 @@ def test_example_csv_has_required_columns():
 
 def test_vendor_seed_flags(ff_db):
     vendors = {v["slug"]: v for v in ff_db["catalog"].list_vendors()}
-    assert vendors["charlotte"]["online_sale_allowed"] is False
-    assert vendors["greenhouse"]["online_sale_allowed"] is False
-    assert vendors["kravet"]["online_sale_allowed"] is False
-    assert vendors["keyston"]["online_sale_allowed"] is False
-    assert vendors["sunbrella"]["online_sale_allowed"] is True
-    assert vendors["charlotte"]["brand_display_allowed"] is False
-    assert vendors["sunbrella"]["brand_display_allowed"] is True
+    for slug in ("charlotte", "greenhouse", "kravet", "keyston", "sunbrella"):
+        assert vendors[slug]["online_sale_allowed"] is True
+        assert vendors[slug]["brand_display_allowed"] is True
 
 
-def test_import_and_public_catalog_hides_blocked_vendors(ff_db):
+def _hide_vendor(ff_db, slug: str) -> None:
+    from app.db.database import get_db
+
+    vendors = {v["slug"]: v for v in ff_db["catalog"].list_vendors()}
+    with get_db() as conn:
+        conn.execute(
+            "UPDATE ff_vendors SET online_sale_allowed=0, brand_display_allowed=0 WHERE id=?",
+            (vendors[slug]["id"],),
+        )
+
+
+def test_import_and_public_catalog_shows_starter_mills(ff_db):
     result = ff_db["importer"].import_csv_text(MOCK_CSV)
     assert result["created"] == 4
     public = ff_db["catalog"].list_catalog()
-    codes = {p["empire_code"] for p in public}
-    assert any(p["pattern"] == "Canvas" for p in public)
+    patterns = {p["pattern"] for p in public}
+    assert {"Canvas", "Heritage", "Cuaderno", "Botanical Vine"} <= patterns
     assert all(p["category"] in ff_db["schema"].CATEGORIES for p in public)
-    assert not any(p["pattern"] == "Cuaderno" for p in public)
-    assert not any(p["pattern"] == "Botanical Vine" for p in public)
-    hidden = ff_db["catalog"].list_catalog(include_hidden=True, owner=True)
-    assert len(hidden) == 4
-    spruce = next(p for p in hidden if p["sku"] == "V639")
+    spruce = next(p for p in public if p["pattern"] == "Cuaderno")
     assert spruce["empire_code"] == "V639-Spruce"
-    assert "V639-Spruce" not in codes
+    assert spruce["brand"] == "Charlotte"
 
 
 def test_customer_payload_never_leaks_cost_or_vendor(ff_db):
@@ -140,10 +144,14 @@ def test_customer_payload_never_leaks_cost_or_vendor(ff_db):
     hidden = ff_db["catalog"].list_catalog(include_hidden=True, owner=True)
     spruce = next(p for p in hidden if p["color"] == "Spruce")
     public_spruce = ff_db["catalog"].get_product(spruce["id"], owner=False, allow_hidden=True)
-    # Hidden vendor + brand_display_allowed false: no brand key, still no cost.
-    assert "brand" not in public_spruce
+    assert public_spruce["brand"] == "Charlotte"
     assert "net_price" not in public_spruce
+    assert "vendor_name" not in public_spruce
     assert public_spruce["price_per_yard"] == round(12.00 * 2.2, 2)
+    _hide_vendor(ff_db, "charlotte")
+    hidden_spruce = ff_db["catalog"].get_product(spruce["id"], owner=False, allow_hidden=True)
+    assert "brand" not in hidden_spruce
+    assert "net_price" not in hidden_spruce
 
 
 def test_per_category_markup_override(ff_db):
@@ -166,16 +174,18 @@ def test_router_catalog_and_hidden_product_404(ff_db):
     ff_db["importer"].import_csv_text(MOCK_CSV)
     client = _client(ff_db["router"])
     catalog = client.get("/api/v1/fine-fabrics/catalog").json()["products"]
-    assert len(catalog) == 2
-    hidden = ff_db["catalog"].list_catalog(include_hidden=True, owner=True)
-    spruce_id = next(p["id"] for p in hidden if p["color"] == "Spruce")
+    assert len(catalog) == 4
+    spruce_id = next(p["id"] for p in catalog if p["color"] == "Spruce")
+    spruce = client.get(f"/api/v1/fine-fabrics/products/{spruce_id}").json()
+    assert spruce["brand"] == "Charlotte"
+    assert "net_price" not in spruce
+    _hide_vendor(ff_db, "charlotte")
     assert client.get(f"/api/v1/fine-fabrics/products/{spruce_id}").status_code == 404
     navy_id = next(p["id"] for p in catalog if p["color"] == "Navy")
     body = client.get(f"/api/v1/fine-fabrics/products/{navy_id}").json()
     assert body["empire_code"]
     assert "net_price" not in body
-    assert "Charlotte" not in str(body)
-    assert "Greenhouse" not in str(catalog)
+    assert body["brand"] == "Sunbrella"
 
 
 def test_csv_import_rejects_hand_entry_shape(ff_db):
@@ -192,8 +202,9 @@ def test_csv_import_rejects_hand_entry_shape(ff_db):
     assert ok.status_code == 200
     assert ok.json()["created"] == 3
     assert ok.json()["format"] == "greenhouse"
-    # Greenhouse stays hidden on the customer catalog.
-    assert client.get("/api/v1/fine-fabrics/catalog").json()["products"] == []
+    greenhouse = client.get("/api/v1/fine-fabrics/catalog").json()["products"]
+    assert len(greenhouse) == 3
+    assert all(p.get("brand") == "Greenhouse" for p in greenhouse)
 
 
 def test_owner_photo_slot_not_vendor_url(ff_db):
@@ -248,8 +259,7 @@ def test_samples_and_preview_stub(ff_db, monkeypatch):
     assert body["shipping_total"] >= 1
     assert body["shipping"]["never_free"] is True
     assert body["shipping"]["free_shipping"] is False
-    assert "Charlotte" not in str(body)
-    assert "Greenhouse" not in str(body)
+    assert "net_price" not in str(body)
 
 
 def test_checkout_uses_quote_deposit_path_test_mode_only(ff_db, monkeypatch):
@@ -306,8 +316,8 @@ def test_checkout_uses_quote_deposit_path_test_mode_only(ff_db, monkeypatch):
 
 def test_checkout_refuses_hidden_vendor(ff_db):
     ff_db["importer"].import_csv_text(MOCK_CSV)
-    hidden = ff_db["catalog"].list_catalog(include_hidden=True, owner=True)
-    spruce = next(p for p in hidden if p["color"] == "Spruce")
+    spruce = next(p for p in ff_db["catalog"].list_catalog() if p["color"] == "Spruce")
+    _hide_vendor(ff_db, "charlotte")
     with pytest.raises(PermissionError):
         ff_db["checkout"].resolve_cart_items([{"product_id": spruce["id"], "yards": 2}])
 
@@ -322,6 +332,7 @@ def test_public_edge_blocks_owner_and_finance(ff_db):
     assert is_public_fabrics_path_allowed("GET", "/api/v1/fine-fabrics/catalog")
     assert is_public_fabrics_path_allowed("POST", "/api/v1/fine-fabrics/checkout")
     assert is_public_fabrics_path_allowed("POST", "/api/v1/fine-fabrics/shipping/estimate")
+    assert is_public_fabrics_path_allowed("POST", "/api/v1/fine-fabrics/quote")
     assert is_public_fabrics_path_allowed("GET", "/api/v1/fine-fabrics/sitemap.xml")
     assert is_public_fabrics_path_allowed("GET", "/api/v1/fine-fabrics/merchant.xml")
     assert not is_public_fabrics_path_allowed("POST", "/api/v1/fine-fabrics/import")
@@ -376,7 +387,9 @@ def test_greenhouse_native_mapping(ff_db):
     assert row["pattern"] == "S8090"
     assert row["color"] == "BRINDLE"
     assert row["vendor_slug"] == "greenhouse"
-    assert ff_db["catalog"].list_catalog() == []
+    public = ff_db["catalog"].list_catalog()
+    assert any(p["pattern"] == "S8090" for p in public)
+    assert any(p.get("brand") == "Greenhouse" for p in public)
 
 
 def test_charlotte_collection_unit_and_unsorted(ff_db):
@@ -397,7 +410,8 @@ def test_charlotte_collection_unit_and_unsorted(ff_db):
     assert mystery["category"] == "Unsorted"
     assert mystery["unit"] == "roll"
     public = ff_db["catalog"].list_catalog()
-    assert public == []
+    assert {p["pattern"] for p in public} == {"Cuaderno Book", "Hearth Tile"}
+    assert all(p.get("brand") == "Charlotte" for p in public)
     queue = ff_db["catalog"].list_unsorted()
     assert [p["pattern"] for p in queue] == ["Mystery Book"]
 
@@ -507,20 +521,34 @@ def test_sitemap_and_merchant_exclude_hidden_and_unsorted(ff_db):
 Sunbrella,Lost Cloth,Fog,LOST-1,,54,Acrylic,,19.00,38.00,,blank category
 """
     ff_db["importer"].import_csv_text(extra)
-    navy = next(p for p in ff_db["catalog"].list_catalog() if p["color"] == "Navy")
+    public = ff_db["catalog"].list_catalog()
+    navy = next(p for p in public if p["color"] == "Navy")
+    spruce = next(p for p in public if p["color"] == "Spruce")
+    lost = next(p for p in ff_db["catalog"].list_unsorted() if p["pattern"] == "Lost Cloth")
     sitemap = ff_db["seo"].sitemap_xml()
     merchant = ff_db["seo"].merchant_xml()
     assert f"/fine-fabrics/{navy['id']}" in sitemap
+    assert f"/fine-fabrics/{spruce['id']}" in sitemap
+    assert f"/fine-fabrics/{lost['id']}" not in sitemap
     assert navy["empire_code"] in merchant
-    assert "Cuaderno" not in sitemap
-    assert "Cuaderno" not in merchant
-    assert "Lost Cloth" not in sitemap
+    assert "Cuaderno" in merchant
     assert "Lost Cloth" not in merchant
-    assert "Charlotte" not in merchant
-    assert "Greenhouse" not in merchant
+    assert "Charlotte" in merchant
+    assert "Sunbrella" in merchant
+    assert f"<g:mpn>{navy['sku']}</g:mpn>" in merchant
+    assert f"<g:brand>{navy['brand']}</g:brand>" in merchant
     public = ff_db["seo"].get_public_product(navy["id"])
     assert public["seo"]["json_ld"]["@type"] == "Product"
+    assert public["seo"]["json_ld"]["sku"] == navy["sku"]
+    assert public["seo"]["json_ld"]["mpn"] == navy["sku"]
+    assert public["seo"]["json_ld"]["brand"]["name"] == "Sunbrella"
+    assert navy["sku"] in public["seo"]["title"]
+    assert "Sunbrella" in public["seo"]["title"]
     assert "net_price" not in public
+    _hide_vendor(ff_db, "greenhouse")
+    hidden_feed = ff_db["seo"].merchant_xml()
+    assert "Botanical Vine" not in hidden_feed
+    assert "Greenhouse" not in hidden_feed
     client = _client(ff_db["router"])
     sm = client.get("/api/v1/fine-fabrics/sitemap.xml")
     assert sm.status_code == 200
@@ -573,3 +601,91 @@ def test_admin_actual_shipping_endpoint(ff_db, monkeypatch):
     assert ok.json()["bill_shortfall"] is True
     shorts = client.get("/api/v1/fine-fabrics/admin/shortfalls", headers={"host": "127.0.0.1:8000"})
     assert shorts.json()["shortfalls"]
+
+
+def test_display_title_and_folded_sku_search(ff_db):
+    csv = """vendor,brand,pattern,color,sku,category,width,content,repeat,net_price,list_price,product_url,notes
+Kravet,Kravet,Indienne,Fennel,PEF100019.34,Drapery,54,Linen,,48.00,96.00,,mock
+"""
+    ff_db["importer"].import_csv_text(csv)
+    catalog = ff_db["catalog"]
+    assert catalog.fold_sku("PEF100019.34") == "pef10001934"
+    assert catalog.fold_sku("PEF-100019-34") == "pef10001934"
+    assert catalog.display_title(
+        {"sku": "PEF100019.34", "pattern": "Indienne", "color": "Fennel"},
+        "Kravet",
+    ) == "Kravet PEF100019.34 Indienne Fennel"
+    row = next(p for p in catalog.list_catalog() if p["sku"] == "PEF100019.34")
+    assert row["display_title"] == "Kravet PEF100019.34 Indienne Fennel"
+    assert row["brand"] == "Kravet"
+    for needle in ("PEF100019.34", "PEF10001934", "pef-100019-34", "Indienne", "Kravet"):
+        hits = catalog.list_catalog(search=needle)
+        assert hits and hits[0]["sku"] == "PEF100019.34", needle
+    client = _client(ff_db["router"])
+    found = client.get("/api/v1/fine-fabrics/catalog?search=PEF10001934").json()["products"]
+    assert found[0]["display_title"] == "Kravet PEF100019.34 Indienne Fennel"
+    seo = ff_db["seo"].get_public_product(row["id"])["seo"]
+    assert seo["title"].startswith("Kravet PEF100019.34 Indienne Fennel")
+    assert seo["json_ld"]["sku"] == "PEF100019.34"
+    assert seo["json_ld"]["mpn"] == "PEF100019.34"
+    assert seo["json_ld"]["brand"]["name"] == "Kravet"
+    assert "PEF100019.34" in seo["description"]
+    merchant = ff_db["seo"].merchant_xml()
+    assert "<g:mpn>PEF100019.34</g:mpn>" in merchant
+    assert "<g:brand>Kravet</g:brand>" in merchant
+
+
+def test_base_selection_import_empire_code_and_vendor_image(ff_db):
+    text = BASE_SELECTION_CSV.read_text(encoding="utf-8")
+    fmt, rows = ff_db["importer"].parse_csv(text, filename="base_selection_import.csv")
+    assert fmt == "canonical"
+    assert "empire_code" in text.splitlines()[0]
+    result = ff_db["importer"].import_csv_text(text, filename="base_selection_import.csv")
+    assert result["created"] == 5
+    public = ff_db["catalog"].list_catalog()
+    book = next(p for p in public if p["product_type"] == "collection")
+    assert book["empire_code"] == "C-CUADERNO-BOOK"
+    assert book["has_vendor_image"] is True
+    brindled = next(p for p in public if p["sku"] == "S8090")
+    assert brindled["empire_code"] == "GH-S8090-BRINDLE"
+    assert brindled["brand"] == "Greenhouse"
+    assert brindled["display_title"] == "Greenhouse S8090 BRINDLE"
+
+
+def test_item_quote_stub_and_preview_mockup_items(ff_db):
+    ff_db["importer"].import_csv_text(MOCK_CSV)
+    navy = next(p for p in ff_db["catalog"].list_catalog() if p["color"] == "Navy")
+    quoted = ff_db["checkout"].request_item_quote(
+        {"name": "Ada", "email": "ada@example.com", "message": "roman shade"},
+        product_id=navy["id"],
+        item_type="roman_shade",
+    )
+    assert quoted["engine"] in {"stub", "leadforge"}
+    assert quoted["item_type"] == "roman_shade"
+    assert quoted["empire_code"] == navy["empire_code"]
+    assert quoted["status"] == "new"
+    preview = ff_db["preview"].preview_fabric(navy["id"], item_type="pillow")
+    assert preview["fabric"]["mockup_items"] == [
+        "pillow",
+        "drapery_panel",
+        "roman_shade",
+        "sofa",
+        "accent_chair",
+        "bench",
+    ]
+    client = _client(ff_db["router"])
+    body = client.post(
+        "/api/v1/fine-fabrics/quote",
+        json={"product_id": navy["id"], "item_type": "pillow", "name": "Ada", "email": "ada@example.com"},
+    )
+    assert body.status_code == 200
+    assert body.json()["item_type"] == "pillow"
+    assert body.json()["engine"] in {"stub", "leadforge"}
+
+
+def test_preview_catalog_has_twenty_mock_skus():
+    text = Path(__file__).resolve().parents[1] / "app" / "data" / "fine_fabrics" / "preview_catalog.csv"
+    rows = [line for line in text.read_text(encoding="utf-8").splitlines()[1:] if line.strip()]
+    assert len(rows) >= 20
+    assert "PEF100019.34" in text.read_text(encoding="utf-8")
+    assert "Indienne" in text.read_text(encoding="utf-8")

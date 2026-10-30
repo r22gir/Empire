@@ -43,10 +43,10 @@ export default function CartPage() {
           <div className="ff-lines">
             {lines.map((line) => (
               <div className="ff-line" key={line.product_id}>
-                <img src={swatchSrc({ image_url: line.image_url, has_owner_photo: Boolean(line.image_url) })} alt="" />
+                <img src={swatchSrc({ image_url: line.image_url, has_owner_photo: Boolean(line.image_url), placeholder: !line.image_url })} alt="" />
                 <div>
-                  <strong>{line.pattern}</strong>
-                  <div className="ff-note">{line.color} · {line.empire_code}</div>
+                  <strong>{line.display_title || line.pattern}</strong>
+                  <div className="ff-note">{line.sku ? `SKU ${line.sku}` : line.color} · Empire {line.empire_code}</div>
                   <div className="ff-note">{money(line.price_per_yard)} / {line.unit_label || 'yd'}</div>
                 </div>
                 <div>

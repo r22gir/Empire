@@ -10,10 +10,11 @@ vendor freight plus handling and is never free.
 from __future__ import annotations
 
 import os
+from pathlib import Path
 from typing import List, Optional
 
 from fastapi import APIRouter, File, HTTPException, Request, UploadFile
-from fastapi.responses import FileResponse, Response
+from fastapi.responses import FileResponse, RedirectResponse, Response
 from pydantic import BaseModel, Field
 
 from app.db.database import dict_rows, get_db
@@ -30,7 +31,13 @@ from app.services.fine_fabrics.importer import (
     import_from_dir,
     list_import_files,
 )
-from app.services.fine_fabrics.photos import photos_dir, read_photo, save_owner_photo
+from app.services.fine_fabrics.photos import (
+    generate_preview_swatch,
+    photos_dir,
+    read_photo,
+    resolve_product_image,
+    save_owner_photo,
+)
 from app.services.fine_fabrics.preview import preview_fabric
 from app.services.fine_fabrics.schema import ensure_fine_fabrics_schema
 from app.services.fine_fabrics.seo import get_public_product, merchant_xml, sitemap_xml
@@ -111,6 +118,15 @@ class DirImportIn(BaseModel):
     filename: Optional[str] = None
 
 
+class ItemQuoteIn(BaseModel):
+    product_id: int
+    item_type: str = "pillow"
+    name: str
+    email: str
+    phone: str = ""
+    message: str = ""
+
+
 def _owner_host(request: Request) -> bool:
     host = (request.headers.get("host") or "").split(":")[0].lower()
     return host not in {"fabrics.empirebox.store", "test-fabrics.empirebox.store"}
@@ -149,12 +165,15 @@ def product_photo(product_id: int):
     product = get_product(product_id, owner=True, allow_hidden=False)
     if not product:
         raise HTTPException(404, "Photo not found")
-    stored = (product.get("image_path") or "").strip()
+    image = resolve_product_image(product)
+    if image.get("redirect_url"):
+        return RedirectResponse(image["redirect_url"], status_code=302)
+    stored = (image.get("local_name") or product.get("image_path") or "").strip()
     if not stored:
-        raise HTTPException(404, "No owner photo for this fabric")
-    path = read_photo(stored)
+        raise HTTPException(404, "No photo for this fabric")
+    path = read_photo(Path(stored).name)
     if path is None:
-        candidate = photos_dir() / stored
+        candidate = photos_dir() / Path(stored).name
         if not candidate.is_file():
             raise HTTPException(404, "Photo file missing")
         path = candidate
@@ -221,6 +240,27 @@ def preview(payload: PreviewIn):
         return preview_fabric(payload.product_id, item_type=payload.item_type)
     except LookupError as exc:
         raise HTTPException(404, str(exc)) from exc
+
+
+@router.post("/quote")
+def item_quote(payload: ItemQuoteIn):
+    from app.services.fine_fabrics.checkout import request_item_quote
+
+    try:
+        return request_item_quote(
+            {
+                "name": payload.name,
+                "email": payload.email,
+                "phone": payload.phone,
+                "message": payload.message,
+            },
+            product_id=payload.product_id,
+            item_type=payload.item_type,
+        )
+    except PermissionError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
 
 
 @router.get("/sitemap.xml")
@@ -425,23 +465,49 @@ async def upload_photo(product_id: int, request: Request, file: UploadFile = Fil
     return get_product(product_id, owner=True, allow_hidden=True)
 
 
+def attach_preview_swatches() -> int:
+    """Generate local mock mill swatches for demo rows that have no photo."""
+    written = 0
+    dest = photos_dir()
+    with get_db() as conn:
+        rows = dict_rows(
+            conn.execute(
+                "SELECT id, sku, pattern, color, empire_code, image_path FROM ff_products"
+            ).fetchall()
+        )
+        for row in rows:
+            existing = (row.get("image_path") or "").strip()
+            if existing and (dest / Path(existing).name).is_file():
+                continue
+            name = generate_preview_swatch(row, dest)
+            conn.execute(
+                "UPDATE ff_products SET image_path = ?, updated_at=datetime('now') WHERE id = ?",
+                (name, row["id"]),
+            )
+            written += 1
+    return written
+
+
 def seed_demo_catalog() -> dict | None:
-    """Load the bundled mock CSV when FINE_FABRICS_SEED_DEMO=1 and catalog is empty."""
+    """Load the bundled mock preview catalog when FINE_FABRICS_SEED_DEMO=1."""
     if os.getenv("FINE_FABRICS_SEED_DEMO") != "1":
         return None
     ensure_fine_fabrics_schema()
     with get_db() as conn:
         count = conn.execute("SELECT COUNT(*) FROM ff_products").fetchone()[0]
         if count:
+            attach_preview_swatches()
             return None
-    example = (
-        os.path.join(os.path.dirname(__file__), "..", "data", "fine_fabrics", "example_import.csv")
-    )
-    path = os.path.abspath(example)
-    if not os.path.isfile(path):
+    data_root = Path(__file__).resolve().parents[1] / "data" / "fine_fabrics"
+    preview = data_root / "preview_catalog.csv"
+    example = data_root / "example_import.csv"
+    path = preview if preview.is_file() else example
+    if not path.is_file():
         return None
     with open(path, encoding="utf-8") as handle:
-        return import_csv_text(handle.read(), filename="example_import.csv")
+        result = import_csv_text(handle.read(), filename=path.name)
+    result["swatches"] = attach_preview_swatches()
+    return result
 
 
 try:

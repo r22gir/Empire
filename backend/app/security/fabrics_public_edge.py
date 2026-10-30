@@ -46,6 +46,7 @@ _PUBLIC_POST_EXACT = frozenset(
         "/api/v1/fine-fabrics/samples",
         "/api/v1/fine-fabrics/preview",
         "/api/v1/fine-fabrics/shipping/estimate",
+        "/api/v1/fine-fabrics/quote",
     }
 )
 

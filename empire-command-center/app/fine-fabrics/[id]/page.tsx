@@ -23,7 +23,7 @@ export async function generateMetadata(
   }
   const seo = product.seo;
   return {
-    title: seo?.title || `${product.pattern} ${product.color} | Empire Fine Fabrics`,
+    title: seo?.title || product.display_title || `${product.pattern} ${product.color} | Empire Fine Fabrics`,
     description: seo?.description,
     alternates: seo?.canonical ? { canonical: seo.canonical } : undefined,
     openGraph: {

@@ -2,7 +2,7 @@
 
 import { useSearchParams } from 'next/navigation';
 import { Suspense, useEffect, useState } from 'react';
-import { fabricsApi } from '../api';
+import { fabricsApi, productTitle } from '../api';
 import { money } from '../cartStore';
 import type { FabricProduct, ShippingEstimate } from '../types';
 
@@ -71,7 +71,7 @@ function SamplesBody() {
                   );
                 }}
               />
-              {' '}{product.pattern} {product.color} · {product.empire_code}
+              {' '}{productTitle(product)} · Empire {product.empire_code}
             </label>
           ))}
         </fieldset>

@@ -73,13 +73,23 @@ def next_sequence(prefix: str, existing: Iterable[str]) -> int:
     return highest + 1
 
 
+def supplied_empire_code(raw: str | None) -> str | None:
+    """CSV empire_code wins over auto-numbering when the cell is filled."""
+    code = (raw or "").strip()
+    return code or None
+
+
 def allocate_empire_code(
     category: str,
     color: str,
     *,
     sku: str | None = None,
     existing_codes: Iterable[str] = (),
+    supplied: str | None = None,
 ) -> str:
+    given = supplied_empire_code(supplied)
+    if given:
+        return given
     known = lookup_known_code(sku, color)
     existing = {str(c) for c in existing_codes if c}
     if known and known not in existing:

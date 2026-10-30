@@ -1,8 +1,8 @@
 'use client';
 
 import Link from 'next/link';
-import { usePathname } from 'next/navigation';
-import { useEffect, useState } from 'react';
+import { usePathname, useRouter, useSearchParams } from 'next/navigation';
+import { Suspense, useEffect, useState } from 'react';
 import { cartCount } from './cartStore';
 
 const NAV = [
@@ -13,6 +13,39 @@ const NAV = [
   { href: '/fine-fabrics?cat=Other', label: 'Other' },
   { href: '/fine-fabrics/samples', label: 'Samples' },
 ];
+
+function SearchBox() {
+  const router = useRouter();
+  const params = useSearchParams();
+  const [q, setQ] = useState(params.get('q') || '');
+
+  useEffect(() => {
+    setQ(params.get('q') || '');
+  }, [params]);
+
+  return (
+    <form
+      className="ff-search"
+      role="search"
+      onSubmit={(event) => {
+        event.preventDefault();
+        const next = q.trim();
+        router.push(next ? `/fine-fabrics?q=${encodeURIComponent(next)}` : '/fine-fabrics');
+      }}
+    >
+      <label className="ff-sr" htmlFor="ff-search">Search brand, pattern, or vendor SKU</label>
+      <input
+        id="ff-search"
+        name="q"
+        value={q}
+        onChange={(e) => setQ(e.target.value)}
+        placeholder="SKU, pattern, brand"
+        autoComplete="off"
+      />
+      <button type="submit">Search</button>
+    </form>
+  );
+}
 
 export default function StoreChrome({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
@@ -46,6 +79,9 @@ export default function StoreChrome({ children }: { children: React.ReactNode })
           ))}
           <Link href="/fine-fabrics/cart">Cart{count ? ` (${count})` : ''}</Link>
         </nav>
+        <Suspense fallback={null}>
+          <SearchBox />
+        </Suspense>
       </header>
       {children}
       <footer className="ff-foot">

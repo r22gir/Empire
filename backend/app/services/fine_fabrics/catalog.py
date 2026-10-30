@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import re
 from typing import Any, Optional
 
 from app.db.database import dict_row, dict_rows, get_db
+from app.services.fine_fabrics.photos import resolve_product_image
 from app.services.fine_fabrics.schema import (
     CATEGORIES,
     UNSORTED_CATEGORY,
@@ -32,6 +34,8 @@ CUSTOMER_FIELDS = (
     "id",
     "pattern",
     "color",
+    "sku",
+    "display_title",
     "empire_code",
     "category",
     "width",
@@ -69,6 +73,35 @@ def retail_price(net_price: float, markup: float) -> float:
     return round(float(net_price) * float(markup), 2)
 
 
+def fold_sku(value: str | None) -> str:
+    """Vendor SKU without dots, dashes, or spaces — PEF100019.34 → PEF10001934."""
+    return re.sub(r"[^A-Za-z0-9]+", "", value or "").lower()
+
+
+def _sku_fold_sql(column: str) -> str:
+    return (
+        f"REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(LOWER(IFNULL({column}, '')), "
+        "'.', ''), '-', ''), ' ', ''), '/', ''), '_', '')"
+    )
+
+
+def display_title(row: dict, brand: str | None = None) -> str:
+    """Kravet PEF100019.34 Indienne Fennel — mill name + SKU + pattern + color."""
+    sku = (row.get("sku") or "").strip()
+    pattern = (row.get("pattern") or "").strip()
+    color = (row.get("color") or "").strip()
+    bits = []
+    if brand:
+        bits.append(brand)
+    if sku:
+        bits.append(sku)
+    if pattern and pattern.casefold() != sku.casefold():
+        bits.append(pattern)
+    if color and color.casefold() != pattern.casefold() and color.casefold() != sku.casefold():
+        bits.append(color)
+    return " ".join(bits) or (row.get("empire_code") or "Fabric")
+
+
 def customer_product(row: dict, vendor: dict | None = None, conn=None) -> dict:
     """Public card. Cost and supplier never leave unless brand_display_allowed."""
     vendor = vendor or _vendor_for(row, conn)
@@ -76,11 +109,12 @@ def customer_product(row: dict, vendor: dict | None = None, conn=None) -> dict:
     if unit not in UNITS:
         unit = "yard"
     price = retail_price(row.get("net_price") or 0, markup_for(vendor, row.get("category") or "Other", conn))
-    image_path = (row.get("image_path") or "").strip()
+    image = resolve_product_image(row)
     payload = {
         "id": row["id"],
         "pattern": row.get("pattern") or "",
         "color": row.get("color") or "",
+        "sku": (row.get("sku") or "").strip(),
         "empire_code": row.get("empire_code") or "",
         "category": row.get("category") or "Other",
         "width": row.get("width") or "",
@@ -91,14 +125,18 @@ def customer_product(row: dict, vendor: dict | None = None, conn=None) -> dict:
         "unit": unit,
         "unit_label": unit_label(unit),
         "product_type": row.get("product_type") or "sku",
+        "collection": row.get("collection") or "",
+        "description": row.get("description") or "",
         "price_per_unit": price,
         "price_per_yard": price,
-        "image_url": f"/api/v1/fine-fabrics/photos/{row['id']}" if image_path else None,
-        "has_owner_photo": bool(image_path),
-        "placeholder": not bool(image_path),
+        "image_url": image["image_url"],
+        "has_owner_photo": image["has_owner_photo"],
+        "has_vendor_image": image["has_vendor_image"],
+        "placeholder": image["placeholder"],
     }
     if vendor and int(vendor.get("brand_display_allowed") or 0):
-        payload["brand"] = vendor.get("name")
+        payload["brand"] = (row.get("brand") or "").strip() or vendor.get("name")
+    payload["display_title"] = display_title(row, payload.get("brand"))
     return payload
 
 
@@ -118,9 +156,13 @@ def owner_product(row: dict, vendor: dict | None = None, conn=None) -> dict:
             "brand_display_allowed": bool(vendor.get("brand_display_allowed")) if vendor else False,
             "markup": markup_for(vendor, row.get("category") or "Other", conn) if vendor else None,
             "image_path": row.get("image_path"),
+            "vendor_image_url": row.get("vendor_image_url"),
             "color_family": row.get("color_family"),
             "is_unsorted": bool(row.get("is_unsorted") or row.get("category") == UNSORTED_CATEGORY),
             "sku_range": row.get("sku_range"),
+            "collection": row.get("collection"),
+            "description": row.get("description"),
+            "brand_label": row.get("brand"),
         }
     )
     return public
@@ -162,9 +204,17 @@ def list_catalog(
             sql += " AND p.category = ?"
             params.append(category)
         if search:
-            sql += " AND (p.pattern LIKE ? OR p.color LIKE ? OR p.empire_code LIKE ? OR p.sku LIKE ?)"
-            needle = f"%{search}%"
-            params.extend([needle, needle, needle, needle])
+            needle = f"%{search.strip()}%"
+            folded = f"%{fold_sku(search)}%"
+            sql += f""" AND (
+                p.pattern LIKE ? OR p.color LIKE ? OR p.empire_code LIKE ?
+                OR p.sku LIKE ? OR IFNULL(p.sku_range, '') LIKE ?
+                OR IFNULL(p.brand, '') LIKE ? OR v.name LIKE ?
+                OR IFNULL(p.collection, '') LIKE ?
+                OR {_sku_fold_sql('p.sku')} LIKE ?
+                OR {_sku_fold_sql('p.sku_range')} LIKE ?
+            )"""
+            params.extend([needle, needle, needle, needle, needle, needle, needle, needle, folded, folded])
         sql += " ORDER BY p.category, p.pattern, p.color"
         rows = dict_rows(conn.execute(sql, params).fetchall())
         out = []

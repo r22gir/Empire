@@ -19,6 +19,7 @@ from typing import Iterable
 
 from app.db.database import dict_row, get_db
 from app.services.fine_fabrics.codes import allocate_empire_code
+from app.services.fine_fabrics.photos import is_owner_photo_name, is_remote_url
 from app.services.fine_fabrics.schema import (
     CATEGORIES,
     UNSORTED_CATEGORY,
@@ -135,6 +136,24 @@ def split_greenhouse_name(sku: str, name_color: str) -> tuple[str, str]:
     return sku or text, ""
 
 
+def _extra_fields(raw: dict) -> dict:
+    image_path = (raw.get("image_path") or "").strip()
+    vendor_image = (raw.get("vendor_image_url") or raw.get("image_url") or "").strip()
+    if is_remote_url(image_path) and not vendor_image:
+        vendor_image = image_path
+    return {
+        "durability": raw.get("durability") or "",
+        "care": raw.get("care") or "",
+        "color_family": raw.get("color_family") or "",
+        "collection": raw.get("collection") or "",
+        "description": raw.get("description") or "",
+        "brand": raw.get("brand") or "",
+        "empire_code": (raw.get("empire_code") or "").strip(),
+        "image_path": image_path,
+        "vendor_image_url": vendor_image,
+    }
+
+
 def detect_format(headers: list[str], rows: list[dict] | None = None, filename: str | None = None) -> str:
     name = (filename or "").lower()
     if "greenhouse" in name:
@@ -144,6 +163,14 @@ def detect_format(headers: list[str], rows: list[dict] | None = None, filename: 
     header_set = set(headers)
     if "name_color" in header_set and "net_price_per_yd" in header_set:
         return "greenhouse"
+    if "base_selection" in name:
+        return "canonical"
+    has_price = "net_price" in header_set or "net_price_per_yd" in header_set
+    has_vendor = "vendor" in header_set or "brand" in header_set
+    if "pattern" in header_set and has_price and has_vendor:
+        if name and "charlotte" in name and rows and any(_looks_charlotte(r) for r in rows):
+            return "charlotte"
+        return "canonical"
     if set(CANONICAL_COLUMNS).issubset(header_set):
         if rows and any(_looks_charlotte(r) for r in rows):
             return "charlotte"
@@ -186,8 +213,9 @@ def _read_raw_rows(text: str) -> tuple[list[str], list[dict]]:
 def map_greenhouse_row(raw: dict, vendor_hint: str | None = None) -> dict:
     sku = (raw.get("sku") or "").strip()
     pattern, color = split_greenhouse_name(sku, raw.get("name_color") or "")
+    extra = _extra_fields(raw)
     return {
-        "vendor": vendor_hint or "Greenhouse",
+        "vendor": vendor_hint or raw.get("vendor") or extra["brand"] or "Greenhouse",
         "pattern": pattern,
         "color": color,
         "sku": sku,
@@ -199,19 +227,19 @@ def map_greenhouse_row(raw: dict, vendor_hint: str | None = None) -> dict:
         "list_price": raw.get("list_price"),
         "product_url": raw.get("product_url") or "",
         "notes": raw.get("notes") or "",
-        "durability": raw.get("durability") or "",
-        "care": raw.get("care") or "",
-        "color_family": raw.get("color_family") or "",
-        "product_type": "sku",
-        "unit": "yard",
+        "product_type": (raw.get("product_type") or "sku").strip() or "sku",
+        "unit": parse_unit(raw.get("notes") or "", raw.get("unit") or "") or "yard",
+        "sku_range": raw.get("sku_range") or "",
+        **extra,
     }
 
 
 def map_charlotte_row(raw: dict, vendor_hint: str | None = None) -> dict:
     notes = raw.get("notes") or ""
     sku = (raw.get("sku") or "").strip()
+    extra = _extra_fields(raw)
     return {
-        "vendor": vendor_hint or raw.get("vendor") or "Charlotte",
+        "vendor": vendor_hint or raw.get("vendor") or extra["brand"] or "Charlotte",
         "pattern": (raw.get("pattern") or "").strip(),
         "color": (raw.get("color") or "").strip(),
         "sku": sku,
@@ -219,23 +247,22 @@ def map_charlotte_row(raw: dict, vendor_hint: str | None = None) -> dict:
         "width": raw.get("width") or "",
         "content": raw.get("content") or "",
         "repeat": raw.get("repeat") or "",
-        "net_price": raw.get("net_price"),
+        "net_price": raw.get("net_price") or raw.get("net_price_per_yd"),
         "list_price": raw.get("list_price"),
         "product_url": raw.get("product_url") or "",
         "notes": notes,
-        "durability": raw.get("durability") or "",
-        "care": raw.get("care") or "",
-        "color_family": raw.get("color_family") or "",
-        "product_type": "collection",
+        "product_type": (raw.get("product_type") or "collection").strip() or "collection",
         "unit": parse_unit(notes, raw.get("unit") or ""),
-        "sku_range": sku,
+        "sku_range": raw.get("sku_range") or sku,
+        **extra,
     }
 
 
 def map_canonical_row(raw: dict, vendor_hint: str | None = None) -> dict:
     notes = raw.get("notes") or ""
+    extra = _extra_fields(raw)
     mapped = {
-        "vendor": vendor_hint or raw.get("vendor") or "",
+        "vendor": vendor_hint or raw.get("vendor") or extra["brand"] or "",
         "pattern": (raw.get("pattern") or "").strip(),
         "color": (raw.get("color") or "").strip(),
         "sku": (raw.get("sku") or "").strip(),
@@ -243,20 +270,18 @@ def map_canonical_row(raw: dict, vendor_hint: str | None = None) -> dict:
         "width": raw.get("width") or "",
         "content": raw.get("content") or "",
         "repeat": raw.get("repeat") or "",
-        "net_price": raw.get("net_price"),
+        "net_price": raw.get("net_price") or raw.get("net_price_per_yd"),
         "list_price": raw.get("list_price"),
         "product_url": raw.get("product_url") or "",
         "notes": notes,
-        "durability": raw.get("durability") or "",
-        "care": raw.get("care") or "",
-        "color_family": raw.get("color_family") or "",
         "product_type": (raw.get("product_type") or "sku").strip() or "sku",
         "unit": parse_unit(notes, raw.get("unit") or ""),
         "sku_range": raw.get("sku_range") or "",
+        **extra,
     }
-    if _looks_charlotte(mapped):
+    if _looks_charlotte(mapped) and not (raw.get("product_type") or "").strip():
         mapped["product_type"] = "collection"
-        mapped["sku_range"] = mapped["sku"]
+        mapped["sku_range"] = mapped["sku_range"] or mapped["sku"]
     return mapped
 
 
@@ -291,10 +316,10 @@ def import_rows(rows: Iterable[dict], *, conn=None) -> dict:
         }
         for index, raw in enumerate(rows, start=2):
             try:
-                vendor_slug = resolve_vendor_slug(raw.get("vendor") or "", vendors.keys())
+                vendor_slug = resolve_vendor_slug(raw.get("vendor") or raw.get("brand") or "", vendors.keys())
                 vendor = vendors.get(vendor_slug)
                 if not vendor:
-                    skipped.append({"row": index, "reason": f"unknown vendor '{raw.get('vendor')}'"})
+                    skipped.append({"row": index, "reason": f"unknown vendor '{raw.get('vendor') or raw.get('brand')}'"})
                     continue
                 pattern = (raw.get("pattern") or "").strip()
                 color = (raw.get("color") or "").strip()
@@ -314,13 +339,21 @@ def import_rows(rows: Iterable[dict], *, conn=None) -> dict:
                 unit = raw.get("unit") if raw.get("unit") in UNITS else parse_unit(raw.get("notes") or "")
                 color_family = (raw.get("color_family") or "").strip()
                 sku_range = (raw.get("sku_range") or sku or "").strip()
+                collection = (raw.get("collection") or "").strip()
+                description = (raw.get("description") or "").strip()
+                brand = (raw.get("brand") or "").strip()
+                vendor_image_url = (raw.get("vendor_image_url") or "").strip()
+                incoming_image = (raw.get("image_path") or "").strip()
                 found = conn.execute(
-                    """SELECT id, empire_code FROM ff_products
+                    """SELECT id, empire_code, image_path FROM ff_products
                        WHERE vendor_id = ? AND IFNULL(sku, '') = ? AND pattern = ? AND color = ?""",
                     (vendor["id"], sku or "", pattern, color),
                 ).fetchone()
                 code_color = color or (sku or "Book")
-                if found:
+                supplied_code = (raw.get("empire_code") or "").strip()
+                if supplied_code:
+                    empire_code = supplied_code
+                elif found:
                     empire_code = found["empire_code"]
                 else:
                     empire_code = allocate_empire_code(
@@ -329,7 +362,12 @@ def import_rows(rows: Iterable[dict], *, conn=None) -> dict:
                         sku=sku,
                         existing_codes=existing_codes,
                     )
-                    existing_codes.add(empire_code)
+                existing_codes.add(empire_code)
+                image_path = incoming_image
+                if found and is_owner_photo_name(found["image_path"] or ""):
+                    image_path = found["image_path"]
+                elif is_remote_url(incoming_image) and not vendor_image_url:
+                    vendor_image_url = incoming_image
                 values = (
                     vendor["id"],
                     vendor["slug"],
@@ -352,6 +390,11 @@ def import_rows(rows: Iterable[dict], *, conn=None) -> dict:
                     color_family,
                     is_unsorted,
                     sku_range,
+                    vendor_image_url,
+                    collection,
+                    description,
+                    brand,
+                    image_path,
                 )
                 if found:
                     conn.execute(
@@ -360,6 +403,7 @@ def import_rows(rows: Iterable[dict], *, conn=None) -> dict:
                            width=?, content=?, repeat=?, durability=?, care=?,
                            net_price=?, list_price=?, product_url=?, notes=?, empire_code=?,
                            product_type=?, unit=?, color_family=?, is_unsorted=?, sku_range=?,
+                           vendor_image_url=?, collection=?, description=?, brand=?, image_path=?,
                            updated_at=datetime('now')
                            WHERE id=?""",
                         values + (found["id"],),
@@ -371,8 +415,9 @@ def import_rows(rows: Iterable[dict], *, conn=None) -> dict:
                            (vendor_id, vendor_slug, pattern, color, sku, category,
                             width, content, repeat, durability, care,
                             net_price, list_price, product_url, notes, empire_code,
-                            product_type, unit, color_family, is_unsorted, sku_range, business)
-                           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'workroom')""",
+                            product_type, unit, color_family, is_unsorted, sku_range,
+                            vendor_image_url, collection, description, brand, image_path, business)
+                           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'workroom')""",
                         values,
                     )
                     created += 1
