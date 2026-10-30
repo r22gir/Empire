@@ -36,7 +36,7 @@ def test_max_image_input_uses_mmx_vision_context_without_raw_image_payload(monke
 
     async def fake_minimax_chat(self, messages, image_path=None):
         calls["chat"] += 1
-        assert image_path is None
+        captured["image_path"] = image_path
         captured["last_message"] = messages[-1].content
         return "The image shows a red square with TEST text."
 
@@ -61,6 +61,7 @@ def test_max_image_input_uses_mmx_vision_context_without_raw_image_payload(monke
     result = asyncio.run(
         router.chat(
             [AIMessage(role="user", content="Describe this image in one sentence. Do not generate a new image.")],
+            model=AIModel.MINIMAX,
             image_filename="sample.png",
             source="web",
         )
@@ -69,6 +70,8 @@ def test_max_image_input_uses_mmx_vision_context_without_raw_image_payload(monke
     assert calls == {"vision": 1, "chat": 1}
     assert result.model_used == f"minimax-{router.minimax_model}"
     assert "IMAGE_NOT_AVAILABLE" not in result.content
+    assert captured["image_path"] == image_path
+    assert "Attached photo on this turn: sample.png" in captured["last_message"]
     assert "Image understanding via MiniMax mmx_cli" in captured["last_message"]
     assert "A red square with the word TEST" in captured["last_message"]
     assert "Image generation used: false" in captured["last_message"]
@@ -84,37 +87,46 @@ def test_max_image_vision_failure_returns_safe_error(monkeypatch, tmp_path):
     image_path = uploads / "sample.png"
     _write_png(image_path)
 
+    captured = {}
+
     async def fake_understand(path, prompt):
         return {
             "success": False,
             "error": "usage limit exceeded for sk-testsecret1234567890",
         }
 
-    async def fail_chat(*args, **kwargs):
-        raise AssertionError("chat provider must not run after image understanding failure")
+    async def fake_minimax_chat(self, messages, image_path=None):
+        captured["image_path"] = image_path
+        captured["last_message"] = messages[-1].content
+        return "Using the attached photo."
 
     monkeypatch.setattr(minimax_tools, "minimax_understand_image", fake_understand)
-    monkeypatch.setattr(AIRouter, "_minimax_chat", fail_chat)
+    monkeypatch.setattr(AIRouter, "_minimax_chat", fake_minimax_chat)
 
     router = AIRouter()
     router.upload_dirs = [tmp_path / "uploads"]
     router.upload_dir = tmp_path / "uploads"
     router.minimax_key = "configured-for-test"
     router.primary_model = AIModel.MINIMAX
+    router.xai_key = ""
+    router.anthropic_key = ""
+    router.groq_key = ""
+    router.openai_key = ""
+    router.gemini_key = ""
 
     result = asyncio.run(
         router.chat(
             [AIMessage(role="user", content="Describe this image.")],
+            model=AIModel.MINIMAX,
             image_filename="sample.png",
             source="web",
         )
     )
 
-    assert result.model_used == "mmx-vision"
-    assert result.fallback_used is False
-    assert "MiniMax vision verification failed" in result.content
-    assert "[KEY_REDACTED]" in result.content
-    assert "sk-testsecret" not in result.content
+    assert captured["image_path"] == image_path
+    assert "Attached photo on this turn: sample.png" in captured["last_message"]
+    assert "sk-testsecret" not in (result.content or "")
+    assert "I don't see the photo" not in result.content
 
 
 def test_max_stream_image_input_uses_mmx_vision_context(monkeypatch, tmp_path):
@@ -136,7 +148,7 @@ def test_max_stream_image_input_uses_mmx_vision_context(monkeypatch, tmp_path):
         }
 
     async def fake_minimax_stream(self, messages, image_path=None):
-        assert image_path is None
+        captured["image_path"] = image_path
         captured["last_message"] = messages[-1].content
         yield "The image is a blue sample."
 
@@ -159,6 +171,7 @@ def test_max_stream_image_input_uses_mmx_vision_context(monkeypatch, tmp_path):
             item
             async for item in router.chat_stream(
                 [AIMessage(role="user", content="Describe this image. Do not generate a new image.")],
+                model=AIModel.MINIMAX,
                 image_filename="stream.png",
                 source="web",
             )
@@ -167,6 +180,8 @@ def test_max_stream_image_input_uses_mmx_vision_context(monkeypatch, tmp_path):
     chunks = asyncio.run(collect())
 
     assert chunks == [("The image is a blue sample.", router.minimax_model)]
+    assert captured["image_path"] == image_path
+    assert "Attached photo on this turn: stream.png" in captured["last_message"]
     assert "Image understanding via MiniMax mmx_cli" in captured["last_message"]
     assert "A blue sample image" in captured["last_message"]
     assert "Image generation used: false" in captured["last_message"]
