@@ -267,6 +267,12 @@ def find_newest_job_document(
     if looked.get("match"):
         matches.append(looked["match"])
 
+    from app.services.max.estimate_link import is_excluded_path
+    matches = [
+        m for m in matches
+        if not is_excluded_path(m.get("abs_path") or m.get("path"))
+        and str(m.get("abs_path") or m.get("path") or m.get("name") or "").lower().endswith(".pdf")
+    ]
     newest = pick_newest_file(matches)
     verified = None
     if newest:
@@ -308,6 +314,10 @@ def show_link_reply(
         return None
     if wants_external_send(message):
         return None
+    from app.services.max import estimate_link as el
+    if el.is_estimate_link_request(message):
+        # FP-N10: estimates come from the job's records, never "newest file on disk".
+        return el.estimate_link_reply(message, history)
     looked = find_newest_job_document(message, history, drawings_dir=drawings_dir)
     match = looked.get("match")
     if not match:
