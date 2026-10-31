@@ -33,6 +33,9 @@ app = FastAPI(
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
+from app.services.job_stages.gate import register_job_stage_exception_handlers
+register_job_stage_exception_handlers(app)
+
 # Validation error logging
 @app.exception_handler(RequestValidationError)
 async def validation_exception_handler(request: Request, exc: RequestValidationError):
@@ -192,6 +195,7 @@ load_router("app.routers.customer_mgmt", "/api/v1", ["crm"])
 load_router("app.routers.inventory", "/api/v1", ["inventory"])
 # load_router("app.routers.jobs", "/api/v1", ["jobs"])  # replaced by jobs_unified
 load_router("app.routers.jobs_unified", "/api/v1", ["jobs-unified"])
+load_router("app.routers.job_stages", "/api/v1", ["job-stages"])
 
 # Customer Journey Linkage MVP — read-only endpoints
 # (mounted at /api/v1 so the paths /customers/{id}/journey, /quotes/{id}/invoice,

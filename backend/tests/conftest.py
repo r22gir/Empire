@@ -101,6 +101,8 @@ _DATA_TABLES = [
     "invoices",
     "jobs",
     "job_documents",   # D44 — job images landing table
+    "job_stages",      # standard document-set checklist
+    "job_stage_config",
     "payments_v2",
     "financial_audit_log",
     "chart_of_accounts",

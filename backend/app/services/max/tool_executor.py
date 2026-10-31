@@ -603,6 +603,10 @@ def execute_tool(tool_call: dict, desk: Optional[str] = None, access_context: Op
             "generate_presentation": "present",
             "make_presentation": "present",
             "presentation": "present",
+            "job_status": "where_is_this_job",
+            "where_is_job": "where_is_this_job",
+            "job_stage": "where_is_this_job",
+            "job_checklist": "where_is_this_job",
         }
         if tool_name not in TOOL_REGISTRY and tool_name in TOOL_CORRECTIONS:
             corrected = TOOL_CORRECTIONS[tool_name]
@@ -2576,12 +2580,34 @@ def _send_telegram(params: dict, desk: Optional[str] = None) -> ToolResult:
         return ToolResult(tool="send_telegram", success=False, error=str(e))
 
 
+def _quote_share_blocked(quote_id: str) -> ToolResult | None:
+    from app.services.job_stages.gate import (
+        ClientEstimateGateError,
+        assert_client_estimate_allowed_for_quote,
+    )
+    try:
+        assert_client_estimate_allowed_for_quote(quote_id)
+    except ClientEstimateGateError as exc:
+        return ToolResult(
+            tool="quote_share_gate",
+            success=False,
+            error=exc.message,
+            result=exc.as_dict(),
+        )
+    return None
+
+
 @tool("send_quote_telegram")
 def _send_quote_telegram(params: dict, desk: Optional[str] = None) -> ToolResult:
     """Generate PDF for a quote and send it to the founder via Telegram."""
     quote_id = params.get("quote_id", "")
     if not quote_id:
         return ToolResult(tool="send_quote_telegram", success=False, error="No quote_id provided")
+
+    blocked = _quote_share_blocked(quote_id)
+    if blocked:
+        blocked.tool = "send_quote_telegram"
+        return blocked
 
     # PHASE 2 · F5.2 — shared canonical-first resolver (not legacy JSON direct)
     from app.services.quote_service import resolve_quote
@@ -2892,6 +2918,11 @@ def _send_quote_email(params: dict, desk: Optional[str] = None) -> ToolResult:
         return ToolResult(tool="send_quote_email", success=False, error="No quote_id provided")
     if not to:
         return ToolResult(tool="send_quote_email", success=False, error="No recipient email (to) provided")
+    for quote_id in quote_ids:
+        blocked = _quote_share_blocked(quote_id)
+        if blocked:
+            blocked.tool = "send_quote_email"
+            return blocked
 
     verdict_to = authorize_email_recipient(to)
     if not verdict_to["recipient_authorized"]:
@@ -5401,10 +5432,40 @@ def _deposit_pay_link(params: dict, desk: Optional[str] = None) -> ToolResult:
     })
 
 
+@tool("where_is_this_job")
+def _where_is_this_job(params: dict, desk: Optional[str] = None) -> ToolResult:
+    """Current document-set stage, what's missing, and the next step."""
+    from app.services.job_stages.max_answer import answer_where_is_this_job
+
+    location = answer_where_is_this_job(
+        params.get("message") or params.get("query"),
+        job_id=params.get("job_id"),
+    )
+    return ToolResult(
+        tool="where_is_this_job",
+        success=bool(location.get("found")),
+        result=location,
+        error=None if location.get("found") else location.get("answer"),
+    )
+
+
 @tool("draft_estimate_and_presentation")
 def _draft_estimate_and_presentation(params: dict, desk: Optional[str] = None) -> ToolResult:
     """Draft an estimate and a presentation from openings. Never sends."""
     from app.services.estimates.workroom_packet import draft_packet
+    from app.services.job_stages.gate import ClientEstimateGateError, assert_client_estimate_allowed
+
+    job_id = params.get("job_id")
+    if job_id:
+        try:
+            assert_client_estimate_allowed(str(job_id))
+        except ClientEstimateGateError as exc:
+            return ToolResult(
+                tool="draft_estimate_and_presentation",
+                success=False,
+                error=exc.message,
+                result=exc.as_dict(),
+            )
 
     openings = params.get("openings")
     if not isinstance(openings, list) or not openings:
@@ -5485,7 +5546,9 @@ If a tool call fails with "Unknown tool", check the name against this list.
 - **deposit_pay_link** — Workroom or WoodCraft quote only. Creates (or reuses) a deposit invoice on the finance router and a Stripe Checkout link on the payments router. Client name/email/phone/address are copied from the quote. A second call returns the same invoice and the same open link. payment_status stays `link_ready` until Stripe reports paid — do not tell the founder the deposit is collected when status is not `paid`.
   `{"tool": "deposit_pay_link", "quote_id": "abc123"}`
 - **create_quick_quote** — DEPRECATED. Legacy JSON store (`/home/rg/empire-data/quotes/*.json`). Does NOT use the pricing engine. Returns `store: "json_legacy"`, `engine: "qis"`, `deprecation_notice`. Will be retired in sprint 1d. **Do NOT pick this tool for new quotes — use `create_engine_quote` instead.**
-- **draft_estimate_and_presentation** — Draft only. Builds the header-B estimate and the landscape presentation from `openings` (width, height, panels, optional sheers, install_flat, photos). Saves a draft quote. Never emails, never creates a Square link. The deposit line stays `Pay deposit online: [Square payment link]`.
+- **where_is_this_job** — Answer "where is this job?": current document-set stage, what's missing, next step. Stages 6–7 are conditional. Client estimates stay blocked until stage 4 (workroom approval) is approved. Square invoices stay draft until Rafael expressly says send.
+  `{"tool": "where_is_this_job", "query": "Le Midi"}` or `{"tool": "where_is_this_job", "job_id": "..."}`
+- **draft_estimate_and_presentation** — Draft only. Builds the header-B estimate and the landscape presentation from `openings` (width, height, panels, optional sheers, install_flat, photos). Saves a draft quote. Never emails, never creates a Square link. The deposit line stays `Pay deposit online: [Square payment link]`. When `job_id` is present, stage 4 (workroom approval) must already be approved.
   `{"tool": "draft_estimate_and_presentation", "billed_by": "nelmas_workroom", "project": {"address": "9408 Old Courthouse Rd"}, "openings": [{"room": "Living Room", "width": 160, "height": 119.75, "panels": 2}]}`
 - **create_engine_quote** — CANONICAL. Creates a quote in `quotes_v2` (SQL) via `quote_service.create_quote`. Catalog categories route through the pricing engine (proposed_price + computed_json returned). Multi-line: pass `line_items[]`. Accepts `business_unit` (default "workroom"). Returns `store: "quotes_v2"`, `engine: "pricing_engine_v1"`, per-line `proposed_price` + `final_price`, plus `quote_number`. **Use this for all new quotes.**
   `{"tool": "create_engine_quote", "customer_name": "...", "business_unit": "workroom", "line_items": [{"category": "drapery", "description": "...", "inputs": {"window_width_in": 84, "length_in": 96, "fullness": 2.5, "lining_type": "blackout"}}, {"category": "hardware_rod_1_1_8", "inputs": {"width_in": 84}}, {"category": "hardware_rings", "inputs": {"widths": 4, "packs": 4}}, {"category": "hardware_brackets", "inputs": {"width_in": 84}}]}`

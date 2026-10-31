@@ -10,6 +10,7 @@ import {
 import KPICard from '../shared/KPICard';
 import DataTable, { Column } from '../shared/DataTable';
 import StatusBadge from '../shared/StatusBadge';
+import JobStageChecklist from './JobStageChecklist';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -773,6 +774,10 @@ export default function JobBoard() {
                 </div>
               )}
             </div>
+
+            {getJobId(selectedJob) && (
+              <JobStageChecklist jobId={getJobId(selectedJob)} />
+            )}
 
             {/* Notes */}
             <div className="mb-6">
