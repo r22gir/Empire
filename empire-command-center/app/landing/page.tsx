@@ -1,648 +1,282 @@
-// R1X-PUB-EMPIREBOX — public apex landing page.
-// This route is served at https://empirebox.store/ and https://www.empirebox.store/
-// via the host-aware middleware in /middleware.ts. The middleware rewrites
-// the apex root "/" → "/landing" so this file is the rendered body for both
-// hostnames. The Command Center at app/page.tsx is NOT touched.
-//
-// Section outline follows R1X-PUB-EMPIREBOX-COPY.md §1:
-//   1 Header / Nav
-//   2 Hero
-//   3 What EmpireBox Is
-//   4 Ecosystem Map
-//   5 Module Grid
-//   6 How It Works
-//   7 Trust & Disclaimers
-//   8 CTAs / Next Steps
-//   9 Footer
+// empirebox.store public landing (served at apex "/" via middleware rewrite → /landing).
+// v2 visual: full-bleed hero, image-led business cards, process strip, gallery.
+// Luxe palette (ivory / charcoal / gold), serif display. ApostApp kept separate (no Workroom link).
+// All imagery is already public under /public/workroom-showroom or is non-identifying
+// shop material (/public/empirebox-landing). No client names or addresses.
 
-import type { LucideIcon } from 'lucide-react';
 import RevealOnScroll from './RevealOnScroll';
-import { MODULES, WORKFLOWS, type ModuleEntry, type WorkflowStep } from './_data';
+import { GROUPS, PROCESS_STEPS, GALLERY, SWATCHES, type ModuleEntry } from './_data';
 
 export const metadata = {
-  title: 'EmpireBox — practical service tools for documents, business, and operations',
+  title: 'EmpireBox — custom workroom, fine fabrics, woodworks, and small-business tools',
   description:
-    'EmpireBox is an ecosystem of focused apps for document apostille, business formation, custom fabrication, pricing, and operations. Start with ApostApp, expand as you grow.',
+    'Empire Workroom, Empire Fine Fabrics, and Empire Woodworks: custom drapery, upholstery, and millwork from 3D design to CNC cutting to installation. Washington DC · Maryland · Virginia.',
   robots: { index: true, follow: true },
 };
 
-// ──────────────────────────────────────────────────────────────────────────
-// Small visual primitives (server-rendered, zero client JS)
-// ──────────────────────────────────────────────────────────────────────────
-
-function Eyebrow({ children }: { children: React.ReactNode }) {
-  return (
-    <div className="eb-eyebrow-wrap">
-      <span className="eb-eyebrow">{children}</span>
-      <span className="eb-eyebrow-rule" aria-hidden="true" />
-    </div>
-  );
+const CSS = `
+.lx{--iv:#f7f2ea;--iv2:#efe7da;--ch:#1f1d1a;--ch2:#3a3631;--gd:#b08d57;--gd2:#8a6b3b;--mut:#5c554c;
+  background:var(--iv);color:var(--ch);font-family:Inter,system-ui,-apple-system,sans-serif;line-height:1.6}
+.lx *{box-sizing:border-box}
+.lx a{color:inherit}
+.lx .serif{font-family:'Cormorant Garamond','Playfair Display',Georgia,'Times New Roman',serif;font-weight:500;letter-spacing:-.01em}
+.lx .wrap{max-width:1200px;margin:0 auto;padding:0 32px}
+.lx .eyebrow{font-size:12px;letter-spacing:.22em;text-transform:uppercase;color:var(--gd2);font-weight:600}
+.lx .rule{width:56px;height:2px;background:var(--gd);margin:18px 0 0}
+.lx-nav{position:absolute;top:0;left:0;right:0;z-index:5;color:#fff}
+.lx-nav .wrap{display:flex;justify-content:space-between;align-items:center;height:76px}
+.lx-nav .brand{font-size:22px;letter-spacing:.24em;text-decoration:none}
+.lx-nav nav{display:flex;gap:28px;font-size:13px;letter-spacing:.08em;text-transform:uppercase}
+.lx-nav nav a{text-decoration:none;opacity:.9}
+.lx-hero{position:relative;min-height:88vh;display:flex;align-items:flex-end;color:#fff;
+  background:#2a2620 url('/workroom-showroom/photos/drapery-music-room.jpg') center/cover no-repeat}
+.lx-hero:before{content:'';position:absolute;inset:0;background:linear-gradient(180deg,rgba(20,18,15,.55) 0%,rgba(20,18,15,.15) 35%,rgba(20,18,15,.78) 100%)}
+.lx-hero .wrap{position:relative;padding-bottom:88px;width:100%}
+.lx-hero h1{font-size:clamp(44px,7vw,92px);line-height:1.02;margin:16px 0 20px;max-width:900px}
+.lx-hero p{font-size:clamp(16px,1.6vw,20px);max-width:620px;opacity:.95;margin:0 0 32px}
+.lx-hero .eyebrow{color:#e6cf9f}
+.btn{display:inline-block;padding:15px 28px;border-radius:2px;font-size:14px;letter-spacing:.08em;text-transform:uppercase;text-decoration:none;font-weight:600;transition:all .2s}
+.btn-gold{background:var(--gd);color:#fff!important}.btn-gold:hover{background:var(--gd2)}
+.btn-ghost{border:1px solid rgba(255,255,255,.7);color:#fff!important;margin-left:12px}.btn-ghost:hover{background:rgba(255,255,255,.12)}
+.btn-dark{border:1px solid var(--ch);color:var(--ch)!important}
+.lx-sec{padding:120px 0}
+.lx-sec.alt{background:var(--iv2)}
+.lx-sec.dark{background:var(--ch);color:var(--iv)}
+.lx-sec.dark .eyebrow{color:#d9bd86}
+.lx h2{font-size:clamp(34px,4.4vw,56px);line-height:1.08;margin:14px 0 0}
+.lx .lede{font-size:18px;color:var(--mut);max-width:640px;margin:22px 0 0}
+.lx-sec.dark .lede{color:#cfc6b8}
+.biz{display:grid;grid-template-columns:repeat(2,1fr);gap:32px;margin-top:64px}
+.biz .card{background:#fff;text-decoration:none;display:flex;flex-direction:column;box-shadow:0 1px 2px rgba(31,29,26,.06),0 12px 32px rgba(31,29,26,.08);transition:transform .25s,box-shadow .25s;overflow:hidden}
+.biz .card:hover{transform:translateY(-4px);box-shadow:0 2px 4px rgba(31,29,26,.08),0 22px 48px rgba(31,29,26,.14)}
+.biz .ph{aspect-ratio:16/10;background:#ddd center/cover no-repeat;position:relative}
+.biz .tag{position:absolute;top:16px;left:16px;background:rgba(247,242,234,.94);color:var(--ch);font-size:11px;letter-spacing:.16em;text-transform:uppercase;padding:6px 12px;font-weight:600}
+.biz .tag.soon{background:var(--ch);color:#e6cf9f}
+.biz .body{padding:28px 30px 32px}
+.biz h3{font-size:30px;margin:0 0 10px}
+.biz p{margin:0;color:var(--mut);font-size:15.5px}
+.biz .cta{margin-top:18px;font-size:13px;letter-spacing:.1em;text-transform:uppercase;color:var(--gd2);font-weight:600}
+.swatchstrip{display:grid;grid-template-columns:repeat(6,1fr);height:100%}
+.swatchstrip div{background-size:cover;background-position:center}
+.swatches{display:grid;grid-template-columns:repeat(6,1fr);gap:20px;margin-top:48px}
+.swatches figure{margin:0}
+.swatches .sw{aspect-ratio:1;background:center/cover;box-shadow:0 8px 24px rgba(31,29,26,.12)}
+.swatches figcaption{font-size:13px;margin-top:10px}
+.swatches figcaption span{display:block;color:var(--mut);font-size:11px;letter-spacing:.14em;text-transform:uppercase}
+.proc{display:grid;grid-template-columns:repeat(4,1fr);gap:24px;margin-top:64px;counter-reset:s}
+.proc li{list-style:none}
+.proc .im{aspect-ratio:4/3;background:#fff center/cover no-repeat;border:1px solid rgba(217,189,134,.25)}
+.proc .im.contain{background-size:contain;background-color:#fff}
+.proc .n{font-size:44px;color:#d9bd86;margin:20px 0 4px;line-height:1}
+.proc h3{font-size:24px;margin:0 0 8px}
+.proc p{margin:0;font-size:14.5px;color:#cfc6b8}
+.gal{display:grid;grid-template-columns:repeat(3,1fr);grid-auto-rows:280px;gap:16px;margin-top:64px}
+.gal figure{margin:0;position:relative;overflow:hidden;background:#ccc center/cover no-repeat}
+.gal figure.big{grid-row:span 2;grid-column:span 2}
+.gal figcaption{position:absolute;left:0;right:0;bottom:0;padding:40px 20px 18px;color:#fff;background:linear-gradient(180deg,transparent,rgba(20,18,15,.75))}
+.gal figcaption b{display:block;font-family:'Cormorant Garamond',Georgia,serif;font-size:22px;font-weight:500}
+.gal figcaption span{font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:#e6cf9f}
+.tools{display:grid;grid-template-columns:repeat(4,1fr);gap:24px;margin-top:56px}
+.tools .t{background:#fff;padding:28px;box-shadow:0 8px 24px rgba(31,29,26,.06);border-top:2px solid var(--gd)}
+.tools h3{font-size:24px;margin:0 0 8px}
+.tools .st{font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--gd2);font-weight:600}
+.tools p{font-size:14.5px;color:var(--mut);margin:10px 0 0}
+.docs{display:flex;gap:48px;align-items:center;justify-content:space-between;border:1px solid #d8ccb8;padding:48px;background:#fff}
+.docs h3{font-size:34px;margin:6px 0 10px}
+.docs p{color:var(--mut);margin:0;max-width:620px}
+.lx-foot{background:var(--ch);color:#cfc6b8;padding:64px 0;font-size:14px}
+.lx-foot .brand{font-size:24px;letter-spacing:.24em;color:var(--iv)}
+.lx-foot .row{display:flex;justify-content:space-between;gap:24px;flex-wrap:wrap;align-items:flex-end}
+.lx-foot a{color:#e6cf9f}
+@media (max-width:900px){
+  .lx .wrap{padding:0 22px}
+  .lx-nav nav{display:none}
+  .lx-hero{min-height:92vh}
+  .lx-hero .wrap{padding-bottom:56px}
+  .btn{display:block;text-align:center;margin:0 0 12px!important}
+  .lx-sec{padding:80px 0}
+  .biz{grid-template-columns:1fr;gap:24px;margin-top:40px}
+  .biz h3{font-size:26px}
+  .swatches{grid-template-columns:repeat(3,1fr);gap:14px}
+  .proc{grid-template-columns:1fr 1fr;gap:20px}
+  .proc h3{font-size:20px}
+  .gal{grid-template-columns:1fr 1fr;grid-auto-rows:200px;gap:10px}
+  .gal figure.big{grid-row:span 1;grid-column:span 2}
+  .gal figure:last-child{grid-column:span 2}
+  .gal figcaption{padding:28px 12px 10px}
+  .gal figcaption b{font-size:16px;line-height:1.2}
+  .gal figcaption span{font-size:9px}
+  .tools{grid-template-columns:1fr;gap:16px}
+  .docs{flex-direction:column;align-items:flex-start;padding:32px 24px;gap:24px}
 }
+@media (max-width:480px){ .proc{grid-template-columns:1fr} }
+`;
 
-function Section({ id, children, reveal }: { id?: string; children: React.ReactNode; reveal?: boolean }) {
-  return (
-    <section id={id} className="eb-section" data-reveal={reveal ? '' : undefined}>
-      {children}
-    </section>
-  );
-}
-
-/**
- * Module card. Status pill + icon + name + description + CTA.
- * The whole card is a link; if href is "#" (or starts with # and points
- * nowhere useful) the link is rendered but muted.
- */
-function ModuleCard({ m }: { m: ModuleEntry }) {
-  const Icon: LucideIcon = m.icon;
-  const ctaDisabled = m.ctaHref === '#' || !m.ctaHref;
-  const statusText = m.statusText;
-  return (
-    <a
-      href={m.ctaHref}
-      className="empire-card eb-module-card"
-      aria-label={m.ariaLabel || `${m.name} — ${statusText}`}
-      data-testid={`module-${m.id}`}
-    >
-      <div className="eb-module-card-row1">
-        <Icon className="eb-module-card-icon" size={20} aria-hidden="true" />
-        <span className={`eb-badge ${m.status}`}>{statusText}</span>
+function BizCard({ m }: { m: ModuleEntry }) {
+  const soon = m.status === 'roadmap';
+  const isFabrics = m.id === 'fabrics';
+  const content = (
+    <>
+      <div className="ph" style={isFabrics ? undefined : { backgroundImage: `url(${m.image})` }} role="img" aria-label={m.imageAlt}>
+        {isFabrics && (
+          <div className="swatchstrip">
+            {SWATCHES.map((s) => <div key={s.src} style={{ backgroundImage: `url(${s.src})` }} />)}
+          </div>
+        )}
+        <span className={`tag${soon ? ' soon' : ''}`}>{m.statusText}</span>
       </div>
-      <h3 className="eb-h3">{m.name}</h3>
-      <p style={{ fontSize: 13, color: 'var(--text-secondary)', lineHeight: 1.55, margin: 0 }}>
-        {m.description}
-      </p>
-      <span className={`eb-module-card-cta${ctaDisabled ? ' disabled' : ''}`}>{m.ctaLabel}</span>
-    </a>
-  );
-}
-
-function WorkflowSteps({ steps }: { steps: WorkflowStep[] }) {
-  return (
-    <ol
-      className="eb-workflow-steps"
-      style={{ ['--eb-steps' as string]: steps.length } as React.CSSProperties}
-    >
-      {steps.map((s, i) => (
-        <li key={i} className="eb-workflow-step">
-          <span className="eb-workflow-num">{String(i + 1).padStart(2, '0')}</span>
-          <h3 className="eb-workflow-title">
-            {s.title}
-            {s.marker && (
-              <span className={`eb-verified ${s.marker}`} title="Verified status marker">
-                {s.markerText || markerLabel(s.marker)}
-              </span>
-            )}
-          </h3>
-          <p className="eb-workflow-body">{s.body}</p>
-        </li>
-      ))}
-    </ol>
-  );
-}
-
-function markerLabel(m: WorkflowStep['marker']): string {
-  switch (m) {
-    case 'full':    return 'VERIFIED';
-    case 'partial': return 'VERIFIED_PARTIAL';
-    case 'founder': return 'FOUNDER-ONLY';
-    case 'vision':  return 'VISION-ONLY';
-  }
-}
-
-// ──────────────────────────────────────────────────────────────────────────
-// Hero — eyebrow + H1 + subhead + body + 2-3 CTAs
-// ──────────────────────────────────────────────────────────────────────────
-
-function Hero() {
-  return (
-    <Section reveal>
-      <Eyebrow>The EmpireBox ecosystem</Eyebrow>
-      <h1 className="eb-h1">EmpireBox</h1>
-      <p className="eb-subhead">
-        Practical service tools for documents, business, and operations.
-      </p>
-      <p className="eb-body">
-        EmpireBox is the system behind a small set of real services. Each module does one job
-        well: ApostApp handles document apostille and authentication, LLCFactory helps you form
-        a company, the Workroom and WoodCraft modules run custom fabrication workflows,
-        Pricing Studio builds clear quotes, ContractorForge coordinates service jobs, and
-        MAX/EmpireAssist keeps phone, email, and follow-up organized. The modules share data,
-        share a design language, and share a single operator — so the work that used to live
-        in five different tools lives in one ecosystem.
-      </p>
-      <div className="eb-hero-ctas">
-        <a
-          href="https://apostapp.empirebox.store/apostille"
-          className="eb-cta-primary"
-          data-testid="cta-start-apostapp"
-        >
-          Start with ApostApp →
-        </a>
-        <a
-          href="https://apostapp.empirebox.store/apostille/status"
-          className="eb-cta-secondary"
-          data-testid="cta-track-order"
-        >
-          Track an ApostApp order
-        </a>
-        <a href="#start" className="eb-cta-tertiary" data-testid="cta-founder-preview">
-          Request Founder preview
-        </a>
+      <div className="body">
+        <h3 className="serif">{m.name}</h3>
+        <p>{m.description}</p>
+        {m.ctaHref ? <div className="cta">{m.ctaLabel}</div> : soon ? <div className="cta" style={{ color: 'var(--mut)' }}>Launching soon</div> : null}
       </div>
-    </Section>
+    </>
+  );
+  return m.ctaHref ? (
+    <a className="card" href={m.ctaHref} data-testid={`module-${m.id}`} aria-label={m.ariaLabel || m.name}>{content}</a>
+  ) : (
+    <div className="card" data-testid={`module-${m.id}`} aria-label={m.ariaLabel || m.name}>{content}</div>
   );
 }
-
-// ──────────────────────────────────────────────────────────────────────────
-// What EmpireBox Is — 3-5 sentence explainer for non-technical readers
-// ──────────────────────────────────────────────────────────────────────────
-
-function WhatEmpireBoxIs() {
-  return (
-    <Section reveal>
-      <Eyebrow>What EmpireBox is</Eyebrow>
-      <h2 className="eb-h2">A small operating system for a service-led business</h2>
-      <div className="eb-rail">
-        <p className="eb-body" style={{ maxWidth: 'none' }}>
-          EmpireBox is the operating system for a small, service-led business. It groups the
-          everyday tools you would otherwise stitch together by hand — document preparation and
-          apostille, business formation, custom fabrication, pricing, customer follow-up, social
-          coordination, and operations — into one ecosystem that a single operator can actually
-          run.
-        </p>
-        <p className="eb-body" style={{ maxWidth: 'none' }}>
-          It is not a law firm and does not give legal advice. It is not a generic SaaS bundle.
-          It is a set of focused modules that you turn on as you need them, with a consistent
-          interface and a shared back office. The modules range from “Available” today to
-          “On the roadmap,” and the public page is honest about which is which.
-        </p>
-        <p className="eb-body" style={{ maxWidth: 'none' }}>
-          A useful way to think about it: EmpireBox is the box, and each module is a tool inside
-          it. You do not have to buy the whole ecosystem to use one of the tools. You can start
-          with a single module and add more as your business grows.
-        </p>
-      </div>
-    </Section>
-  );
-}
-
-// ──────────────────────────────────────────────────────────────────────────
-// Ecosystem Diagram — inline SVG hub-and-spoke, with a vertical mobile fallback
-// ──────────────────────────────────────────────────────────────────────────
-
-function EcosystemDiagram() {
-  return (
-    <div
-      className="eb-eco-wrap"
-      role="img"
-      aria-label="EmpireBox ecosystem diagram. Center: EmpireBox. Spokes: ApostApp, Workroom, WoodCraft, ContractorForge, Pricing Studio, MAX / EmpireAssist."
-    >
-      <svg
-        viewBox="0 0 960 540"
-        xmlns="http://www.w3.org/2000/svg"
-        className="eb-eco-svg"
-        data-testid="ecosystem-diagram"
-      >
-        {/* Center hub */}
-        <g>
-          <circle cx="480" cy="270" r="78" fill="var(--panel)" stroke="var(--gold-border)" strokeWidth="2" />
-          <text
-            x="480"
-            y="262"
-            textAnchor="middle"
-            fontSize="14"
-            fontWeight="700"
-            fill="var(--text)"
-            fontFamily="Inter, system-ui, sans-serif"
-          >
-            EMPIREBOX
-          </text>
-          <text
-            x="480"
-            y="282"
-            textAnchor="middle"
-            fontSize="11"
-            fontWeight="500"
-            fill="var(--muted)"
-            fontFamily="Inter, system-ui, sans-serif"
-          >
-            the ecosystem
-          </text>
-        </g>
-
-        {/* Spokes — 6 spokes, 60° apart starting at -90° */}
-        {[0, 60, 120, 180, 240, 300].map((angle, i) => {
-          const rad = ((angle - 90) * Math.PI) / 180;
-          const x1 = 480 + Math.cos(rad) * 90;
-          const y1 = 270 + Math.sin(rad) * 90;
-          const x2 = 480 + Math.cos(rad) * 200;
-          const y2 = 270 + Math.sin(rad) * 200;
-          return (
-            <line
-              key={`spoke-${i}`}
-              x1={x1}
-              y1={y1}
-              x2={x2}
-              y2={y2}
-              stroke="var(--border-h)"
-              strokeWidth="1.5"
-            />
-          );
-        })}
-
-        {/* Module nodes */}
-        {[
-          { label: 'ApostApp',        sub: 'Apostilles',       dx:    0, dy: -210, live: true  },
-          { label: 'Workroom',        sub: 'Upholstery',       dx:  182, dy: -105, live: false },
-          { label: 'WoodCraft',       sub: 'Furniture',        dx:  182, dy:  105, live: false },
-          { label: 'ContractorForge', sub: 'Service business', dx:    0, dy:  210, live: false },
-          { label: 'Pricing Studio',  sub: 'Quotes & cost',    dx: -182, dy:  105, live: false },
-          { label: 'MAX / Assist',    sub: 'Operations',       dx: -182, dy: -105, live: false },
-        ].map((m, i) => (
-          <g key={`node-${i}`} transform={`translate(${480 + m.dx}, ${270 + m.dy})`}>
-            <rect
-              x={-72}
-              y={-28}
-              width={144}
-              height={56}
-              rx={10}
-              fill={m.live ? 'var(--gold-light)' : 'var(--card-bg)'}
-              stroke={m.live ? 'var(--gold-border)' : 'var(--border)'}
-              strokeWidth={m.live ? 1.5 : 1}
-            />
-            <text
-              x="0"
-              y={-4}
-              textAnchor="middle"
-              fontSize="13"
-              fontWeight="700"
-              fill="var(--text)"
-              fontFamily="Inter, system-ui, sans-serif"
-            >
-              {m.label}
-            </text>
-            <text
-              x="0"
-              y="14"
-              textAnchor="middle"
-              fontSize="10"
-              fontWeight="500"
-              fill="var(--text-secondary)"
-              fontFamily="Inter, system-ui, sans-serif"
-            >
-              {m.sub}
-            </text>
-          </g>
-        ))}
-      </svg>
-
-      {/* Mobile fallback — vertical list */}
-      <ol className="eb-eco-list" aria-hidden="true">
-        {[
-          'ApostApp — Apostilles',
-          'Workroom — Upholstery',
-          'WoodCraft — Furniture',
-          'ContractorForge — Service business',
-          'Pricing Studio — Quotes & cost',
-          'MAX / Assist — Operations',
-        ].map((label) => (
-          <li
-            key={label}
-            className="empire-card"
-            style={{ fontSize: 14, fontWeight: 600, color: 'var(--text)' }}
-          >
-            {label}
-          </li>
-        ))}
-      </ol>
-
-      {/* Long description for screen readers / SEO */}
-      <p className="eb-eco-sr">
-        EmpireBox is the system. ApostApp is the customer-facing apostille service. Workroom and
-        WoodCraft handle fabrication. ContractorForge serves service businesses. Pricing Studio
-        generates quotes. MAX and EmpireAssist are the operations layer.
-      </p>
-    </div>
-  );
-}
-
-function EcosystemSection() {
-  return (
-    <Section id="ecosystem" reveal>
-      <Eyebrow>The ecosystem</Eyebrow>
-      <h2 className="eb-h2">How the pieces fit</h2>
-      <p className="eb-section-intro">
-        EmpireBox is organized as one ecosystem of focused modules. The map below shows what is
-        live, what is in active development, and what is on the roadmap. The map is the source of
-        truth for what EmpireBox is — if a module is not on the map, it is not part of the public
-        product yet.
-      </p>
-      <EcosystemDiagram />
-      <p
-        style={{
-          fontSize: 13,
-          color: 'var(--muted)',
-          lineHeight: 1.55,
-          maxWidth: 640,
-          margin: '16px auto 0',
-          textAlign: 'center',
-        }}
-      >
-        ApostApp, Workroom, WoodCraft, ContractorForge, Pricing Studio, and MAX/EmpireAssist
-        are the customer-facing surface. The supporting services and operator tools behind them
-        are what makes the system work.
-      </p>
-    </Section>
-  );
-}
-
-// ──────────────────────────────────────────────────────────────────────────
-// Module Grid — every GREEN/YELLOW module + 2 PARKED. No ShipForge.
-// ──────────────────────────────────────────────────────────────────────────
-
-function ModuleGrid() {
-  return (
-    <Section id="modules" reveal>
-      <Eyebrow>What&apos;s available</Eyebrow>
-      <h2 className="eb-h2">The module grid</h2>
-      <p className="eb-section-intro">
-        Every module in the EmpireBox ecosystem, in one place. Status labels are honest: the
-        four public labels are <em>Available</em>, <em>In active development</em>,
-        <em>Founder preview</em>, and <em>On the roadmap</em>.
-      </p>
-      <div className="eb-module-grid">
-        {MODULES.map((m) => (
-          <ModuleCard key={m.id} m={m} />
-        ))}
-      </div>
-    </Section>
-  );
-}
-
-// ──────────────────────────────────────────────────────────────────────────
-// How It Works — the 5 workflow examples with [VERIFIED] markers
-// ──────────────────────────────────────────────────────────────────────────
-
-function HowItWorks() {
-  return (
-    <Section id="how-it-works" reveal>
-      <Eyebrow>How it works</Eyebrow>
-      <h2 className="eb-h2">Five real workflows</h2>
-      <p className="eb-section-intro">
-        Each example shows what you do and what EmpireBox handles. Inline markers show whether
-        each step is fully verified in production, verified in part, or a vision item still on
-        the roadmap.
-      </p>
-      <div className="eb-rail">
-        {WORKFLOWS.map((wf) => (
-          <article key={wf.id} id={wf.id} className="eb-workflow" data-testid={wf.id}>
-            <p className="eb-workflow-label">{wf.label}</p>
-            <span
-              className="eb-verified"
-              style={{ marginLeft: 0, marginBottom: 12, display: 'inline-block' }}
-            >
-              {wf.badge}
-            </span>
-            <WorkflowSteps steps={wf.steps} />
-            <div className="eb-workflow-honest">
-              <span className="eb-workflow-honest-label">Honest limits: </span>
-              {wf.honestLimits}
-            </div>
-          </article>
-        ))}
-      </div>
-    </Section>
-  );
-}
-
-// ──────────────────────────────────────────────────────────────────────────
-// Visual accent — gold rule that grows on scroll
-// ──────────────────────────────────────────────────────────────────────────
-
-function VisualAccent() {
-  return (
-    <div className="eb-visual-accent" data-reveal>
-      <div className="eb-gold-rule" />
-    </div>
-  );
-}
-
-// ──────────────────────────────────────────────────────────────────────────
-// Trust & Disclaimers — verbatim from COPY §2.F
-// ──────────────────────────────────────────────────────────────────────────
-
-function TrustSection() {
-  return (
-    <Section id="trust" reveal>
-      <Eyebrow>Important things to know</Eyebrow>
-      <h2 className="eb-h2">Trust &amp; disclaimers</h2>
-      <div className="eb-rail">
-        <div className="eb-trust-card">
-          <p>
-            <strong>EmpireBox is a software ecosystem, not a law firm, and EmpireBox does not
-            provide legal advice.</strong> If you need legal advice — for a document, a contract,
-            a filing, or a business decision — please consult a licensed attorney in the relevant
-            jurisdiction. Where a module touches a regulated activity (for example, ApostApp’s
-            document apostille and authentication), the work is performed by qualified operators
-            and vendors; EmpireBox provides the system that organizes the work, not the regulated
-            service itself.
-          </p>
-          <p>
-            <strong>Government processing times vary.</strong> Apostille and authentication
-            processing times are set by the issuing government office (for example, the DC, MD,
-            or VA Secretary of State) and by the U.S. Department of State for federal documents.
-            EmpireBox cannot guarantee a processing time, an approval, or an outcome, and rush or
-            expedited tiers reflect the operator’s effort, not a guarantee of government action.
-            <strong> A government office may request additional documents, an in-person
-            appearance, or a correction at any time</strong>; the customer is responsible for
-            responding to those requests promptly.
-          </p>
-          <p>
-            <strong>Third-party services have separate terms.</strong> Payments, banking, social
-            platforms, marketplace listings, government filings, courier services, and any other
-            third-party integrations are governed by those providers’ own terms, fees, and
-            policies. EmpireBox is not a party to those agreements and does not warrant their
-            availability, pricing, or behavior. Where a module uses a third-party provider (for
-            example, a payment rail, a courier, or a translation vendor), the customer’s
-            relationship for that specific service is with that provider.
-          </p>
-          <p>
-            <strong>Operator review is part of the workflow.</strong> Several EmpireBox modules
-            use AI to draft, summarize, or route work. Every EmpireBox output that leaves the
-            system is reviewed by a human operator before it is sent, posted, or filed. You
-            should expect operator review at every step that touches a customer, a vendor, or a
-            government office.
-          </p>
-          <p>
-            <strong>No outcome guarantees.</strong> EmpireBox helps organize business workflows —
-            it does not guarantee revenue, customer acquisition, government approval, or any
-            specific business outcome. Where a module supports a regulated or licensed activity,
-            the relevant professional, vendor, or government office remains responsible for the
-            work.
-          </p>
-          <p>
-            <strong>Data and privacy.</strong> Customer and order data is stored in the
-            EmpireBox system and is only shared with the third parties needed to perform the
-            requested service (for example, a notary, a translator, a courier, a government
-            office, or a payment provider). EmpireBox does not sell customer data.
-          </p>
-        </div>
-      </div>
-    </Section>
-  );
-}
-
-// ──────────────────────────────────────────────────────────────────────────
-// ApostApp preservation callout — kept short; ApostApp lives elsewhere
-// ──────────────────────────────────────────────────────────────────────────
-
-function ApostAppCallout() {
-  return (
-    <Section reveal>
-      <div className="eb-rail">
-        <aside
-          style={{
-            background: 'var(--blue-bg)',
-            border: '1px solid #bfdbfe',
-            borderRadius: 'var(--radius-sm)',
-            padding: 16,
-            fontSize: 14,
-            lineHeight: 1.6,
-            color: 'var(--text-secondary)',
-          }}
-        >
-          <strong style={{ color: 'var(--text)' }}>ApostApp</strong> — apostille &amp; document
-          legalization support — lives at{' '}
-          <a
-            href="https://apostapp.empirebox.store/apostille"
-            className="eb-link"
-            data-testid="callout-apostapp"
-          >
-            apostapp.empirebox.store/apostille
-          </a>
-          . The intake form, the status tracker, and the post-intake confirmation all run on
-          that hostname and are not part of this landing page.
-        </aside>
-      </div>
-    </Section>
-  );
-}
-
-// ──────────────────────────────────────────────────────────────────────────
-// CTAs / Next Steps — the final 3-4 action cards
-// ──────────────────────────────────────────────────────────────────────────
-
-function CtaSection() {
-  return (
-    <Section id="start" reveal>
-      <Eyebrow>Start here</Eyebrow>
-      <h2 className="eb-h2">Pick a place to start</h2>
-      <p className="eb-section-intro">
-        You do not have to buy the whole ecosystem. Pick the one that meets you where you are.
-      </p>
-      <div className="eb-cta-grid">
-        <div className="eb-cta-card gold">
-          <h3>Start with ApostApp</h3>
-          <p>
-            Open the public apostille intake and place an order. Available today for DC, MD, VA,
-            and Federal documents.
-          </p>
-          <a
-            href="https://apostapp.empirebox.store/apostille"
-            data-testid="cta-card-start-apostapp"
-          >
-            Go to ApostApp →
-          </a>
-        </div>
-        <div className="eb-cta-card green">
-          <h3>Track an ApostApp order</h3>
-          <p>Check the current status of an order by reference number on the public tracker.</p>
-          <a
-            href="https://apostapp.empirebox.store/apostille/status"
-            data-testid="cta-card-track"
-          >
-            Open the status tracker →
-          </a>
-        </div>
-        <div className="eb-cta-card blue">
-          <h3>Explore the ecosystem</h3>
-          <p>See every module, what it does, and where it stands. Or request Founder preview.</p>
-          <a href="#ecosystem" data-testid="cta-card-explore">
-            Jump to the ecosystem →
-          </a>
-        </div>
-      </div>
-    </Section>
-  );
-}
-
-// ──────────────────────────────────────────────────────────────────────────
-// Header / Nav (sticky, slim, 2 nav anchors)
-// ──────────────────────────────────────────────────────────────────────────
-
-function HeaderBar() {
-  return (
-    <header className="eb-header" role="banner">
-      <div className="eb-header-inner">
-        <div>
-          <a href="#top" className="eb-wordmark" aria-label="EmpireBox home">
-            EMPIREBOX
-          </a>
-          <span className="eb-tagline">practical service tools</span>
-        </div>
-        <nav className="eb-nav" aria-label="Primary">
-          <a href="#ecosystem">Ecosystem</a>
-          <a href="#start">Start</a>
-        </nav>
-      </div>
-    </header>
-  );
-}
-
-// ──────────────────────────────────────────────────────────────────────────
-// Footer
-// ──────────────────────────────────────────────────────────────────────────
-
-function Footer() {
-  const year = new Date().getFullYear();
-  return (
-    <footer className="eb-footer" role="contentinfo">
-      <div>© {year} EmpireBox · empirebox.store</div>
-      <div className="eb-footer-row">Washington DC · Maryland · Virginia</div>
-      <div className="eb-footer-row">
-        EmpireBox is a software ecosystem, not a law firm, and does not provide legal advice.
-      </div>
-      <div className="eb-footer-row">
-        Contact:{' '}
-        <a href="mailto:hello@empirebox.store">hello@empirebox.store</a>
-      </div>
-    </footer>
-  );
-}
-
-// ──────────────────────────────────────────────────────────────────────────
-// Page entry
-// ──────────────────────────────────────────────────────────────────────────
 
 export default function LandingPage() {
+  const [home, business, documents] = GROUPS;
+  const apost = documents.modules[0];
   return (
-    <main data-empirebox-page>
-      <a href="#main" className="eb-skip-link">
-        Skip to main content
-      </a>
-      <HeaderBar />
-      <div id="main" className="eb-outer">
-        <Hero />
-        <WhatEmpireBoxIs />
-        <EcosystemSection />
-        <ModuleGrid />
-        <HowItWorks />
-        <VisualAccent />
-        <TrustSection />
-        <ApostAppCallout />
-        <CtaSection />
-      </div>
-      <Footer />
+    <main className="lx" data-empirebox-page>
+      <style dangerouslySetInnerHTML={{ __html: CSS }} />
+      <header className="lx-nav">
+        <div className="wrap">
+          <a href="/" className="brand serif" aria-label="EmpireBox home">EMPIREBOX</a>
+          <nav aria-label="Primary">
+            <a href="#home-design">Home &amp; design</a>
+            <a href="#process">Process</a>
+            <a href="#recent-work">Our work</a>
+            <a href="#business-tools">Business tools</a>
+            <a href="#documents">Documents</a>
+          </nav>
+        </div>
+      </header>
+
+      <section className="lx-hero" data-testid="hero">
+        <div className="wrap">
+          <div className="eyebrow">Washington DC · Maryland · Virginia</div>
+          <h1 className="serif">Drapery, upholstery &amp; fine woodwork — made in our own shop.</h1>
+          <p>Designed in 3D, cut on our CNC, and finished by hand. Empire Workroom, Empire Fine Fabrics, and Empire Woodworks under one roof.</p>
+          <a href="https://workroom.empirebox.store" className="btn btn-gold" data-testid="cta-workroom">Visit the Workroom</a>
+          <a href="#recent-work" className="btn btn-ghost" data-testid="cta-recent-work">See recent work</a>
+        </div>
+      </section>
+
+      <section id="home-design" className="lx-sec">
+        <div className="wrap">
+          <div className="eyebrow">Home &amp; design</div>
+          <h2 className="serif">Four houses of craft</h2>
+          <div className="rule" />
+          <p className="lede">{home.intro}</p>
+          <div className="biz">
+            {home.modules.filter((m) => m.id !== 'luxeforge').map((m) => <BizCard key={m.id} m={m} />)}
+          </div>
+          <p className="lede" style={{ fontSize: 15, marginTop: 36 }}>
+            <strong style={{ color: 'var(--ch)' }}>LuxeForge</strong> (founder preview) — see fabrics and finishes on your own room before anything is cut.
+          </p>
+        </div>
+      </section>
+
+      <section className="lx-sec alt" data-testid="swatches">
+        <div className="wrap">
+          <div className="eyebrow">Empire Fine Fabrics</div>
+          <h2 className="serif">Linens, silks, cottons &amp; vinyls</h2>
+          <div className="rule" />
+          <div className="swatches">
+            {SWATCHES.map((s) => (
+              <figure key={s.src}>
+                <div className="sw" style={{ backgroundImage: `url(${s.src})` }} role="img" aria-label={s.name} />
+                <figcaption><span>{s.material}</span>{s.name}</figcaption>
+              </figure>
+            ))}
+          </div>
+          <div style={{ marginTop: 40 }}><a className="btn btn-dark" href="https://fabrics.empirebox.store">Browse the collection</a></div>
+        </div>
+      </section>
+
+      <section id="process" className="lx-sec dark" data-testid="process-steps">
+        <div className="wrap">
+          <div className="eyebrow">Our process</div>
+          <h2 className="serif">From 3D design to CNC to your room</h2>
+          <div className="rule" />
+          <p className="lede">Every piece is modeled before it is cut, so you approve proportions, fabric, and finish first — then the CNC cuts it exactly to the drawing.</p>
+          <ol className="proc" style={{ padding: 0 }}>
+            {PROCESS_STEPS.map((s, i) => (
+              <li key={s.title}>
+                <div className={`im${i < 2 ? ' contain' : ''}`} style={{ backgroundImage: `url(${s.image})` }} role="img" aria-label={s.alt} />
+                <div className="n serif">0{i + 1}</div>
+                <h3 className="serif">{s.title}</h3>
+                <p>{s.body}</p>
+              </li>
+            ))}
+          </ol>
+        </div>
+      </section>
+
+      <section id="recent-work" className="lx-sec" data-testid="recent-work">
+        <div className="wrap">
+          <div className="eyebrow">Recent work</div>
+          <h2 className="serif">From the workroom floor</h2>
+          <div className="rule" />
+          <div className="gal">
+            {GALLERY.map((g, i) => (
+              <figure key={g.src} className={i === 0 ? 'big' : undefined} style={{ backgroundImage: `url(${g.src})` }}>
+                <figcaption><span>{g.tag}</span><b>{g.title}</b></figcaption>
+              </figure>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      <section id="business-tools" className="lx-sec alt">
+        <div className="wrap">
+          <div className="eyebrow">Business tools</div>
+          <h2 className="serif">The software behind our shop</h2>
+          <div className="rule" />
+          <p className="lede">{business.intro}</p>
+          <div className="tools">
+            {business.modules.map((m) => (
+              <div className="t" key={m.id} data-testid={`module-${m.id}`}>
+                <div className="st">{m.statusText}</div>
+                <h3 className="serif">{m.name}</h3>
+                <p>{m.description}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      <section id="documents" className="lx-sec">
+        <div className="wrap">
+          <div className="docs" data-testid="module-apostapp">
+            <div>
+              <div className="eyebrow">Documents · separate service</div>
+              <h3 className="serif">{apost.name}</h3>
+              <p>{apost.description} Not affiliated with the design workroom. EmpireBox is not a law firm and does not give legal advice.</p>
+            </div>
+            <a className="btn btn-dark" href={apost.ctaHref}>Go to ApostApp</a>
+          </div>
+        </div>
+      </section>
+
+      <footer className="lx-foot" role="contentinfo">
+        <div className="wrap row">
+          <div>
+            <div className="brand serif">EMPIREBOX</div>
+            <div style={{ marginTop: 10 }}>Washington DC · Maryland · Virginia</div>
+          </div>
+          <div>
+            Every quote is reviewed by a person · Customer pays shipping on product orders<br />
+            © {new Date().getFullYear()} EmpireBox · <a href="mailto:hello@empirebox.store">hello@empirebox.store</a>
+          </div>
+        </div>
+      </footer>
       <RevealOnScroll />
     </main>
   );
