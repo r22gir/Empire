@@ -128,6 +128,7 @@ _DATA_TABLES = [
     "jobs",
     "job_events",
     "job_documents",   # D44 — job images landing table
+    "job_stages",      # standard document-set checklist
     "jmi_processed",
     "jmi_review_queue",
     "jmi_calendar_proposals",

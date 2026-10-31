@@ -156,6 +156,14 @@ def generate_quote_pdf(quote_id: str) -> bytes:
     quote = get_quote(quote_id) or resolve_quote(quote_id)
     if not quote:
         raise FileNotFoundError(f"Quote {quote_id} not found")
+    from app.services.job_stages.gate import (
+        ClientEstimateGateError,
+        assert_client_estimate_allowed_for_quote,
+    )
+    try:
+        assert_client_estimate_allowed_for_quote(quote.get("id") or quote_id)
+    except ClientEstimateGateError:
+        raise
     try:
         pdf_bytes, _path = render_and_save_mclean_pdf(quote, pdf_dir=str(quote_pdf_dir()))
         return pdf_bytes

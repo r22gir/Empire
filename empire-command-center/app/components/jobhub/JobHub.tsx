@@ -18,6 +18,7 @@ import { Empty } from '../../v3/ui';
 import { jobHubHref } from './href';
 import PhaseStepper from '../../studio/PhaseStepper';
 import PhaseToast from '../../studio/PhaseToast';
+import JobStageChecklist from '../business/jobs/JobStageChecklist';
 import { formatInches } from '../../lib/formatInches';
 import {
   businessLabel,
@@ -330,6 +331,11 @@ export default function JobHub({ initial }: { initial?: { job?: string | null; q
           onMove={movePhase}
           moving={moving}
         />
+      )}
+      {job?.id && (
+        <div className="jh-card" style={{ margin: '12px 0' }}>
+          <JobStageChecklist jobId={String(job.id)} />
+        </div>
       )}
       <nav className="jh-nav" aria-label="Job sections">{nav.map(([k, l]) => <a key={k} href={`#jh-${k}`} className="v3-chip">{l}</a>)}</nav>
       {!d ? <div className="jh-mut">Loading job…</div> : d.missing ? <Empty title="Job not found">The link may be old. <button type="button" className="v3-btn sm" onClick={() => pick({})}>Pick a job</button></Empty> : (

@@ -663,6 +663,8 @@ def init_schema():
 
         from app.services.job_clients import ensure_job_clients_schema
         ensure_job_clients_schema(conn)
+        from app.services.job_stages.schema import init_job_stages_schema
+        init_job_stages_schema(conn)
 
 
 # Run schema on import
@@ -1417,6 +1419,9 @@ def create_job(job: JobCreateSchema):
         _add_event(conn, job_id, "created", f"Job {job_number} created", "system",
                    {"pipeline_stage": job.pipeline_stage})
 
+        from app.services.job_stages.service import ensure_job_stages
+        result["stages"] = ensure_job_stages(conn, job_id)
+
         return {"job": result}
 
 
@@ -1489,6 +1494,12 @@ def get_job(job_id: str):
         job["payment_strip"] = payment_strip
         raw_stage = (job.get("pipeline_stage") or job.get("status") or "lead").strip().lower()
         job["canonical_stage"] = STAGE_NORMALIZATION.get(raw_stage, "lead")
+
+        from app.services.job_stages.service import job_location
+        try:
+            job["stages"] = job_location(conn, job_id)
+        except Exception:
+            job["stages"] = None
 
         # Flat fields support for frontend / backward compat
         return {
@@ -1813,21 +1824,23 @@ def add_job_document(job_id: str, doc: DocumentCreate):
         if not exists:
             raise HTTPException(status_code=404, detail="Job not found")
 
-        conn.execute(
-            """INSERT INTO job_documents (id, job_id, document_type, item_key, route_to, url, filename, revision, visible_to_client)
-               VALUES (lower(hex(randomblob(8))), ?, ?, ?, ?, ?, ?, ?, ?)""",
-            (job_id, doc.document_type, doc.item_key, doc.route_to, doc.url, doc.filename,
-             doc.revision, 1 if doc.visible_to_client else 0),
+        from app.services.job_stages.service import register_document
+        document = register_document(
+            conn,
+            job_id=job_id,
+            document_type=doc.document_type,
+            url=doc.url,
+            filename=doc.filename,
+            item_key=doc.item_key,
+            route_to=doc.route_to,
+            visible_to_client=doc.visible_to_client,
+            revision=doc.revision,
         )
 
         _add_event(conn, job_id, "document_added",
-                   f"Document added: {doc.filename or doc.document_type}")
+                   f"Document added: {document.get('filename') or doc.document_type}")
 
-        row = conn.execute(
-            "SELECT * FROM job_documents WHERE job_id = ? ORDER BY created_at DESC LIMIT 1",
-            (job_id,),
-        ).fetchone()
-        return {"document": dict_row(row)}
+        return {"document": document}
 
 
 @router.post("/jobs/{job_id}/upload")
@@ -1980,8 +1993,11 @@ def delete_job(job_id: str):
         if not existing:
             raise HTTPException(status_code=404, detail="Job not found")
 
-        for table in ["job_items", "job_documents", "job_selections", "job_revisions", "job_events"]:
-            conn.execute(f"DELETE FROM {table} WHERE job_id = ?", (job_id,))
+        for table in ["job_items", "job_documents", "job_selections", "job_revisions", "job_events", "job_stages"]:
+            try:
+                conn.execute(f"DELETE FROM {table} WHERE job_id = ?", (job_id,))
+            except sqlite3.OperationalError:
+                pass
         conn.execute("DELETE FROM jobs WHERE id = ?", (job_id,))
         return {"status": "deleted", "job_id": job_id}
 
@@ -2080,6 +2096,10 @@ def create_job_from_quote(quote_id: str):
                 ),
             )
         _add_event(conn, result["id"], "created", f"Job {job_number} created from quote {quote_id}")
+        from app.services.job_stages.backfill import backfill_job_stages
+        from app.services.job_stages.service import ensure_job_stages
+        ensure_job_stages(conn, result["id"])
+        result["stage_backfill"] = backfill_job_stages(conn, result["id"])
         return {"job": result, "quote_id": quote_id}
 
 

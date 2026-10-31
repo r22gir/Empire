@@ -231,6 +231,7 @@ load_router("app.routers.accounting_connectors", "/api/v1", ["accounting"])
 load_router("app.routers.inventory", "/api/v1", ["inventory"])
 # load_router("app.routers.jobs", "/api/v1", ["jobs"])  # replaced by jobs_unified
 load_router("app.routers.jobs_unified", "/api/v1", ["jobs-unified"])
+load_router("app.routers.job_stages", "/api/v1", ["job-stages"])
 load_router("app.routers.universal_search", "/api/v1", ["search"])
 load_router("app.routers.schedule", "/api/v1/schedule", ["schedule"])
 load_router("app.routers.organizer", "/api/v1/organizer", ["organizer"])
