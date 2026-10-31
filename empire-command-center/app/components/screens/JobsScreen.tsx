@@ -2,6 +2,7 @@
 import React, { useState, useEffect } from 'react';
 import { API } from '../../lib/api';
 import { useJob, Job } from '../../hooks/useJob';
+import JobStageChecklist from '../business/jobs/JobStageChecklist';
 import {
   Briefcase, Plus, Search, Filter, ChevronRight, Clock, User,
   MapPin, DollarSign, FileText, Camera, Hammer, CheckCircle,
@@ -145,7 +146,7 @@ export default function JobsScreen({ business }: JobsScreenProps) {
       {/* Job detail side panel */}
       {selected && (
         <div style={{
-          position: 'fixed', right: 0, top: 0, bottom: 0, width: 400, background: '#fff',
+          position: 'fixed', right: 0, top: 0, bottom: 0, width: 440, background: '#fff',
           borderLeft: '1px solid #e5e2dc', boxShadow: '-4px 0 20px rgba(0,0,0,0.1)',
           zIndex: 500, overflowY: 'auto', padding: 20,
         }}>
@@ -167,6 +168,8 @@ export default function JobsScreen({ business }: JobsScreenProps) {
             <span style={{ fontSize: 10, fontWeight: 600, color: '#888' }}>STATUS</span>
             <div style={{ marginTop: 4 }}>{STATUS_BADGE(selected.pipeline_stage || selected.status || 'intake')}</div>
           </div>
+
+          {selected.id && <JobStageChecklist jobId={String(selected.id)} />}
 
           {/* Room / Description */}
           {(selected.room || selected.description) && (
@@ -194,7 +197,6 @@ export default function JobsScreen({ business }: JobsScreenProps) {
 
           {/* Actions */}
           <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 16 }}>
-            <button style={{ fontSize: 10, padding: '6px 12px', background: '#b8960c', color: '#fff', border: 'none', borderRadius: 6, cursor: 'pointer', fontWeight: 600 }}>Create Quote</button>
             <button style={{ fontSize: 10, padding: '6px 12px', background: '#16a34a', color: '#fff', border: 'none', borderRadius: 6, cursor: 'pointer', fontWeight: 600 }}>Create Invoice</button>
             <button style={{ fontSize: 10, padding: '6px 12px', background: '#f5f3ef', color: '#666', border: 'none', borderRadius: 6, cursor: 'pointer' }}>Generate Drawing</button>
           </div>
