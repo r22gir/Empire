@@ -681,6 +681,19 @@ def _next_invoice_number(conn) -> str:
     return f"{prefix}0001"
 
 
+def _safe_stage_backfill_after_create(conn, job_id: str) -> dict:
+    """New jobs get the stage-4 gate. A backfill error must not fail job create."""
+    try:
+        from app.services.job_stages.backfill import backfill_job_stages
+        from app.services.job_stages.service import ensure_job_stages, set_job_gate_enforced
+        set_job_gate_enforced(conn, job_id, True)
+        ensure_job_stages(conn, job_id)
+        return backfill_job_stages(conn, job_id)
+    except Exception as exc:
+        logger.exception("job stage backfill failed after job create; job kept")
+        return {"job_id": job_id, "skipped": True, "error": str(exc)}
+
+
 def _add_event(conn, job_id: str, event_type: str, summary: str,
                actor: str = "system", metadata: dict | None = None):
     """Insert a job_event row."""
@@ -1167,7 +1180,8 @@ def create_job(job: JobCreateSchema):
         _add_event(conn, job_id, "created", f"Job {job_number} created", "system",
                    {"pipeline_stage": job.pipeline_stage})
 
-        from app.services.job_stages.service import ensure_job_stages
+        from app.services.job_stages.service import ensure_job_stages, set_job_gate_enforced
+        set_job_gate_enforced(conn, job_id, True)
         result["stages"] = ensure_job_stages(conn, job_id)
 
         return {"job": result}
@@ -1592,10 +1606,7 @@ def create_job_from_quote(quote_id: str):
                 ),
             )
         _add_event(conn, result["id"], "created", f"Job {job_number} created from quote {quote_id}")
-        from app.services.job_stages.backfill import backfill_job_stages
-        from app.services.job_stages.service import ensure_job_stages
-        ensure_job_stages(conn, result["id"])
-        result["stage_backfill"] = backfill_job_stages(conn, result["id"])
+        result["stage_backfill"] = _safe_stage_backfill_after_create(conn, result["id"])
         return {"job": result, "quote_id": quote_id}
 
 

@@ -10,6 +10,7 @@ from app.db.database import dict_row, get_db
 from app.services.job_stages.catalog import (
     STAGE_REFERRAL,
     STAGE_REVISION,
+    STAGE_WORKROOM,
     STAGES,
     STATUS_APPROVED,
     STATUS_DONE,
@@ -19,6 +20,7 @@ from app.services.job_stages.catalog import (
     infer_stage_key,
     stage_definition,
 )
+from app.services.job_stages.gate import assert_can_approve_workroom_stage, job_is_gate_enforced
 from app.services.job_stages.naming import (
     build_standard_name,
     family_key,
@@ -64,7 +66,21 @@ def _stage_row(row) -> dict[str, Any]:
     data["doc_type"] = definition["doc_type"]
     data["order"] = definition["order"]
     data["gate"] = bool(definition.get("gate"))
+    data["gate_enforced"] = bool(int(data.get("gate_enforced") or 0))
     return data
+
+
+def set_job_gate_enforced(conn, job_id: str, enforced: bool) -> None:
+    init_job_stages_schema(conn)
+    flag = 1 if enforced else 0
+    conn.execute(
+        "UPDATE jobs SET gate_enforced = ?, updated_at = datetime('now') WHERE id = ?",
+        (flag, job_id),
+    )
+    conn.execute(
+        "UPDATE job_stages SET gate_enforced = ?, updated_at = datetime('now') WHERE job_id = ?",
+        (flag, job_id),
+    )
 
 
 def job_has_referral(conn, job: dict[str, Any]) -> bool:
@@ -149,6 +165,7 @@ def ensure_job_stages(conn, job_id: str) -> list[dict[str, Any]]:
     job = _load_job(conn, job_id)
     if not job:
         raise ValueError(f"Job {job_id} not found")
+    enforced = 1 if job_is_gate_enforced(job, conn) else 0
     existing = {
         row["stage_key"]: row
         for row in conn.execute(
@@ -161,8 +178,9 @@ def ensure_job_stages(conn, job_id: str) -> list[dict[str, Any]]:
         if current is None:
             conn.execute(
                 """INSERT INTO job_stages
-                   (id, job_id, stage_key, stage_order, status, linked_documents, required)
-                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                   (id, job_id, stage_key, stage_order, status, linked_documents,
+                    required, gate_enforced)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     _new_id(),
                     job_id,
@@ -171,14 +189,25 @@ def ensure_job_stages(conn, job_id: str) -> list[dict[str, Any]]:
                     STATUS_NOT_STARTED,
                     "[]",
                     required,
+                    enforced,
                 ),
             )
-        elif int(current["required"] or 0) != required:
-            conn.execute(
-                "UPDATE job_stages SET required = ?, updated_at = datetime('now') "
-                "WHERE job_id = ? AND stage_key = ?",
-                (required, job_id, definition["key"]),
-            )
+        else:
+            updates = []
+            values: list[Any] = []
+            if int(current["required"] or 0) != required:
+                updates.append("required = ?")
+                values.append(required)
+            if int(current["gate_enforced"] or 0) != enforced:
+                updates.append("gate_enforced = ?")
+                values.append(enforced)
+            if updates:
+                values.extend([job_id, definition["key"]])
+                conn.execute(
+                    f"UPDATE job_stages SET {', '.join(updates)}, updated_at = datetime('now') "
+                    "WHERE job_id = ? AND stage_key = ?",
+                    values,
+                )
     return list_stages(conn, job_id)
 
 
@@ -210,6 +239,8 @@ def set_stage_status(
     if status not in VALID_STATUSES:
         raise ValueError(f"Invalid stage status: {status}")
     stage_definition(stage_key)
+    if stage_key == STAGE_WORKROOM and status in {STATUS_APPROVED, STATUS_DONE}:
+        assert_can_approve_workroom_stage(actor)
     ensure_job_stages(conn, job_id)
     fields = ["status = ?", "updated_at = datetime('now')"]
     values: list[Any] = [status]
@@ -484,7 +515,8 @@ def job_location(conn, job_id: str) -> dict[str, Any]:
         "missing": missing,
         "next_step": _next_step(current),
         "stages": stages,
-        "gate_open": any(
+        "gate_enforced": job_is_gate_enforced(job, conn) if job else False,
+        "gate_open": (not job_is_gate_enforced(job, conn) if job else True) or any(
             stage["stage_key"] == "workroom_approval"
             and stage["status"] in {STATUS_APPROVED, STATUS_DONE}
             for stage in stages

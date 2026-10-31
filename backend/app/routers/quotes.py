@@ -3143,15 +3143,8 @@ async def generate_pdf(quote_id: str, skip_verification: bool = False):
     """
     quote = _load_quote(quote_id)
 
-    from app.services.job_stages.gate import (
-        ClientEstimateGateError,
-        assert_client_estimate_allowed_for_quote,
-    )
-    try:
-        assert_client_estimate_allowed_for_quote(quote.get("id") or quote_id)
-    except ClientEstimateGateError as exc:
-        from fastapi.responses import JSONResponse
-        return JSONResponse(status_code=exc.status_code, content=exc.as_dict())
+    from app.services.job_stages.gate import assert_client_estimate_allowed_for_quote
+    assert_client_estimate_allowed_for_quote(quote.get("id") or quote_id)
 
     # ── GATE 2: Pre-PDF verification ──
     if not skip_verification:

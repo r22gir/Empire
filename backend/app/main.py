@@ -33,6 +33,9 @@ app = FastAPI(
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
+from app.services.job_stages.gate import register_job_stage_exception_handlers
+register_job_stage_exception_handlers(app)
+
 # Validation error logging
 @app.exception_handler(RequestValidationError)
 async def validation_exception_handler(request: Request, exc: RequestValidationError):

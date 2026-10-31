@@ -15,6 +15,7 @@ from app.services.job_stages.estimates import generate_estimate_copies
 from app.services.job_stages.gate import (
     ClientEstimateGateError,
     SquareSendGateError,
+    StageApprovalDenied,
     assert_client_estimate_allowed,
     assert_share_export_allowed,
 )
@@ -41,7 +42,7 @@ router = APIRouter(tags=["job-stages"])
 
 class StatusBody(BaseModel):
     status: str
-    actor: str = "workroom"
+    actor: Optional[str] = None
     notes: Optional[str] = None
 
 
@@ -162,6 +163,8 @@ def patch_stage(job_id: str, stage_key: str, body: StatusBody):
                 conn, job_id, stage_key, body.status,
                 actor=body.actor, notes=body.notes,
             )
+    except StageApprovalDenied as exc:
+        return JSONResponse(status_code=403, content=exc.as_dict())
     except (KeyError, ValueError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return {"stage": stage}
@@ -173,6 +176,8 @@ def approve_job_stage(job_id: str, stage_key: str, body: ApproveBody):
     try:
         with get_db() as conn:
             stage = approve_stage(conn, job_id, stage_key, body.approved_by)
+    except StageApprovalDenied as exc:
+        return JSONResponse(status_code=403, content=exc.as_dict())
     except (KeyError, ValueError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return {"stage": stage, "gate_open": stage_key == "workroom_approval"}

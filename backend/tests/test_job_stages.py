@@ -15,18 +15,24 @@ from app.services.job_stages.estimates import group_willard_lines
 from app.services.job_stages.gate import (
     ClientEstimateGateError,
     SquareSendGateError,
+    StageApprovalDenied,
     assert_client_estimate_allowed,
+    assert_client_estimate_allowed_for_quote,
     assert_square_send_allowed,
+    job_is_gate_enforced,
+    register_job_stage_exception_handlers,
+    resolve_job_id_for_quote,
 )
 from app.services.job_stages.max_answer import answer_where_is_this_job, wants_job_location
 from app.services.job_stages.naming import build_standard_name, next_revision, parse_standard_name
-from app.services.job_stages.schema import init_job_stages_schema
+from app.services.job_stages.schema import get_gate_cutover_at, init_job_stages_schema
 from app.services.job_stages.service import (
     approve_stage,
     ensure_job_stages,
     get_stage,
     list_stages,
     register_document,
+    set_stage_status,
 )
 from app.services.job_stages.square_invoice import create_square_invoice_draft, send_square_invoice
 from app.services.job_stages.workroom_approval import render_workroom_approval_pdf
@@ -42,6 +48,7 @@ def _seed_job(
     metadata: dict | None = None,
     current_revision: int = 1,
     notes: str = "",
+    gate_enforced: int | None = None,
 ) -> str:
     with get_db() as conn:
         init_job_stages_schema(conn)
@@ -52,8 +59,8 @@ def _seed_job(
         conn.execute(
             """INSERT INTO jobs
                (id, title, customer_id, client_name, room, business_unit, job_number,
-                pipeline_stage, metadata, current_revision, notes)
-               VALUES (?, ?, ?, ?, ?, 'workroom', ?, 'designing', ?, ?, ?)""",
+                pipeline_stage, metadata, current_revision, notes, gate_enforced)
+               VALUES (?, ?, ?, ?, ?, 'workroom', ?, 'designing', ?, ?, ?, ?)""",
             (
                 job_id,
                 title,
@@ -64,9 +71,21 @@ def _seed_job(
                 json.dumps(metadata or {}),
                 current_revision,
                 notes,
+                0 if gate_enforced is None else int(gate_enforced),
             ),
         )
     return job_id
+
+
+def _link_quote(quote_id: str, job_id: str | None) -> str:
+    with get_db() as conn:
+        init_job_stages_schema(conn)
+        conn.execute(
+            """INSERT INTO quotes_v2 (id, quote_number, job_id, customer_name, status, total)
+               VALUES (?, ?, ?, ?, 'draft', 100)""",
+            (quote_id, f"EST-{quote_id}", job_id, "Mock Client"),
+        )
+    return quote_id
 
 
 def _add_doc(job_id: str, document_type: str, filename: str) -> None:
@@ -82,6 +101,7 @@ def _add_doc(job_id: str, document_type: str, filename: str) -> None:
 
 def _client() -> TestClient:
     app = FastAPI()
+    register_job_stage_exception_handlers(app)
     app.include_router(job_stages.router, prefix="/api/v1")
     return TestClient(app)
 
@@ -139,7 +159,7 @@ def test_conditional_stages_off_without_referral_or_revision(isolated_empire_db)
 
 
 def test_gate_blocks_client_estimate_until_stage_4_approved(isolated_empire_db):
-    job_id = _seed_job()
+    job_id = _seed_job(gate_enforced=1)
     with get_db() as conn:
         ensure_job_stages(conn, job_id)
     with pytest.raises(ClientEstimateGateError) as exc:
@@ -213,8 +233,10 @@ def test_le_midi_backfill_lands_at_stage_4_awaiting_approval(isolated_empire_db)
     assert stages["workroom_approval"]["status"] == "drafted"
     assert stages["workroom_approval"]["approved_by"] is None
     assert stages["estimate"]["status"] == "not_started"
-    with pytest.raises(ClientEstimateGateError):
-        assert_client_estimate_allowed(job_id)
+    state = assert_client_estimate_allowed(job_id)
+    assert state["allowed"] is True
+    assert state["grandfathered"] is True
+    assert state["gate_enforced"] is False
 
 
 def test_where_is_this_job_tool_and_max_answer(isolated_empire_db):
@@ -294,8 +316,186 @@ def test_checklist_api_and_where_endpoint(isolated_empire_db):
     assert checklist.status_code == 200
     body = checklist.json()
     assert body["current_stage_key"] == "workroom_approval"
-    assert body["gate_open"] is False
+    assert body["gate_enforced"] is False
+    assert body["gate_open"] is True
     where = client.get(f"/api/v1/jobs/{job_id}/where")
     assert "stage 4" in where.json()["next_step"].lower() or "approve" in where.json()["next_step"].lower()
     gate = client.get(f"/api/v1/jobs/{job_id}/estimates/gate")
-    assert gate.status_code == 409
+    assert gate.status_code == 200
+    assert gate.json()["allowed"] is True
+
+
+def test_cutover_grandfathered_jobs_keep_quote_pdf_paths_open(isolated_empire_db):
+    """Existing jobs (Le Midi) are not gated; post-cutover jobs are."""
+    midi = _seed_job()
+    _link_quote("q-midi", midi)
+    midi_state = assert_client_estimate_allowed_for_quote("q-midi")
+    assert midi_state["allowed"] is True
+    assert midi_state["grandfathered"] is True
+    assert midi_state["gate_enforced"] is False
+
+    new_id = _seed_job(
+        job_id="job-new-gate", title="New Drapery", client_name="Ada", gate_enforced=1,
+    )
+    _link_quote("q-new", new_id)
+    with pytest.raises(ClientEstimateGateError) as exc:
+        assert_client_estimate_allowed_for_quote("q-new")
+    assert exc.value.status_code == 409
+    assert exc.value.payload["blocked"] is True
+
+    with get_db() as conn:
+        init_job_stages_schema(conn)
+        cutover = get_gate_cutover_at(conn)
+        assert cutover
+        assert job_is_gate_enforced({"created_at": "1999-01-01T00:00:00"}, conn) is False
+        assert job_is_gate_enforced({"created_at": "9999-12-31T00:00:00"}, conn) is True
+        assert job_is_gate_enforced({"gate_enforced": 0, "created_at": "9999-12-31T00:00:00"}, conn) is False
+    assert job_is_gate_enforced(None) is False
+
+
+def test_quote_pdf_service_gate_is_http_409_not_500(isolated_empire_db):
+    """Callers of quote_pdf_service must see 409, never a 500 from a bare raise.
+
+    generate_quote_pdf itself is not imported here — its Max import graph
+    is out of scope. The service calls assert_client_estimate_allowed_for_quote
+    with no local try/except; that is the path under test.
+    """
+    job_id = _seed_job(
+        job_id="job-pdf-gate", title="Gated Job", client_name="Ada", gate_enforced=1,
+    )
+    _link_quote("q-pdf-gate", job_id)
+
+    source = Path(__file__).resolve().parents[1] / "app" / "services" / "quote_pdf_service.py"
+    text = source.read_text()
+    assert "assert_client_estimate_allowed_for_quote" in text
+    assert "except ClientEstimateGateError" not in text
+
+    quotes_src = Path(__file__).resolve().parents[1] / "app" / "routers" / "quotes.py"
+    quotes_text = quotes_src.read_text()
+    assert "assert_client_estimate_allowed_for_quote" in quotes_text
+    tools = Path(__file__).resolve().parents[1] / "app" / "services" / "max" / "tool_executor.py"
+    tool_src = tools.read_text()
+    assert "def _quote_share_blocked" in tool_src
+    assert "assert_client_estimate_allowed_for_quote" in tool_src
+
+    with pytest.raises(ClientEstimateGateError) as raised:
+        assert_client_estimate_allowed_for_quote("q-pdf-gate")
+    assert raised.value.status_code == 409
+
+    app = FastAPI()
+    register_job_stage_exception_handlers(app)
+
+    @app.get("/quotes/{quote_id}/pdf")
+    def _pdf(quote_id: str):
+        # Same call generate_quote_pdf / generate_pdf / Max share tools make.
+        return assert_client_estimate_allowed_for_quote(quote_id)
+
+    res = TestClient(app).get("/quotes/q-pdf-gate/pdf")
+    assert res.status_code == 409
+    assert res.json()["error"] == "WORKROOM_APPROVAL_REQUIRED"
+    assert res.json()["blocked"] is True
+
+
+def test_only_rafael_or_workroom_can_approve_stage_4(isolated_empire_db):
+    job_id = _seed_job(
+        job_id="job-acl", title="ACL Job", client_name="Ada", gate_enforced=1,
+    )
+    with get_db() as conn:
+        ensure_job_stages(conn, job_id)
+        with pytest.raises(StageApprovalDenied) as denied:
+            approve_stage(conn, job_id, STAGE_WORKROOM, "max")
+        assert denied.value.status_code == 403
+        with pytest.raises(StageApprovalDenied):
+            set_stage_status(conn, job_id, STAGE_WORKROOM, "approved", actor="max-agent")
+        with pytest.raises(StageApprovalDenied):
+            set_stage_status(conn, job_id, STAGE_WORKROOM, "approved", actor=None)
+
+    client = _client()
+    max_patch = client.patch(
+        f"/api/v1/jobs/{job_id}/stages/workroom_approval",
+        json={"status": "approved", "actor": "max"},
+    )
+    assert max_patch.status_code == 403
+    assert max_patch.json()["error"] == "STAGE_APPROVAL_DENIED"
+
+    max_approve = client.post(
+        f"/api/v1/jobs/{job_id}/stages/workroom_approval/approve",
+        json={"approved_by": "max"},
+    )
+    assert max_approve.status_code == 403
+
+    workroom = client.post(
+        f"/api/v1/jobs/{job_id}/stages/workroom_approval/approve",
+        json={"approved_by": "workroom"},
+    )
+    assert workroom.status_code == 200
+    assert workroom.json()["stage"]["status"] == "approved"
+
+    tools = Path(__file__).resolve().parents[1] / "app" / "services" / "max" / "tool_executor.py"
+    tool_src = tools.read_text()
+    assert '@tool("approve_job_stage")' not in tool_src
+    assert '@tool("approve_workroom")' not in tool_src
+    assert "approve_stage(" not in tool_src
+
+
+def test_create_job_from_quote_survives_backfill_error(isolated_empire_db, tmp_path, monkeypatch):
+    from app.routers import jobs_unified
+
+    quotes_dir = tmp_path / "quotes"
+    quotes_dir.mkdir()
+    (quotes_dir / "q-bf.json").write_text(json.dumps({
+        "id": "q-bf",
+        "quote_number": "EST-2026-0999",
+        "customer_name": "Backfill Client",
+        "total": 10,
+        "rooms": [],
+    }))
+    monkeypatch.setattr(jobs_unified, "QUOTES_DIR", quotes_dir)
+    monkeypatch.setattr(
+        "app.services.job_stages.backfill.backfill_job_stages",
+        lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("backfill exploded")),
+    )
+    result = jobs_unified.create_job_from_quote("q-bf")
+    job = result["job"]
+    assert job["id"]
+    assert result.get("quote_id") == "q-bf"
+    assert job["stage_backfill"]["skipped"] is True
+    assert "backfill exploded" in job["stage_backfill"]["error"]
+    with get_db() as conn:
+        row = conn.execute("SELECT id FROM jobs WHERE id = ?", (job["id"],)).fetchone()
+    assert row is not None
+
+    wrapper = Path(__file__).resolve().parents[1] / "app" / "routers" / "jobs_unified.py"
+    src = wrapper.read_text()
+    assert "def _safe_stage_backfill_after_create" in src
+    assert "except Exception" in src.split("def _safe_stage_backfill_after_create", 1)[1][:800]
+
+
+def test_quote_whose_job_was_deleted_is_allowed(isolated_empire_db):
+    job_id = _seed_job(
+        job_id="job-gone", title="Deleted Job", client_name="Ada", gate_enforced=1,
+    )
+    _link_quote("q-orphan", job_id)
+    assert resolve_job_id_for_quote("q-orphan") == job_id
+    with get_db() as conn:
+        conn.execute("DELETE FROM jobs WHERE id = ?", (job_id,))
+    assert resolve_job_id_for_quote("q-orphan") is None
+    assert assert_client_estimate_allowed_for_quote("q-orphan") is None
+    assert assert_client_estimate_allowed("job-gone")["allowed"] is True
+    assert assert_client_estimate_allowed("job-gone")["job_missing"] is True
+
+
+def test_wants_job_location_does_not_hijack_other_max_messages():
+    assert wants_job_location("Where is this job — Le Midi?") is True
+    assert wants_job_location("Where is this job?") is True
+    assert wants_job_location("Where are we on this job?") is True
+    assert wants_job_location("What's missing on this job?") is True
+    assert wants_job_location("what's the current stage") is False
+    assert wants_job_location("what's the current stage of this job") is False
+    assert wants_job_location("generate an estimate for this job") is False
+    assert wants_job_location("update job status") is False
+    assert wants_job_location("send the invoice for this job") is False
+    assert wants_job_location("approve quote for the Le Midi job") is False
+    assert wants_job_location("draw the elevation for this job") is False
+    assert wants_job_location("Where is this job and also generate an estimate") is False
+    assert wants_job_location("x" * 200) is False

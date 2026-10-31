@@ -186,6 +186,11 @@ RAFAEL_SEND_PHRASES = (
 )
 
 RAFAEL_ACTORS = ("rafael", "rafael giraldo", "rg")
+WORKROOM_APPROVERS = ("rafael", "rafael giraldo", "rg", "workroom")
+MAX_APPROVE_BLOCKLIST = (
+    "max", "max-agent", "max_agent", "max agent",
+    "assistant", "agent", "system",
+)
 
 
 def stage_definition(stage_key: str) -> dict[str, Any]:

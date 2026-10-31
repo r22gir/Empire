@@ -14,18 +14,35 @@ from app.services.job_stages.service import (
     job_location,
 )
 
+# Tight: only explicit job-location questions. Do not match "what's the
+# current stage", bare "job status", or action requests that mention a job.
 _WHERE_JOB = re.compile(
-    r"\bwhere\s+is\s+(this\s+)?(the\s+)?job\b"
-    r"|\bwhat'?s\s+(the\s+)?(current\s+)?stage\b"
-    r"|\bjob\s+(status|stage|checklist|progress)\b"
-    r"|\bwhere\s+are\s+we\s+(on|with)\s+(this\s+)?(the\s+)?job\b"
-    r"|\bwhat'?s\s+missing\s+(on|for|with)?\s*(this\s+)?(the\s+)?job\b",
+    r"^\s*(?:hey\s+max[,:]?\s+)?"
+    r"(?:"
+    r"where\s+is\s+(?:this\s+|the\s+)?job(?:\s+(?:called\s+|named\s+|—\s*|-\s*)?.{1,60})?"
+    r"|where\s+is\s+(?:the\s+)?(?P<named>[A-Za-z][\w '.&-]{1,40})\s+job"
+    r"|where\s+is\s+job\s+(?P<id>JOB-\d{4}-\d+|[A-Za-z0-9-]{4,})"
+    r"|where\s+are\s+we\s+(?:on|with)\s+(?:this\s+|the\s+)?job(?:\s+.{0,40})?"
+    r"|what(?:'s| is)\s+missing\s+(?:on|for|with)\s+(?:this\s+|the\s+)?job(?:\s+.{0,40})?"
+    r")"
+    r"[\s?!.]*$",
+    re.I,
+)
+
+_OTHER_WORK = re.compile(
+    r"\b(draw|drawing|email|send|invoice|create|generate|yardage|"
+    r"approve quote|render|sketch|fabric|install)\b",
     re.I,
 )
 
 
 def wants_job_location(message: str | None) -> bool:
-    return bool(_WHERE_JOB.search(message or ""))
+    text = (message or "").strip()
+    if not text or len(text) > 160:
+        return False
+    if _OTHER_WORK.search(text):
+        return False
+    return bool(_WHERE_JOB.match(text))
 
 
 def locate_job(query: str | None = None, job_id: str | None = None) -> dict[str, Any]:
