@@ -808,8 +808,35 @@ def generate_job_drawing(
 ) -> dict[str, Any]:
     """Build a revised internal drawing PDF for a job. Temp data only in tests."""
     ctx = merge_drawing_job_context(message, history)
+    bad_codes = list(ctx.get("unknown_fabric_codes") or [])
+    if bad_codes:
+        return {
+            "success": False,
+            "error": (
+                f"Fabric code {', '.join(bad_codes)} is not in the fabric registry "
+                "(docs/FABRIC_CODES.csv). I won't draw with an unknown code; "
+                "use a registered V### code."
+            ),
+            "unknown_fabric_codes": bad_codes,
+            "desk": DRAWING_DESK_ID,
+            "internal_only": True,
+        }
     hint = job_hint or ctx.get("job_hint") or extract_job_hint(message)
-    changes = dict(ctx.get("spec_changes") or {})
+    recorded_spec: dict[str, Any] = {}
+    try:
+        from app.services.max.latest_job_file import latest_recorded_drawing
+        rec = latest_recorded_drawing(hint, drawings_dir=output_dir) if hint else None
+        if not hint and (history or message):
+            rec = latest_recorded_drawing(None, drawings_dir=output_dir)
+            if rec and rec.get("job_key") and rec.get("spec"):
+                hint = rec["job_key"]
+        if rec and isinstance(rec.get("spec"), dict):
+            recorded_spec = {k: v for k, v in rec["spec"].items() if v not in (None, "")}
+    except Exception:
+        recorded_spec = {}
+    # Latest saved revision is the base; this conversation's changes apply on top.
+    changes = dict(recorded_spec)
+    changes.update(ctx.get("spec_changes") or {})
     if spec_changes:
         changes.update(spec_changes)
     if quote is None:
@@ -982,7 +1009,16 @@ def generate_job_drawing(
         record_generated_drawing(
             job_key=hint or job_slug,
             path=str(primary),
-            extra={"revision": revision, "date": today, "pieces": [s.name for s in specs]},
+            extra={
+                "revision": revision,
+                "date": today,
+                "pieces": [s.name for s in specs],
+                "spec": {
+                    "channel_width_in": channel,
+                    "seat_fabric": (fabrics.get("seat") or {}).get("code") or seat_token,
+                    "back_fabric": (fabrics.get("back") or {}).get("code") or back_token,
+                },
+            },
             drawings_dir=out_dir,
         )
         share_url = studio_found_url(str(primary)) or ""

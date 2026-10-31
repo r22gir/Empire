@@ -58,7 +58,7 @@ _JOB_HINT = re.compile(
     re.I,
 )
 
-_INCH_NUM = r"(\d+(?:\s+\d+/\d+)?(?:\.\d+)?)"
+_INCH_NUM = r"(\d+\s+\d+/\d+|\d+/\d+|\d+(?:\.\d+)?)"
 _CHANNEL_WIDTH = re.compile(
     r"\bchannel(?:s)?(?:\s+backs?)?(?:\s+width)?(?:\s+(?:at|to|of))?\s+"
     + _INCH_NUM
@@ -236,17 +236,95 @@ def extract_spec_changes(text: str | None) -> dict[str, Any]:
     return changes
 
 
+def _turns(history: Any) -> list[tuple[str, str]]:
+    """Every history turn as (role, text), oldest first. No window cap."""
+    out: list[tuple[str, str]] = []
+    for item in list(history or []):
+        if isinstance(item, dict):
+            role = str(item.get("role") or "user").lower()
+            text = str(item.get("content") or item.get("message") or "")
+        else:
+            role = str(getattr(item, "role", "user") or "user").lower()
+            text = str(getattr(item, "content", "") or "")
+        out.append((role, text))
+    return out
+
+
+def _registry_codes() -> Optional[set[str]]:
+    try:
+        from app.services.fabric_code_catalog import load_registry_rows
+        codes = {str(r.get("code")).strip().lower() for r in load_registry_rows() if r.get("code")}
+    except Exception:
+        return None
+    return codes or None
+
+
+def unknown_fabric_codes(text: str | None) -> list[str]:
+    """V### codes in the text that are not in the shared registry (FP-N2/N9)."""
+    known = _registry_codes()
+    if known is None:
+        return []
+    seen: list[str] = []
+    for m in _FABRIC_CODE.finditer(text or ""):
+        code = m.group(1)
+        if code.lower() not in known and code not in seen:
+            seen.append(code)
+    return seen
+
+
+def _drop_unknown(spec: dict[str, Any], bad: list[str]) -> dict[str, Any]:
+    if not bad:
+        return spec
+    low = {b.lower() for b in bad}
+    out = dict(spec)
+    codes = [c for c in out.get("fabric_codes") or [] if c.lower() not in low]
+    if codes:
+        out["fabric_codes"] = codes
+    else:
+        out.pop("fabric_codes", None)
+    for key in ("seat_fabric", "back_fabric"):
+        if str(out.get(key) or "").lower() in low:
+            out.pop(key)
+    return out
+
+
 def merge_drawing_job_context(message: str | None, history: Any = None) -> dict[str, Any]:
-    """Carry prior job + spec into a short follow-up like 'you change it'."""
+    """Carry the job + LATEST spec into a revision follow-up.
+
+    FP-N9 (Night Lab 2026-10-31): after several revision turns the old blob
+    merge re-read the first (oldest) channel width in the last 8 messages,
+    so 10" reverted to 12", the job fell out of the window, and V999-Fake
+    was accepted. Now every user turn is applied in order (later wins),
+    the job hint is the most recent one anywhere in history, and codes not
+    in the fabric registry are rejected instead of carried forward.
+    """
     current = (message or "").strip()
-    prior = _history_blob(history)
+    turns = _turns(history)
+    prior = "\n".join(t for _, t in turns)
     combined = f"{prior}\n{current}".strip()
-    spec = extract_spec_changes(prior)
-    spec.update(extract_spec_changes(current))
-    job = extract_job_hint(current) or extract_job_hint(prior)
+    spec: dict[str, Any] = {}
+    for role, text in turns:
+        if role not in ("user", "human", "founder"):
+            continue
+        spec.update(_drop_unknown(extract_spec_changes(text), unknown_fabric_codes(text)))
+    bad_now = unknown_fabric_codes(current)
+    spec.update(_drop_unknown(extract_spec_changes(current), bad_now))
+    job = extract_job_hint(current)
+    if not job:
+        for role, text in reversed(turns):
+            if role in ("user", "human", "founder"):
+                job = extract_job_hint(text)
+                if job:
+                    break
+    if not job:
+        for _, text in reversed(turns):
+            job = extract_job_hint(text)
+            if job:
+                break
     return {
         "job_hint": job,
         "spec_changes": spec,
+        "unknown_fabric_codes": bad_now,
         "combined_text": combined,
         "message": current,
     }
