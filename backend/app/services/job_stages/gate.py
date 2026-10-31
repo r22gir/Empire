@@ -5,20 +5,23 @@ import json
 import re
 from typing import Any
 
-from app.db.database import get_db
+from app.db.database import dict_row, get_db
 from app.services.job_stages.catalog import (
     GATE_STAGE_KEY,
+    MAX_APPROVE_BLOCKLIST,
     RAFAEL_ACTORS,
     RAFAEL_SEND_PHRASES,
     STAGE_WORKROOM,
     STATUS_APPROVED,
     STATUS_DONE,
+    WORKROOM_APPROVERS,
     stage_definition,
 )
-from app.services.job_stages.schema import init_job_stages_schema
+from app.services.job_stages.schema import get_gate_cutover_at, init_job_stages_schema
 
 GATE_CODE = "WORKROOM_APPROVAL_REQUIRED"
 SEND_GATE_CODE = "RAFAEL_EXPRESS_SEND_REQUIRED"
+APPROVAL_DENIED_CODE = "STAGE_APPROVAL_DENIED"
 
 
 class ClientEstimateGateError(Exception):
@@ -35,6 +38,24 @@ class ClientEstimateGateError(Exception):
             "error": GATE_CODE,
             "detail": self.message,
             "gate": GATE_STAGE_KEY,
+        }
+        body.update(self.payload)
+        return body
+
+
+class StageApprovalDenied(Exception):
+    """Stage 4 approval is limited to Rafael or the workroom. Max cannot approve."""
+
+    def __init__(self, message: str, payload: dict[str, Any] | None = None):
+        super().__init__(message)
+        self.message = message
+        self.payload = payload or {}
+        self.status_code = 403
+
+    def as_dict(self) -> dict[str, Any]:
+        body = {
+            "error": APPROVAL_DENIED_CODE,
+            "detail": self.message,
         }
         body.update(self.payload)
         return body
@@ -61,11 +82,31 @@ class SquareSendGateError(Exception):
 
 
 def _row(conn, job_id: str):
-    return conn.execute(
-        """SELECT id, title, client_name, quote_id, metadata, current_revision
-           FROM jobs WHERE id = ?""",
-        (job_id,),
-    ).fetchone()
+    """Load a job without assuming every deploy has gate_enforced yet."""
+    try:
+        return conn.execute("SELECT * FROM jobs WHERE id = ?", (job_id,)).fetchone()
+    except Exception:
+        return None
+
+
+def job_is_gate_enforced(job: dict[str, Any] | None, conn=None) -> bool:
+    """Stage 4 gate applies only to jobs created after the deploy cutover.
+
+    Explicit jobs.gate_enforced wins. Missing/deleted jobs are never gated.
+    """
+    if not job:
+        return False
+    flag = job.get("gate_enforced")
+    if flag is not None and str(flag) != "":
+        try:
+            return int(flag) == 1
+        except (TypeError, ValueError):
+            pass
+    created = str(job.get("created_at") or "")
+    cutover = get_gate_cutover_at(conn) if conn is not None else None
+    if not created or not cutover:
+        return False
+    return created >= str(cutover)
 
 
 def workroom_approval_state(job_id: str) -> dict[str, Any]:
@@ -75,10 +116,19 @@ def workroom_approval_state(job_id: str) -> dict[str, Any]:
         init_job_stages_schema(conn)
         job = _row(conn, job_id)
         if not job:
-            raise ClientEstimateGateError(
-                f"Job {job_id} not found.",
-                {"job_id": job_id, "found": False},
-            )
+            return {
+                "job_id": job_id,
+                "found": False,
+                "job_missing": True,
+                "gate_enforced": False,
+                "allowed": True,
+                "grandfathered": False,
+                "stage_key": STAGE_WORKROOM,
+                "status": None,
+                "approved": False,
+            }
+        job_dict = dict_row(job) if not isinstance(job, dict) else job
+        enforced = job_is_gate_enforced(job_dict, conn)
         ensure_job_stages(conn, job_id)
         stage = get_stage(conn, job_id, STAGE_WORKROOM)
     status = (stage or {}).get("status") or "not_started"
@@ -86,21 +136,28 @@ def workroom_approval_state(job_id: str) -> dict[str, Any]:
     definition = stage_definition(STAGE_WORKROOM)
     return {
         "job_id": job_id,
-        "job_title": job["title"] if job else None,
+        "found": True,
+        "job_title": job_dict.get("title"),
         "stage_key": STAGE_WORKROOM,
         "stage_title": definition["title"],
         "status": status,
         "approved": approved,
         "approved_by": (stage or {}).get("approved_by"),
         "approved_at": (stage or {}).get("approved_at"),
-        "allowed": approved,
+        "gate_enforced": enforced,
+        "grandfathered": not enforced,
+        "allowed": (not enforced) or approved,
     }
 
 
 def assert_client_estimate_allowed(job_id: str) -> dict[str, Any]:
-    """No client estimate generation or share/export until stage 4 is approved."""
+    """No client estimate generation or share/export until stage 4 is approved.
+
+    Jobs created before the cutover (gate_enforced=0), and quotes whose job
+    was deleted, are allowed through.
+    """
     state = workroom_approval_state(job_id)
-    if state["allowed"]:
+    if state.get("allowed"):
         return state
     raise ClientEstimateGateError(
         "Workroom approval (stage 4) must be approved before a client "
@@ -111,6 +168,7 @@ def assert_client_estimate_allowed(job_id: str) -> dict[str, Any]:
             "required_status": STATUS_APPROVED,
             "current_status": state["status"],
             "blocked": True,
+            "gate_enforced": True,
             "next_step": (
                 "Workroom must approve the 3-page approval document "
                 "before any estimate goes to the client."
@@ -124,6 +182,7 @@ def assert_share_export_allowed(job_id: str) -> dict[str, Any]:
 
 
 def resolve_job_id_for_quote(quote_id: str | None) -> str | None:
+    """Return a live job id for this quote, or None if unlinked / job deleted."""
     if not quote_id:
         return None
     with get_db() as conn:
@@ -140,17 +199,63 @@ def resolve_job_id_for_quote(quote_id: str | None) -> str | None:
             ).fetchone()
         except Exception:
             qrow = None
-        if qrow and qrow["job_id"]:
-            return qrow["job_id"]
-    return None
+        stale_id = qrow["job_id"] if qrow and qrow["job_id"] else None
+        if not stale_id:
+            return None
+        exists = conn.execute("SELECT id FROM jobs WHERE id = ?", (stale_id,)).fetchone()
+        if not exists:
+            return None
+        return stale_id
 
 
 def assert_client_estimate_allowed_for_quote(quote_id: str | None) -> dict[str, Any] | None:
-    """Gate quote PDF / share when the quote is linked to a job. Unlinked quotes pass."""
+    """Gate quote PDF / share when the quote is linked to a live, post-cutover job.
+
+    Unlinked quotes and quotes whose job was deleted pass.
+    """
     job_id = resolve_job_id_for_quote(quote_id)
     if not job_id:
         return None
     return assert_client_estimate_allowed(job_id)
+
+
+def can_approve_workroom_stage(actor: str | None) -> bool:
+    name = (actor or "").strip().lower()
+    if not name:
+        return False
+    if name in MAX_APPROVE_BLOCKLIST or name.startswith("max"):
+        return False
+    return name in WORKROOM_APPROVERS
+
+
+def assert_can_approve_workroom_stage(actor: str | None) -> str:
+    name = (actor or "").strip()
+    if can_approve_workroom_stage(name):
+        return name
+    raise StageApprovalDenied(
+        "Only Rafael or the workroom can approve stage 4. Max cannot approve.",
+        {"actor": actor, "stage_key": STAGE_WORKROOM, "allowed": False},
+    )
+
+
+def client_estimate_gate_http_response(exc: ClientEstimateGateError):
+    """The single FastAPI conversion of the gate error to HTTP 409."""
+    from fastapi.responses import JSONResponse
+    return JSONResponse(status_code=409, content=exc.as_dict())
+
+
+def register_job_stage_exception_handlers(app) -> None:
+    """Register once so no quote_pdf_service caller surfaces a 500."""
+    from fastapi import Request
+    from fastapi.responses import JSONResponse
+
+    @app.exception_handler(ClientEstimateGateError)
+    async def _gate_409(_request: Request, exc: ClientEstimateGateError):
+        return client_estimate_gate_http_response(exc)
+
+    @app.exception_handler(StageApprovalDenied)
+    async def _approve_403(_request: Request, exc: StageApprovalDenied):
+        return JSONResponse(status_code=403, content=exc.as_dict())
 
 
 def rafael_expressly_said_send(

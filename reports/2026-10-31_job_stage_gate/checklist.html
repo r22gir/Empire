@@ -1,5 +1,5 @@
 <!doctype html>
-<html><head><meta charset="utf-8"><title>Le Midi · Document set</title>
+<html><head><meta charset="utf-8"><title>JOB-2026-0401 · Le Midi</title>
 <style>
 body { font-family: Georgia, serif; background:#f5f3ef; margin:0; }
 .panel { width:440px; margin:24px auto; background:#fff; border-left:1px solid #e5e2dc;
@@ -7,6 +7,7 @@ body { font-family: Georgia, serif; background:#f5f3ef; margin:0; }
 h2 { margin:0 0 4px; font-size:18px; }
 .sub { color:#888; font-size:12px; margin-bottom:16px; }
 .banner { background:#fff7ed; border:1px solid #fed7aa; border-radius:8px; padding:10px; font-size:12px; margin-bottom:12px; }
+.legacy { background:#ecfdf5; border:1px solid #a7f3d0; color:#047857; }
 .stage { border:1px solid #ece8e0; border-radius:8px; padding:8px; margin-bottom:6px; font-size:12px; }
 .stage.current { border-color:#b8960c; background:#fdf8eb; }
 .top { display:flex; justify-content:space-between; font-weight:700; }
@@ -17,17 +18,19 @@ h2 { margin:0 0 4px; font-size:18px; }
 .badge.not_started { background:#f3f4f6; color:#6b7280; }
 .badge.approved { background:#ecfdf5; color:#047857; }
 .gate { margin-top:12px; background:#fef2f2; color:#991b1b; border-radius:8px; padding:8px; font-size:12px; }
+.ok { margin-top:12px; background:#ecfdf5; color:#065f46; border-radius:8px; padding:8px; font-size:12px; }
 button { background:#7f1d1d; color:#fff; border:0; border-radius:6px; padding:6px 10px; font-weight:700; }
 </style></head>
 <body>
 <div class="panel">
   <h2>JOB-2026-0401 · Le Midi</h2>
-  <div class="sub">LivingRoom · document set</div>
-  <div class="banner"><b>Workroom Approval · drafted</b><div>Workroom must approve the 3-page approval document before any estimate goes to the client.</div></div>
+  <div class="sub">document set · real API path</div>
+  <div class="banner legacy"><b>Workroom Approval · drafted</b>
+    <div>Workroom must approve the 3-page approval document before any estimate goes to the client.</div>
+    <div>Legacy job — stage 4 gate is not enforced. Client estimates stay available.</div>
+  </div>
   <div class='stage '><div class='top'><b>1. Prelim Info Sheet</b><span class='badge done'>done</span></div><div class='desc'>Site measurements, photos, first notes.</div></div><div class='stage '><div class='top'><b>2. Drawing</b><span class='badge done'>done</span></div><div class='desc'>Elevation/plan with full dims, on the gold template.</div></div><div class='stage '><div class='top'><b>3. Presentation Board</b><span class='badge done'>done</span></div><div class='desc'>Concept, layers and fabric for the designer or client.</div></div><div class='stage current'><div class='top'><b>4. Workroom Approval</b><span class='badge drafted'>drafted</span></div><div class='desc'>Compact 3-page approval: measurements and proposed prices (unit, unit price, qty, base, +20%, client total), terms and a confirm line; full-page elevation; site photo. Big bold black fonts. Workroom must approve before any estimate goes to the client.</div></div><div class='stage '><div class='top'><b>5. Estimate</b><span class='badge not_started'>not started</span></div><div class='desc'>Willard layout, grouped by area and within each area by Labor / Materials / Install. Client copy carries the Square pay link + QR and terms; internal copy shows base + markup.</div></div><div class='stage '><div class='top'><b>6. Referral Totals</b><span class='badge not_started'>not started</span></div><div class='desc'>Only if the job has a referral.</div><div class="opt">not required</div></div><div class='stage '><div class='top'><b>7. Revision Comparison</b><span class='badge not_started'>not started</span></div><div class='desc'>Only when the job is revised.</div><div class="opt">not required</div></div><div class='stage '><div class='top'><b>8. Square Invoice</b><span class='badge not_started'>not started</span></div><div class='desc'>Always a draft until Rafael expressly says send. Never auto-send.</div></div>
   <p><button>Generate client estimate</button></p>
-  <div class="gate" data-testid="estimate-gate-message">
-    Workroom approval (stage 4) must be approved before a client estimate can be generated, shared, or exported.
-  </div>
+  <div class='ok' data-testid='estimate-gate-message'>Legacy Le Midi allowed (200). Job-linked quote PDF 200.</div>
 </div>
 </body></html>

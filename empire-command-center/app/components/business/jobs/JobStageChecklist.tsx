@@ -29,6 +29,7 @@ interface ChecklistPayload {
   missing?: string[];
   next_step?: string;
   gate_open?: boolean;
+  gate_enforced?: boolean;
   stages?: StageRow[];
 }
 
@@ -140,6 +141,11 @@ export default function JobStageChecklist({ jobId }: { jobId: string }) {
             <div style={{ fontWeight: 700, marginBottom: 4 }}>
               {data.current_stage_title || 'Complete'} · {(data.current_status || '').replace('_', ' ')}
             </div>
+            {data.gate_enforced === false && (
+              <div style={{ color: '#047857', marginBottom: 4 }}>
+                Legacy job — stage 4 gate is not enforced. Client estimates stay available.
+              </div>
+            )}
             <div style={{ color: '#555' }}>{data.next_step}</div>
             {(data.missing || []).length > 0 && (
               <div style={{ marginTop: 6, color: '#9a3412' }}>

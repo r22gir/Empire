@@ -37,6 +37,8 @@ JOB_DOCUMENT_COLUMNS = (
     ("stage_key", "TEXT"),
 )
 
+GATE_CUTOVER_KEY = "gate_cutover_at"
+
 
 def _safe_alter(conn: sqlite3.Connection, table: str, column: str, col_type: str) -> None:
     try:
@@ -48,6 +50,20 @@ def _safe_alter(conn: sqlite3.Connection, table: str, column: str, col_type: str
 def init_job_stages_schema(conn: sqlite3.Connection) -> None:
     """Idempotent migration: job_stages table + document-set columns."""
     conn.execute(JOB_STAGES_DDL)
+    conn.execute(
+        """CREATE TABLE IF NOT EXISTS job_stage_config (
+            key TEXT PRIMARY KEY,
+            value TEXT NOT NULL
+        )"""
+    )
+    # Cutover is stamped once at first migrate: jobs created before this
+    # moment are grandfathered. Existing rows get gate_enforced=0.
+    conn.execute(
+        "INSERT OR IGNORE INTO job_stage_config (key, value) VALUES (?, datetime('now'))",
+        (GATE_CUTOVER_KEY,),
+    )
+    _safe_alter(conn, "jobs", "gate_enforced", "INTEGER DEFAULT 0")
+    _safe_alter(conn, "job_stages", "gate_enforced", "INTEGER DEFAULT 0")
     for column, col_type in JOB_DOCUMENT_COLUMNS:
         _safe_alter(conn, "job_documents", column, col_type)
     for statement in JOB_STAGE_INDEXES:
@@ -55,3 +71,13 @@ def init_job_stages_schema(conn: sqlite3.Connection) -> None:
             conn.execute(statement)
         except sqlite3.OperationalError:
             pass
+
+
+def get_gate_cutover_at(conn: sqlite3.Connection) -> str | None:
+    row = conn.execute(
+        "SELECT value FROM job_stage_config WHERE key = ?",
+        (GATE_CUTOVER_KEY,),
+    ).fetchone()
+    if not row:
+        return None
+    return row[0] if not hasattr(row, "keys") else row["value"]

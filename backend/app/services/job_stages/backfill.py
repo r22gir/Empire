@@ -20,6 +20,7 @@ from app.services.job_stages.service import (
     ensure_job_stages,
     get_stage,
     link_document_to_stage,
+    set_job_gate_enforced,
     set_stage_status,
 )
 
@@ -107,6 +108,9 @@ def backfill_job_stages(conn, job_id: str) -> dict[str, Any]:
             set_stage_status(conn, job_id, key, STATUS_DONE, notes="backfill: implied by later stage")
 
     if le_midi:
+        # Existing Le Midi is grandfathered: checklist still shows stage 4,
+        # but the client-estimate gate does not apply.
+        set_job_gate_enforced(conn, job_id, False)
         # Never invent an approval. Stage 4 stays drafted / awaiting.
         workroom = get_stage(conn, job_id, STAGE_WORKROOM)
         if workroom and workroom["status"] in {STATUS_APPROVED, STATUS_DONE}:
@@ -142,6 +146,7 @@ def backfill_job_stages(conn, job_id: str) -> dict[str, Any]:
         "title": job.get("title"),
         "le_midi": le_midi,
         "document_count": len(documents),
+        "gate_enforced": False if le_midi else bool(int(job.get("gate_enforced") or 0)),
         "stages": stages,
     }
 
