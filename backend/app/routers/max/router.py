@@ -2811,6 +2811,28 @@ async def _maybe_delegate_first_response(request: ChatRequest) -> ChatResponse |
     )
 
 
+def _maybe_handle_job_location_request(request: ChatRequest) -> ChatResponse | None:
+    """Shared 'where is this job?' answer for /chat and /chat/stream."""
+    from app.services.job_stages.max_answer import answer_where_is_this_job, wants_job_location
+
+    if request.desk or request.image_filename:
+        return None
+    if not wants_job_location(request.message):
+        return None
+    location = answer_where_is_this_job(request.message)
+    return ChatResponse(
+        response=location.get("answer") or "Job stage lookup failed.",
+        model_used="job-stage-checklist",
+        fallback_used=False,
+        tool_results=[{
+            "tool": "where_is_this_job",
+            "success": bool(location.get("found")),
+            "result": location,
+        }],
+        metadata=_response_metadata(request.channel, skill_used="where_is_this_job"),
+    )
+
+
 def _maybe_handle_direct_route_request(request: ChatRequest) -> ChatResponse | None:
     # Family editions: "pide ayuda a Max" / "ask Max for help" becomes a ticket.
     # No-op on studio / Workroom (is_family_edition is false).
@@ -3379,6 +3401,10 @@ async def _chat_with_max_service_impl(
     if link_intel is not None:
         link_intel.response = sanitize_output(_sanitize_internal_leakage_text(link_intel.response))
         return link_intel
+
+    job_location = _maybe_handle_job_location_request(request)
+    if job_location is not None:
+        return job_location
 
     direct_route = _maybe_handle_direct_route_request(request)
     if direct_route is not None:
@@ -4859,6 +4885,10 @@ async def _chat_stream_impl(request: ChatRequest, _founder_session: dict | None 
     if link_intel is not None:
         link_intel.response = sanitize_output(_sanitize_internal_leakage_text(link_intel.response))
         return _stream_immediate_response(link_intel, request.conversation_id)
+
+    job_location = _maybe_handle_job_location_request(request)
+    if job_location is not None:
+        return _stream_immediate_response(job_location, request.conversation_id)
 
     direct_route = _maybe_handle_direct_route_request(request)
     if direct_route is not None:
