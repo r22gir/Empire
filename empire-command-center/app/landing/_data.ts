@@ -23,6 +23,9 @@ export type ModuleEntry = {
   ctaLabel?: string;
   ctaHref?: string;
   ariaLabel?: string;
+  /** Public image path (already published under /public). */
+  image?: string;
+  imageAlt?: string;
 };
 
 export type ModuleGroup = {
@@ -40,6 +43,8 @@ export const GROUPS: ModuleGroup[] = [
     modules: [
       {
         id: 'workroom',
+        image: '/workroom-showroom/photos/drapery-bay-cream-lounge.jpg',
+        imageAlt: 'Custom drapery in a bay window',
         name: 'Empire Workroom',
         icon: Scissors,
         status: 'available',
@@ -51,6 +56,8 @@ export const GROUPS: ModuleGroup[] = [
       },
       {
         id: 'fabrics',
+        image: '/empirebox-landing/swatch-GHBVSAGE.png',
+        imageAlt: 'Botanical vine linen swatch',
         name: 'Empire Fine Fabrics',
         icon: Palette,
         status: 'available',
@@ -62,6 +69,8 @@ export const GROUPS: ModuleGroup[] = [
       },
       {
         id: 'pillows',
+        image: '/workroom-showroom/photos/softgoods-trellis-corner.jpg',
+        imageAlt: 'Decorative soft goods with trellis fabric',
         name: 'Empire pillow line',
         icon: Sparkles,
         status: 'roadmap',
@@ -70,6 +79,8 @@ export const GROUPS: ModuleGroup[] = [
       },
       {
         id: 'luxeforge',
+        image: '/workroom-showroom/photos/bed-cognac-panel-headboard.jpg',
+        imageAlt: 'Cognac channel headboard',
         name: 'LuxeForge',
         icon: Gem,
         status: 'preview',
@@ -79,6 +90,8 @@ export const GROUPS: ModuleGroup[] = [
       },
       {
         id: 'woodworks',
+        image: '/workroom-showroom/photos/woodcraft-chevron-island.jpg',
+        imageAlt: 'Chevron-front custom island',
         name: 'Empire Woodworks',
         icon: Hammer,
         status: 'roadmap',
@@ -151,20 +164,28 @@ export const GROUPS: ModuleGroup[] = [
 ];
 
 /** Design → build process (Empire Woodworks / Workroom). */
-export const PROCESS_STEPS: { title: string; body: string; icon: LucideIcon }[] = [
-  { title: 'Measure & 3D design', body: 'We measure on site and model the piece in 3D so you approve proportions, finish, and fabric before anything is cut.', icon: PencilRuler },
-  { title: 'CNC cutting', body: 'Panels and parts are cut on our CNC from the approved model — accurate to the drawing, repeatable, clean edges.', icon: Cpu },
-  { title: 'Build & upholster', body: 'Assembly, joinery, foam, and fabric work happen in our own workroom.', icon: Wrench },
-  { title: 'Finish & install', body: 'Hand finishing, final inspection, and installation in your space.', icon: CheckCircle2 },
+export const PROCESS_STEPS: { title: string; body: string; icon: LucideIcon; image: string; alt: string }[] = [
+  { title: 'Measure & 3D design', body: 'We measure on site and model the piece in 3D so you approve proportions, finish, and fabric before anything is cut.', icon: PencilRuler, image: '/empirebox-landing/process-3d-design.jpg', alt: '3D model of a curved upholstered bench' },
+  { title: 'CNC cutting', body: 'Panels and parts are cut on our CNC from the approved model — accurate to the drawing, repeatable, clean edges.', icon: Cpu, image: '/empirebox-landing/process-cnc-nest.jpg', alt: 'CNC nesting sheet with curved plywood parts' },
+  { title: 'Build & upholster', body: 'Assembly, joinery, foam, and fabric work happen in our own workroom.', icon: Wrench, image: '/workroom-showroom/photos/banquette-teal-tufted-bench.jpg', alt: 'Tufted teal banquette bench' },
+  { title: 'Finish & install', body: 'Hand finishing, final inspection, and installation in your space.', icon: CheckCircle2, image: '/workroom-showroom/photos/drapery-window-nook.jpg', alt: 'Installed drapery in a window nook' },
 ];
 
-/**
- * Recent work. Photos are PLACEHOLDERS until Rafael approves specific images
- * for public use. Never put client names or addresses here.
- */
-export const RECENT_WORK: { id: string; title: string; category: string; blurb: string; photoNeeded: string }[] = [
-  { id: 'walnut-wall-unit', title: 'Walnut wall unit', category: 'Empire Woodworks', blurb: 'Full-wall walnut media and storage unit, designed in 3D and CNC-cut.', photoNeeded: '3D render + CNC parts + installed photo (approved for public use)' },
-  { id: 'banquette', title: 'Upholstered banquette seating', category: 'Workroom', blurb: 'U- and L-shaped bench seating with custom foam and fabric.', photoNeeded: 'Finished banquette photo (approved)' },
-  { id: 'lobby-drapery', title: 'Commercial lobby drapery', category: 'Workroom', blurb: 'Drapery and window treatments for a commercial lobby.', photoNeeded: 'Installed drapery photo, no signage or address visible (approved)' },
-  { id: 'roman-shades', title: 'Roman shades', category: 'Workroom', blurb: 'Lined roman shades, measured and built to the window.', photoNeeded: 'Finished shades photo (approved)' },
+/** Recent work gallery — photos already published on the Workroom showroom. No client names/addresses. */
+export const GALLERY: { src: string; title: string; tag: string }[] = [
+  { src: '/workroom-showroom/photos/sheers-tall-living.jpg', title: 'Floor-to-ceiling sheers', tag: 'Workroom' },
+  { src: '/workroom-showroom/photos/woodcraft-champagne-lounge.jpg', title: 'Champagne lounge millwork', tag: 'Woodworks' },
+  { src: '/workroom-showroom/photos/banquette-plant-wall.jpg', title: 'Banquette with plant wall', tag: 'Workroom' },
+  { src: '/workroom-showroom/photos/romans-bay-nook.jpg', title: 'Roman shades, bay nook', tag: 'Workroom' },
+  { src: '/workroom-showroom/photos/bed-mauve-channel.jpg', title: 'Channel-tufted headboard', tag: 'Upholstery' },
+  { src: '/workroom-showroom/photos/seating-herringbone-sectional.jpg', title: 'Herringbone sectional', tag: 'Upholstery' },
+];
+
+export const SWATCHES: { src: string; name: string; material: string }[] = [
+  { src: '/empirebox-landing/swatch-GHBVSAGE.png', name: 'Botanical Vine · Sage', material: 'Linen' },
+  { src: '/empirebox-landing/swatch-KDCIVORY.png', name: 'Damask Court · Ivory', material: 'Silk' },
+  { src: '/empirebox-landing/swatch-V638.png', name: 'Cuaderno · Teak', material: 'Vinyl' },
+  { src: '/empirebox-landing/swatch-54080000.png', name: 'Canvas · Navy', material: 'Cotton' },
+  { src: '/empirebox-landing/swatch-GHQCIVORY.png', name: 'Quiet Check · Ivory', material: 'Linen' },
+  { src: '/empirebox-landing/swatch-SVI001.png', name: 'Vintage Ale · Saddle', material: 'Vinyl' },
 ];
